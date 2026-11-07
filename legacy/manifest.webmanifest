@@ -1,0 +1,10 @@
+{
+  "name": "HER RULES — Legacy local demo",
+  "short_name": "HER RULES",
+  "start_url": "./index.html",
+  "display": "standalone",
+  "background_color": "#100b10",
+  "theme_color": "#120b10",
+  "description": "A private, consensual, female-led couples game prototype.",
+  "icons": []
+}

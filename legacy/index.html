@@ -1,0 +1,67 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="theme-color" content="#120b10">
+<title>HER RULES — Legacy local demo</title>
+<link rel="manifest" href="manifest.webmanifest">
+<style>
+:root{--bg:#100b10;--panel:#1b1119;--panel2:#241721;--line:#49303d;--red:#8e263f;--gold:#c7a66a;--muted:#b8a9b2;--text:#f6edf2;--green:#7fb69b;--danger:#d96a73}
+*{box-sizing:border-box}body{margin:0;background:radial-gradient(ellipse at 15% 0%,#351624 0,transparent 45%),linear-gradient(145deg,#100b10,#170e16 55%,#0d0a0e);color:var(--text);font:15px/1.5 system-ui,-apple-system,Segoe UI,sans-serif;min-height:100vh}
+button,input,select,textarea{font:inherit}button{cursor:pointer;border:1px solid var(--line);background:#2a1722;color:var(--text);padding:10px 14px;border-radius:10px}button:hover{border-color:var(--gold)}button.primary{background:linear-gradient(135deg,#8d2843,#542034);border-color:#a95b6e}button.gold{background:#b99558;color:#1b1015;border-color:#d8bd88;font-weight:700}button.ghost{background:transparent}button.danger{border-color:#85414c;color:#ffdce0;background:#341820}.small{font-size:12px;color:var(--muted)}.muted{color:var(--muted)}.goldtxt{color:var(--gold)}header{max-width:1180px;margin:auto;padding:28px 22px 10px;display:flex;justify-content:space-between;align-items:center;gap:15px}.brand{font-family:Georgia,serif;letter-spacing:.18em;font-size:clamp(24px,4vw,36px);color:#f7e9ed}.tag{color:var(--gold);font-size:11px;letter-spacing:.22em;text-transform:uppercase}.wrap{max-width:1180px;margin:auto;padding:12px 22px 50px}.hero{border:1px solid var(--line);border-radius:20px;padding:26px;background:linear-gradient(110deg,#29141fdd,#160e16ee);box-shadow:0 18px 55px #0006;margin-bottom:18px}.hero h1{font:clamp(25px,4vw,38px)/1.15 Georgia,serif;margin:0 0 8px}.hero p{color:#cbbbc4;margin:0;max-width:720px}.toolbar{display:flex;flex-wrap:wrap;gap:8px;align-items:center}.layout{display:grid;grid-template-columns:260px 1fr;gap:16px}.side,.panel,.card{background:#1b121aeF;border:1px solid var(--line);border-radius:16px}.side{padding:12px;height:max-content;position:sticky;top:12px}.nav{display:grid;gap:6px}.nav button{text-align:left;background:transparent;border-color:transparent;color:#d9cbd2}.nav button.active{background:#38202d;border-color:#694052;color:#fff}.main{min-width:0}.panel{padding:20px;margin-bottom:14px}.panel h2{font:24px Georgia,serif;margin:0 0 5px}.panel h3{font:19px Georgia,serif;margin:0 0 10px}.grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px}.grid3{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:12px}.field{display:grid;gap:5px;margin:12px 0}.field label{font-size:12px;color:var(--gold);letter-spacing:.08em;text-transform:uppercase}.field input,.field select,.field textarea{width:100%;background:#100b10;border:1px solid #573b49;color:var(--text);padding:11px;border-radius:9px}.field textarea{min-height:82px;resize:vertical}.stat{padding:14px;background:#251721;border:1px solid #4a303d;border-radius:12px}.stat strong{display:block;font:25px Georgia,serif;color:var(--gold)}.pill{display:inline-flex;border:1px solid #624453;border-radius:99px;padding:4px 9px;font-size:11px;color:#e6c9d2;margin:2px}.row{display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap}.mission{padding:14px;border:1px solid #49313e;border-radius:12px;background:#21151e;margin:9px 0}.mission p{margin:6px 0 12px}.mission .actions{display:flex;gap:7px;flex-wrap:wrap}.status{color:var(--green)}.hidden{display:none!important}.notice{border-left:3px solid var(--gold);background:#2a1b25;padding:12px;border-radius:8px;color:#e9dce2;margin:12px 0}.safety{border-color:#75424d;background:#26151b}.timer{font:clamp(30px,6vw,48px) Georgia,serif;color:var(--gold);letter-spacing:.04em}.footer{color:#95838d;font-size:12px;text-align:center;padding:20px}.check{display:flex;gap:9px;align-items:flex-start;margin:9px 0;color:#e6dce1}.check input{margin-top:5px;accent-color:#b99558}.toast{position:fixed;bottom:18px;left:50%;transform:translateX(-50%);background:#f2e5e9;color:#21121a;padding:10px 16px;border-radius:10px;box-shadow:0 8px 30px #0008;z-index:5;display:none}.badge{font-size:11px;padding:4px 8px;border-radius:20px;background:#33202b;color:#e7c8d1}.tabs{display:flex;gap:8px;flex-wrap:wrap;margin-bottom:14px}
+@media(max-width:760px){.layout{grid-template-columns:1fr}.side{position:static}.nav{grid-template-columns:repeat(2,1fr)}.grid,.grid3{grid-template-columns:1fr}header{align-items:flex-start;flex-direction:column}.panel{padding:15px}}
+</style>
+</head>
+<body>
+<header><div><div class="brand">HER RULES</div><div class="tag">Her game · Her rules · Her decisions</div></div><div class="toolbar"><span class="badge" id="connection">LOCAL DEMO</span><button class="ghost" id="resetBtn">Reset demo</button></div></header>
+<div class="wrap">
+<section class="hero"><h1>A private world, designed together.</h1><p>A female-led couples experience for playful commands, anticipation, roleplay and shared progression. This prototype demonstrates the core flow; it is not yet connected to a remote server.</p></section>
+<div class="layout">
+<aside class="side"><div class="small" style="padding:8px 10px">VIEW AS</div><div class="nav"><button class="active" data-view="host">Host / Player</button><button data-view="her">Her Command Center</button><button data-view="rules">Agreements & Boundaries</button><button data-view="history">Session Activity</button></div><hr style="border-color:#392733;margin:14px 4px"><div class="small">DEMO STATUS</div><p id="sideStatus" class="small">No session created</p><div class="small">Local data is saved in this browser only.</div></aside>
+<main class="main">
+<section id="view-host">
+<div class="panel">
+<div class="row"><div><h2>Create your session</h2><div class="small">You operate the app. She directs gameplay after joining.</div></div><span class="pill">HOST SETUP</span></div>
+<div class="grid">
+<div class="field"><label>Session name</label><input id="sessionName" value="Our private experience"></div>
+<div class="field"><label>Initial duration</label><select id="duration"><option value="60">1 hour</option><option value="1440">1 day</option><option value="4320">Weekend (3 days)</option><option value="custom">Custom duration</option><option value="0">Open-ended</option></select></div>
+</div>
+<div class="grid hidden" id="customDuration"><div class="field"><label>Custom duration (hours)</label><input id="customHours" type="number" min="1" max="8760" value="24"></div><div class="field"><label>Session style</label><select id="style"><option>Sensual teasing & anticipation</option><option>Playful power exchange</option><option>Roleplay & story</option><option>Mixed experience</option></select></div></div>
+<div class="field"><label>Initial intensity</label><select id="intensity"><option>Light</option><option selected>Moderate</option><option>Advanced (within agreed limits)</option><option>Choose per mission</option></select></div>
+<div class="notice">Before play begins, both players must review and agree to boundaries. Either person can pause or stop at any time.</div>
+<button class="primary" id="createBtn">Create private session</button> <button id="copyInvite" class="hidden">Copy invitation text</button>
+<div id="inviteBox" class="notice hidden"></div>
+</div>
+<div class="panel"><div class="row"><h3>Your player view</h3><span class="badge" id="hostSessionState">No active session</span></div><div id="playerMissions"><p class="muted">Create a session to see your experience here.</p></div></div>
+</section>
+
+<section id="view-her" class="hidden">
+<div class="panel"><div class="row"><div><h2>Her Command Center</h2><div class="small">Suggestions are drafts. Nothing is sent until she approves it.</div></div><span class="pill">GAME MASTER</span></div>
+<div class="grid3"><div class="stat"><strong id="remaining">—</strong><span class="small">Time remaining</span></div><div class="stat"><strong id="points">0</strong><span class="small">Player points</span></div><div class="stat"><strong id="missionCount">0</strong><span class="small">Missions sent</span></div></div>
+<div class="toolbar" style="margin:14px 0"><button id="pauseBtn">Pause session</button><button id="breakBtn">Start a break</button><button id="extendBtn">Extend +1 hour</button><button class="danger" id="endBtn">End session</button></div>
+<div class="notice">The timer is a local prototype clock. A production multi-day session needs a server timestamp so it remains accurate when browsers close or devices go offline.</div>
+</div>
+<div class="panel"><h3>Create a mission</h3><div class="grid"><div class="field"><label>Category</label><select id="category"><option>Command</option><option>Challenge</option><option>Reward</option><option>Consequence</option><option>Roleplay</option><option>Anticipation</option><option>Random event</option><option>Timed mission</option><option>Secret mission</option></select></div><div class="field"><label>Intensity</label><select id="missionIntensity"><option>Light</option><option selected>Moderate</option><option>Advanced</option></select></div></div><div class="field"><label>Instruction / mission</label><textarea id="missionText" placeholder="Write a mutually agreed, playful instruction..."></textarea></div><div class="grid"><div class="field"><label>Response type</label><select id="responseType"><option>Completion confirmation</option><option>Written response</option><option>Optional photo proof</option><option>Her choice</option></select></div><div class="field"><label>Points</label><input id="missionPoints" type="number" min="0" max="100" value="10"></div></div><div class="toolbar"><button id="suggestBtn">Suggest a mission</button><button class="gold" id="sendMission">Approve & send</button></div></div>
+<div class="panel"><div class="row"><h3>Mission board</h3><span class="small">Edit, approve, queue or remove</span></div><div id="missionBoard"><p class="muted">No missions yet.</p></div></div>
+<div class="panel"><h3>Communication (demo)</h3><div class="field"><label>Message to player</label><textarea id="messageText" placeholder="Write a note or instruction..."></textarea></div><button id="sendMessage">Send message</button><p class="small">Audio recording, push notifications and live voice require production services and browser permissions; they are not simulated as working features here.</p></div>
+</section>
+
+<section id="view-rules" class="hidden">
+<div class="panel"><h2>Agreements & boundaries</h2><p class="muted">Set shared limits before starting. Updating boundaries during a session requires confirmation from both players.</p>
+<div class="field"><label>Agreed boundaries / limits</label><textarea id="boundaries" placeholder="List permitted activities, limits, exclusions and personal boundaries..."></textarea></div>
+<div class="grid"><div class="field"><label>Safe word — pause</label><input id="safewordPause" value="Yellow"></div><div class="field"><label>Safe word — stop</label><input id="safewordStop" value="Red"></div></div>
+<label class="check"><input type="checkbox" id="hostAgree"> I have reviewed and agree to these boundaries.</label>
+<label class="check"><input type="checkbox" id="wifeAgree"> My wife has independently reviewed and agreed (demo confirmation).</label>
+<button class="primary" id="saveRules">Save agreement</button>
+<div class="notice safety"><strong>Always available:</strong> Either player can pause or end the experience without penalty. Consent can be withdrawn at any time.</div>
+<h3>Change boundaries during a session</h3><div class="field"><label>Proposed change</label><textarea id="changeText" placeholder="Describe the proposed boundary change..."></textarea></div><label class="check"><input type="checkbox" id="changeHost"> Host agrees to this change</label><label class="check"><input type="checkbox" id="changeWife"> Wife agrees to this change</label><button id="applyChange">Apply only with both approvals</button><p class="small" id="rulesStatus">No agreement saved.</p>
+</div>
+</section>
+
+<section id="view-history" class="hidden"><div class="panel"><h2>Session activity</h2><p class="muted">A local audit trail of important actions in this demo.</p><div id="activity"><p class="muted">No activity yet.</p></div></div></section>
+</main></div>
+<div class="footer">HER RULES · Prototype 0.1 · Private, consensual play · Not a production remote service</div>
+</div><div class="toast" id="toast"></div>
+<script src="./demo.js"></script>
+</body></html>

@@ -1,0 +1,212 @@
+import assert from 'node:assert/strict';
+import { randomUUID, scryptSync } from 'node:crypto';
+import { mkdtemp, rm, readFile } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { startDatabase } from '../scripts/db/runtime.mjs';
+import type { User } from '../server/app.ts';
+import { request } from 'node:http';
+
+const dir = await mkdtemp(join(tmpdir(), 'her-rules-app-'));
+const db = await startDatabase(dir, 55434);
+let server: any, pool: any;
+try {
+  const { createApp } = await import('../server/app.ts');
+  const pg = await import('pg');
+  pool = new pg.default.Pool({ connectionString: db.url });
+  // Upgrade a real old schema with a registered row, rather than testing only fresh installs.
+  await pool.query(await readFile(new URL('../db/001-foundation.sql',import.meta.url),'utf8'));
+  const legacyId=randomUUID();
+  const legacyPassword='legacy-salt:'+scryptSync('legacy-password-long','legacy-salt',64).toString('hex');
+  await pool.query('INSERT INTO users(id,email,password,role,adult) VALUES($1,$2,$3,$4,true)',[legacyId,'legacy@example.test',legacyPassword,'wife']);
+  const app = await createApp(pool, 'http://localhost:4179');
+  server = app.listen(4179);
+  assert.deepEqual((await pool.query('SELECT email,password,role,nickname FROM users WHERE id=$1',[legacyId])).rows[0],{email:'legacy@example.test',password:legacyPassword,role:'wife',nickname:null});
+  await createApp(pool,'http://localhost:4179'); // Numbered migrations must also tolerate repeated startup.
+  await assert.rejects(pool.query("UPDATE users SET role='husband' WHERE id=$1",[legacyId]),{code:'23514'});
+  const guestRequest=async(body:any,cookie='',origin='http://localhost:4179')=>fetch('http://localhost:4179/api/guest',{method:'POST',headers:{Origin:origin,'Content-Type':'application/json',Cookie:cookie},body:JSON.stringify(body)});
+  const wrongOrigin=await guestRequest({nickname:'Same name',role:'wife',adult:true},'','https://evil.example');
+  assert.equal(wrongOrigin.status,403);
+  assert.deepEqual(await wrongOrigin.json(),{error:'Origin rejected',expectedOrigin:'http://localhost:4179'});
+  const aliasEntry=await fetch('http://127.0.0.1:4179/api/logout',{method:'POST',headers:{Origin:'http://127.0.0.1:4179','Content-Type':'application/json'},body:'{}'});
+  assert.equal(aliasEntry.status,200,'The address serving the game must support same-origin guest entry');
+  const domainStatus=await new Promise<number|undefined>((resolve,reject)=>{
+    const req=request('http://localhost:4179/api/logout',{method:'POST',headers:{Host:'game.example.test:4179',Origin:'http://game.example.test:4179','Content-Type':'application/json'}},res=>{res.resume();res.on('end',()=>resolve(res.statusCode));});
+    req.on('error',reject);req.end('{}');
+  });
+  assert.equal(domainStatus,200,'A domain serving the game must support same-origin entry');
+  for(const origin of ['null','http://localhost:9999','https://evil.example']){
+    const response=await fetch('http://localhost:4179/api/logout',{method:'POST',headers:{Origin:origin,'Content-Type':'application/json','X-Forwarded-Host':'evil.example','X-Forwarded-Proto':'https'},body:'{}'});
+    assert.equal(response.status,403,'Different-site/port and untrusted forwarded headers must remain rejected');
+  }
+  for(const body of [{nickname:' ',role:'wife',adult:true},{nickname:'a'.repeat(41),role:'wife',adult:true},{nickname:'Name\nOther',role:'wife',adult:true},{nickname:'Name',role:'admin',adult:true},{nickname:'Name',role:'wife',adult:false},{nickname:'Name',role:'wife',adult:true,id:legacyId}])assert.equal((await guestRequest(body)).status,400);
+  const guests:{user:User;cookie:string}[]=[];
+  const contenders=await Promise.all([guestRequest({nickname:'Same name',role:'wife',adult:true}),guestRequest({nickname:'Same name',role:'wife',adult:true})]);
+  assert.deepEqual(contenders.map(r=>r.status).sort(),[200,409],'Only one simultaneous role claim may succeed');
+  for(const response of [contenders.find(r=>r.status===200)!,await guestRequest({nickname:' Same name ',role:'husband',adult:true})]){
+    assert.equal(response.status,200);
+    const cookie=response.headers.get('set-cookie')!;assert.match(cookie,/HttpOnly/);assert.match(cookie,/SameSite=Lax/);assert.match(cookie,/Max-Age=604800/);
+    const {user}=await response.json();assert.equal(user.nickname,'Same name');assert.equal(user.email,null);
+    guests.push({user,cookie:cookie.split(';')[0]});
+  }
+  assert.equal(new Set(guests.map(g=>g.user.id)).size,2);
+  assert.equal(Number((await pool.query('SELECT count(*) FROM users WHERE nickname IS NOT NULL')).rows[0].count),2,'Losing role claims must roll back identity creation');
+  for(const role of ['wife','husband'])assert.equal((await guestRequest({nickname:'Same name',role,adult:true})).status,409);
+  const guestCall=async(index:number,path:string,body?:any,status=200)=>{
+    const r=await fetch('http://localhost:4179/api'+path,{method:body===undefined?'GET':'POST',headers:{Origin:'http://localhost:4179','Content-Type':'application/json',Cookie:guests[index].cookie},body:body===undefined?undefined:JSON.stringify(body)});assert.equal(r.status,status);return r.json();
+  };
+  assert.equal((await guestCall(0,'/state')).user.id,guests[0].user.id);
+  await guestCall(0,'/guest',{nickname:'Replacement',role:'husband',adult:true},409);
+  const wifeState=await guestCall(0,'/state'),husbandState=await guestCall(1,'/state');
+  assert.ok(wifeState.user.pair_id);assert.equal(wifeState.user.pair_id,husbandState.user.pair_id,'Both roles automatically share one game');
+  await guestCall(0,'/invite',{},404);await guestCall(0,'/redeem',{token:'a'.repeat(64)},404);
+  const guestSession=(await guestCall(0,'/sessions',{terms:'Guest independent consent',minutes:10})).session;
+  await guestCall(0,`/sessions/${guestSession.id}/approve`,{revision:1});await guestCall(0,`/sessions/${guestSession.id}/approve`,{revision:1});
+  assert.equal((await guestCall(1,`/sessions/${guestSession.id}`)).session.approvals.length,1);
+  await guestCall(1,`/sessions/${guestSession.id}/mission`,{key:randomUUID(),title:'Forbidden',text:'Forbidden'},409);
+  await guestCall(1,`/sessions/${guestSession.id}/approve`,{revision:1});
+  await guestCall(1,`/sessions/${guestSession.id}/mission`,{key:randomUUID(),title:'Forbidden',text:'Forbidden'},403);
+  assert.equal((await guestCall(0,`/sessions/${guestSession.id}`)).session.approvals.length,2);
+  assert.equal((await pool.query('SELECT password FROM users WHERE id=$1',[guests[0].user.id])).rows[0].password,null);
+  await pool.query('DELETE FROM approvals WHERE session_id=$1',[guestSession.id]);await pool.query('DELETE FROM sessions WHERE id=$1',[guestSession.id]);
+  console.log('PASS two players: concurrent slot claim, automatic shared game, third identity blocked, no invitations, separate same-name identities and independent approvals');
+  function account(cookie: string) {
+    const call = async (path: string, body?: any, expected: number|number[] = 200) => {
+      const r = await fetch('http://localhost:4179/api' + path, { method: body === undefined ? 'GET' : 'POST', headers: { Origin: 'http://localhost:4179', 'Content-Type': 'application/json', Cookie: cookie }, body: body === undefined ? undefined : JSON.stringify(body) });
+      if (r.headers.get('set-cookie')) cookie = r.headers.get('set-cookie')!.split(';')[0];
+      const data = await r.json();
+      assert.ok((Array.isArray(expected)?expected:[expected]).includes(r.status), path + ': expected '+expected+', got '+r.status+': '+JSON.stringify(data));
+      assert.equal(r.headers.get('cache-control'),'no-store');
+      return {...data,_status:r.status};
+    };
+    return call;
+  }
+  const w = account(guests[0].cookie),h=account(guests[1].cookie),x=account('');
+  const badOrigin=await fetch('http://localhost:4179/api/login',{method:'POST',headers:{Origin:'https://evil.example','Content-Type':'application/json'},body:JSON.stringify({email:'wife@example.test',password:'test-password-strong'})});assert.equal(badOrigin.status,403);
+  const unrelatedLogin=await fetch('http://localhost:4179/api/login',{method:'POST',headers:{Origin:'http://localhost:4179','Content-Type':'application/json'},body:JSON.stringify({email:'legacy@example.test',password:'legacy-password-long'})});assert.equal(unrelatedLogin.status,409,'An existing unrelated account cannot take an occupied role');
+  await x('/events',undefined,401);
+  const { session } = await w('/sessions', { terms: 'Only agreed playful tasks. No penalty for refusal.', minutes: 60 });
+  const id = session.id;
+  const action = (who: typeof w, op: string, extra = {}, status = 200) => who(`/sessions/${id}/${op}`, extra, status);
+  await x(`/sessions/${id}`, undefined, 401);
+  await w(`/sessions/${randomUUID()}`,undefined,403);
+  await action(w, 'approve', { revision: 1 });
+  await action(h, 'approve', { revision: 1 });
+  await action(h,'approve',{revision:1});
+  await w('/sessions',{terms:'Another active session',minutes:30},409);
+  await action(h, 'mission', { key: randomUUID(), title: 'bad', text: 'bad' }, 403);
+  const key = randomUUID();
+  const m = await action(w, 'mission', { key, title: 'Tea', text: 'Offer a cup of tea', points: 7, secret: true });
+  assert.equal((await action(w, 'mission', { key, title: 'Tea', text: 'Offer a cup of tea', points: 7, secret: true })).mission.id, m.mission.id);
+  assert.ok(!JSON.stringify(await h(`/sessions/${id}`)).includes('Offer a cup'));
+  const safe=JSON.stringify(await h('/state'));for(const forbidden of ['Offer a cup','password','hash'])assert.ok(!safe.includes(forbidden));
+  assert.equal((await h(`/sessions/${id}`)).session.missions.length,0);
+  await action(w, 'deliver', { mission: m.mission.id });
+  await action(w,'edit',{mission:m.mission.id,title:'Changed',text:'Changed',points:1,secret:false},409);
+  assert.equal((await h(`/sessions/${id}`)).session.missions[0].status,'pending');
+  await action(h, 'complete', { mission: m.mission.id, text: 'Done',key:randomUUID(),expectedVersion:0 }, 409);
+  await action(h, 'ack', { mission: m.mission.id });
+  const done=await action(h,'complete',{mission:m.mission.id,text:'Done',expectedVersion:0,key:randomUUID()});
+  const firstReview={mission:m.mission.id,approve:true,submissionVersion:done.submissionVersion,key:randomUUID()};
+  const reviews=await Promise.all([action(w,'review',firstReview),action(w,'review',firstReview)]);assert.deepEqual(reviews[0],reviews[1]);
+  assert.equal((await h(`/sessions/${id}`)).session.points, 7);
+  assert.equal(Number((await pool.query('SELECT count(*) FROM awards')).rows[0].count),1);
+  const returnable=await action(w,'mission',{key:randomUUID(),title:'Revise work',text:'Write a kind note',points:2});await action(w,'deliver',{mission:returnable.mission.id});await action(h,'ack',{mission:returnable.mission.id});
+  const oldCompletion={mission:returnable.mission.id,text:'OLD',expectedVersion:0,key:randomUUID()};
+  const oldResult=await action(h,'complete',oldCompletion);assert.equal(oldResult.submissionVersion,1);
+  const oldReturn={mission:returnable.mission.id,approve:false,submissionVersion:1,key:randomUUID()};
+  const returned=await action(w,'review',oldReturn);
+  const newCompletion={mission:returnable.mission.id,text:'NEW',expectedVersion:1,key:randomUUID()};
+  const newResults=await Promise.all([action(h,'complete',newCompletion),action(h,'complete',newCompletion)]);assert.deepEqual(newResults[0],newResults[1]);assert.equal(newResults[0].submissionVersion,2);
+  assert.deepEqual(await action(w,'review',oldReturn),returned);
+  assert.deepEqual(await action(h,'complete',oldCompletion),oldResult);
+  await action(w,'review',{...oldReturn,key:randomUUID()},409);
+  await action(w,'review',{...oldReturn,approve:true,key:randomUUID()},409);
+  await action(h,'complete',{...oldCompletion,key:randomUUID()},409);
+  const currentSubmission=(await h(`/sessions/${id}`)).session.missions.find((v:any)=>v.id===returnable.mission.id);
+  assert.equal(currentSubmission.completion,'NEW');assert.equal(currentSubmission.submissionVersion,2);assert.equal(currentSubmission.status,'submitted');
+  const currentApproval={mission:returnable.mission.id,approve:true,submissionVersion:2,key:randomUUID()};
+  const approvalRace=await Promise.all([
+    action(w,'review',currentApproval),action(w,'review',currentApproval),
+    action(w,'review',{...oldReturn,approve:true,key:randomUUID()},409),
+    action(w,'review',oldReturn),action(h,'complete',oldCompletion)
+  ]);assert.deepEqual(approvalRace[0],approvalRace[1]);assert.deepEqual(approvalRace[3],returned);assert.deepEqual(approvalRace[4],oldResult);
+  const finalSubmission=(await h(`/sessions/${id}`)).session.missions.find((v:any)=>v.id===returnable.mission.id);assert.equal(finalSubmission.completion,'NEW');assert.equal(finalSubmission.status,'approved');
+  const refused=await action(w,'mission',{key:randomUUID(),title:'Optional',text:'A freely optional task',points:20});await action(w,'deliver',{mission:refused.mission.id});await action(h,'refuse',{mission:refused.mission.id});assert.equal((await h(`/sessions/${id}`)).session.points,9);
+  const cas=await action(w,'mission',{key:randomUUID(),title:'Concurrent submission fixture',text:'A zero-point concurrency check',points:0});await action(w,'deliver',{mission:cas.mission.id});await action(h,'ack',{mission:cas.mission.id});
+  const competing=await Promise.all(['One','Two'].map(completion=>h(`/sessions/${id}/complete`,{mission:cas.mission.id,text:completion,expectedVersion:0,key:randomUUID()},[200,409])));
+  assert.deepEqual(competing.map(r=>r._status).sort(),[200,409]);
+  const casState=(await h(`/sessions/${id}`)).session.missions.find((v:any)=>v.id===cas.mission.id);assert.equal(casState.submissionVersion,1);assert.equal(casState.completion,competing[0]._status===200?'One':'Two');
+  const competingReviews=await Promise.all([1,2].map(()=>w(`/sessions/${id}/review`,{mission:cas.mission.id,approve:true,submissionVersion:1,key:randomUUID()},[200,409])));assert.deepEqual(competingReviews.map(r=>r._status).sort(),[200,409]);
+  console.log('PASS submissions: OLD/return/NEW with delayed completion/return/approval, original UUID results, stale fresh-key rejection, duplicate-key concurrency and distinct-key compare-and-set races');
+  await action(w, 'pause'); await action(h, 'pause');
+  const frozen=(await h(`/sessions/${id}`)).session.remaining;
+  await pool.query("UPDATE sessions SET data=jsonb_set(data,'{last}',to_jsonb($2::bigint)) WHERE id=$1",[id,Date.now()-60000]);
+  assert.equal((await h(`/sessions/${id}`)).session.remaining,frozen);
+  await action(w, 'resume');
+  assert.equal((await h(`/sessions/${id}`)).session.pauses.length, 1);
+  await pool.query("UPDATE sessions SET data=jsonb_set(data,'{last}',to_jsonb($2::bigint)) WHERE id=$1",[id,Date.now()-60000]);
+  assert.equal((await h(`/sessions/${id}`)).session.remaining,frozen);
+  await action(w, 'mission', { key: randomUUID(), title: 'blocked', text: 'blocked' }, 409);
+  await action(h, 'resume');
+  const unfinished=await action(w,'mission',{key:randomUUID(),title:'Old terms',text:'Must be cancelled on revision'});
+  await action(w, 'revise', { terms: 'New mutually reviewed boundaries' });
+  assert.equal((await w(`/sessions/${id}`)).session.missions.find((v:any)=>v.id===unfinished.mission.id).status,'cancelled');
+  await action(w,'mission',{key:randomUUID(),title:'blocked',text:'blocked'},409);
+  const reviewFrozen=(await w(`/sessions/${id}`)).session.remaining;
+  await pool.query("UPDATE sessions SET data=jsonb_set(data,'{last}',to_jsonb($2::bigint)) WHERE id=$1",[id,Date.now()-60000]);
+  assert.equal((await w(`/sessions/${id}`)).session.remaining,reviewFrozen);
+  await action(h,'pause');await action(w,'resume');assert.equal((await h(`/sessions/${id}`)).session.pauses.length,1);await action(h,'resume');
+  await action(h, 'approve', { revision: 1 }, 409);
+  await action(w, 'approve', { revision: 2 }); await action(h, 'approve', { revision: 2 });
+  const scheduled = await action(w, 'mission', { key: randomUUID(), title: 'Future', text: 'A timed note', secret: true });
+  await action(w, 'queue', { mission: scheduled.mission.id, scheduledAt: Date.now() + 100 });
+  await action(h, 'pause');
+  await new Promise(r => setTimeout(r, 150));
+  assert.ok(!JSON.stringify(await h(`/sessions/${id}`)).includes('A timed note'));
+  await action(h, 'resume');
+  assert.ok(JSON.stringify(await h(`/sessions/${id}`)).includes('A timed note'));
+  const msgKey = randomUUID();
+  await action(w, 'message', { key: msgKey, text: 'hello' }); await action(w, 'message', { key: msgKey, text: 'hello' });
+  assert.equal((await h(`/sessions/${id}`)).session.messages.length, 1);
+  // An authenticated SSE subscriber gets only invalidations, never mission contents or invitation tokens.
+  const controller=new AbortController();
+  const loginCookie=guests[0].cookie;
+  const stream=await fetch('http://localhost:4179/api/events',{headers:{Cookie:loginCookie},signal:controller.signal});
+  assert.equal(stream.status,200);const reader=stream.body!.getReader();const event=new TextDecoder().decode((await reader.read()).value);assert.equal(event,'data: refresh\n\n');controller.abort();await reader.cancel().catch(()=>{});
+  await action(h, 'stop');
+  assert.deepEqual(await action(h,'complete',oldCompletion),oldResult);
+  assert.deepEqual(await action(w,'review',oldReturn),returned);
+  await action(w, 'resume', {}, 409);
+  await action(w, 'extend', { minutes: 30 }, 409);
+  assert.equal((await w(`/sessions/${id}`)).session.status, 'stopped');
+  const endedState=(await w(`/sessions/${id}`)).session;await action(w,'read',{ids:endedState.inbox.map((n:any)=>n.id)});assert.ok((await w(`/sessions/${id}`)).session.inbox.every((n:any)=>n.readBy.length>0));
+  await action(w,'message',{key:randomUUID(),text:'after stop'},409);
+  assert.equal((await w(`/sessions/${id}`)).session.points,9);
+  const second=await w('/sessions',{terms:'Second session with expiry',minutes:1});
+  await w(`/sessions/${second.session.id}/approve`,{revision:1});await h(`/sessions/${second.session.id}/approve`,{revision:1});
+  await pool.query("UPDATE sessions SET data=jsonb_set(jsonb_set(data,'{remaining}','1'::jsonb),'{last}',to_jsonb($2::bigint)) WHERE id=$1",[second.session.id,Date.now()-1000]);
+  await w(`/sessions/${second.session.id}/extend`,{minutes:30},409);
+  assert.equal((await h(`/sessions/${second.session.id}`)).session.status,'expired');
+  const racing=await w('/sessions',{terms:'Stop wins after commit; earlier awards remain',minutes:10}),rid=racing.session.id;
+  for(const who of [w,h])await who(`/sessions/${rid}/approve`,{revision:1});
+  const raceMission=await w(`/sessions/${rid}/mission`,{key:randomUUID(),title:'Race task',text:'Optional race fixture',points:3});
+  await w(`/sessions/${rid}/deliver`,{mission:raceMission.mission.id});await h(`/sessions/${rid}/ack`,{mission:raceMission.mission.id});const raceDone=await h(`/sessions/${rid}/complete`,{mission:raceMission.mission.id,text:'Done',expectedVersion:0,key:randomUUID()});
+  const [stop,review]=await Promise.all([h(`/sessions/${rid}/stop`,{}),w(`/sessions/${rid}/review`,{mission:raceMission.mission.id,approve:true,submissionVersion:raceDone.submissionVersion,key:randomUUID()},[200,409])]);
+  assert.equal(stop._status,200);const raced=(await w(`/sessions/${rid}`)).session;assert.equal(raced.status,'stopped');assert.equal(raced.points,review._status===200?3:0);
+  const stopIndex=raced.history.findIndex((e:any)=>e.event==='stop');assert.ok(!raced.history.slice(stopIndex+1).some((e:any)=>e.event==='review'));
+  await w(`/sessions/${rid}/review`,{mission:raceMission.mission.id,approve:true,submissionVersion:raceDone.submissionVersion,key:randomUUID()},409);
+  await w('/logout',{});await w('/state',undefined,401);
+  assert.equal((await guestRequest({nickname:'Same name',role:'wife',adult:true})).status,409,'Logout never releases a role to another browser');
+  await pool.query("UPDATE auth_sessions SET expires=now()-interval '1 second' WHERE user_id=$1",[guests[1].user.id]);await h('/state',undefined,401);
+  assert.equal((await guestRequest({nickname:'Same name',role:'husband',adult:true})).status,409,'Expiry never releases a role');
+  const reuse=await fetch('http://localhost:4179/api/logout',{method:'POST',headers:{Origin:'http://localhost:4179',Cookie:loginCookie,'Content-Type':'application/json'},body:'{}'});assert.equal(reuse.status,200);
+  assert.equal((await fetch('http://localhost:4179/api/state',{headers:{Cookie:loginCookie}})).status,401);
+  let lastLoginStatus=0;for(let attempt=0;attempt<41;attempt++){lastLoginStatus=(await fetch('http://localhost:4179/api/login',{method:'POST',headers:{Origin:'http://localhost:4179','Content-Type':'application/json'},body:JSON.stringify({email:'missing@example.test',password:'incorrect-password'})})).status;}assert.equal(lastLoginStatus,429);
+  let guestStatus=0;for(let attempt=0;attempt<21;attempt++)guestStatus=(await guestRequest({nickname:'Same name',role:'wife',adult:true})).status;assert.equal(guestStatus,429);
+  console.log('PASS actual PostgreSQL: Origin/auth cookies/logout/expiry/rate limit, fixed role ownership, single shared pair, secret exclusion, immutable delivery, idempotency, acknowledgement, review-once, penalty-free refusal, pause union, stale consent, scheduling, stop/review ordering and terminal expiry');
+} finally {
+  if (server) await new Promise<void>(r => server.close(r));
+  if (pool) await pool.end();
+  await db.stop(); await rm(dir, { recursive: true, force: true });
+}
