@@ -18,7 +18,7 @@ try{
  assert.equal((await fetch('http://localhost:4181/server/app.ts')).status,404);
   const legacy=await fetch('http://localhost:4181/legacy/');assert.equal(legacy.status,200);assert.equal(legacy.headers.get('content-security-policy'),root.headers.get('content-security-policy'));assert.match(legacy.headers.get('content-security-policy')!,/script-src 'self';/);
   assert.match(await legacy.text(),/<script src="\.\/demo\.js"><\/script>/);assert.equal((await fetch('http://localhost:4181/legacy/demo.js')).status,200);
- const registration=await fetch('http://localhost:4181/api/register',{method:'POST',headers:{Origin:'https://her-rules.example','Content-Type':'application/json'},body:JSON.stringify({email:'production@smoke.test',password:'production-smoke-long',adult:true,role:'wife'})});
+ const registration=await fetch('http://localhost:4181/api/guest',{method:'POST',headers:{Origin:'https://her-rules.example','Content-Type':'application/json'},body:JSON.stringify({adult:true,role:'wife'})});
  assert.equal(registration.status,200);const cookie=registration.headers.get('set-cookie')!;assert.ok(cookie.includes('Secure'));assert.ok(cookie.includes('HttpOnly'));assert.ok(cookie.includes('SameSite=Lax'));assert.equal(registration.headers.get('cache-control'),'no-store');
   assert.equal((await fetch('http://localhost:4181/api/logout',{method:'POST',headers:{Origin:'http://localhost:4181','Content-Type':'application/json'},body:'{}'})).status,403);
   const guest=await fetch('http://localhost:4181/api/guest',{method:'POST',headers:{Origin:'https://her-rules.example','Content-Type':'application/json'},body:JSON.stringify({nickname:'Production guest',adult:true,role:'husband'})});assert.equal(guest.status,200);

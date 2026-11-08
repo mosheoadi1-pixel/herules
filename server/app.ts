@@ -97,12 +97,11 @@ export async function createApp(pool: Pool, origin: string) {
     await login(res,user);res.json({user});
   });
   app.post('/api/guest', async (req,res) => {
-    await rate(req,'guest',20);
-    const b=z.strictObject({nickname:z.string().trim().min(1).max(40).regex(/^[^\p{Cc}\p{Cf}]+$/u),role:z.enum(['wife','husband']),adult:z.literal(true)}).parse(req.body);
-    const current=await pool.query('SELECT 1 FROM auth_sessions WHERE hash=$1 AND expires>now()',[hash(tokenOf(req))]);
-    if(current.rowCount)fail(409,'Sign out before creating a new identity');
+    const b=z.strictObject({nickname:z.string().trim().min(1).max(40).regex(/^[^\p{Cc}\p{Cf}]+$/u).optional(),role:z.enum(['wife','husband']),adult:z.literal(true)}).parse(req.body);
     const user=await transaction(async c=>{
-      const r=await c.query('INSERT INTO users(id,nickname,role,adult) VALUES($1,$2,$3,true) RETURNING id,email,nickname,role,pair_id',[randomUUID(),b.nickname,b.role]);
+      const game=(await c.query('SELECT * FROM private_game WHERE singleton=true FOR UPDATE')).rows[0];
+      if(game[b.role])return (await c.query('SELECT id,email,nickname,role,pair_id FROM users WHERE id=$1',[game[b.role]])).rows[0];
+      const r=await c.query('INSERT INTO users(id,nickname,role,adult) VALUES($1,$2,$3,true) RETURNING id,email,nickname,role,pair_id',[randomUUID(),b.nickname??(b.role==='wife'?'Wife':'Husband'),b.role]);
       return claimPlayer(c,r.rows[0]);
     });
     await login(res,user);res.json({user});

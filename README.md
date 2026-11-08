@@ -1,6 +1,6 @@
 # HER RULES — remote foundation
 
-A Hebrew-first/RTL React + TypeScript app with a single same-origin TypeScript server and **actual PostgreSQL**. One private game, exactly two player identities: enter a nickname, choose a role, and join automatically. No registration or invitation code is required. Each adult independently approves exact agreement revisions and acknowledges optional missions. The original browser-only prototype is preserved at [`legacy/`](legacy/README.md); its simulated identities and consent are never used by the remote app.
+A Hebrew-first/RTL React + TypeScript app with a single same-origin TypeScript server and **actual PostgreSQL**. One private game, exactly two player identities: choose wife or husband and enter. Repeated entry from any browser reuses that role's identity. Each adult independently approves exact agreement revisions and acknowledges optional missions. The original browser-only prototype is preserved at [`legacy/`](legacy/README.md).
 
 ## Local run (Windows, system Node 26)
 
@@ -20,11 +20,15 @@ $env:APP_ORIGIN = 'http://localhost:3000'
 npm.cmd run dev
 ```
 
-Open **http://localhost:3000** in two separate browser profiles or devices. Enter a nickname and select wife in one, husband in the other, then self-attest adulthood. The first player waits; the second joins the same game automatically. Create a session, open Agreement in each browser and independently approve. The wife can draft/send/schedule; the husband acknowledges before written completion; the wife reviews for a single point award. Each role has one permanently reserved identity; third-player or duplicate-role entry is rejected. Existing paired accounts can still use their original cookies or email/password login.
+Open **http://localhost:3000** in two separate browser profiles or devices. Select wife in one, husband in the other, then self-attest adulthood. Both identities are already paired. Create a session, open Agreement in each browser and independently approve. The wife can draft/send/schedule; the husband acknowledges before written completion; the wife reviews for a single point award.
 
-Guest access expires seven days after entry. Signing out, clearing cookies or changing the address/browser loses guest access; **the occupied role is not released to another person**. Keep the same browser and address. There is no self-service guest recovery. Keep the game privately reachable while its initial roles are unclaimed. Upgrade preservation and multi-pair migration: [docs/PRIVATE-GAME.md](docs/PRIVATE-GAME.md).
+Login cookies expire after seven days. Signing out, clearing cookies, or changing browsers is fine: choose the same role again. Anyone who can reach the app can enter either role; keep its address privately reachable.
 
-`.env.example` lists environment values, but files are **not automatically loaded**. `DATABASE_URL` is required. `APP_ORIGIN` is the canonical address; additional IP/domain addresses work automatically when the browser sends requests back to the same address serving the game. First startup applies the idempotent initial SQL migration. Existing data is retained. Database startup/shutdown/recovery details: [docs/DB-SETUP.md](docs/DB-SETUP.md).
+`.env.example` lists environment values, but files are **not automatically loaded**. `DATABASE_URL` is required. `APP_ORIGIN` is the canonical address; additional IP/domain addresses work automatically when the browser sends requests back to the same address serving the game.
+
+**Every application startup resets the game database**, including server restarts and deployments. It clears gameplay, messages, points, approvals, login cookies and imported ideas, creates the two paired identities, and seeds all **193 tasks from `custom-tasks-template.csv`**. The 42 built-in suggestions also remain available. Reset and seed run in one transaction before accepting requests; a seed failure rolls back the reset and prevents startup. Deploy the CSV with the application. Manually imported tasks survive only until the next restart; add permanent tasks to the seed CSV. No active gameplay session is created automatically.
+
+Database process startup/shutdown details: [docs/DB-SETUP.md](docs/DB-SETUP.md). Older architecture and migration documents describe the previous persistent-account behavior; this startup-reset behavior supersedes it.
 
 ### Origin rejected / כתובת משחק לא תואמת
 
@@ -50,18 +54,18 @@ challenges,שיחה משותפת,A conversation together,5,2,conversation|home
 
 Categories: `challenges`, `timed`, `rewards`, `consequences`, `roleplay`, `anticipation`, `random`, `secret`. Minutes must be an integer from 1 to 525600; intensity must be a positive integer, with values above 3 automatically converted to 3 (Bold) before storage and duplicate checking. Both language texts are required (maximum 4000 characters). Separate tags with `|`; tags may be empty. Quote fields containing commas, double quotes, or newlines; escape an embedded quote as `""`.
 
-The importer validates the entire file before inserting and rolls back on database errors. Existing built-in and imported ideas remain. Identical normalized imported rows are skipped on reimport; editing any field creates a new idea. This does not deduplicate against built-in ideas. Imported rows are stored in `imported_ideas`, available only through an authenticated API, and appear alongside the built-in library. Restart the website once after installing this change, then reopen the library tab or refresh the page after each import. No website restart is needed for subsequent imports. There is no browser upload endpoint.
+The importer validates the entire file before inserting and rolls back on database errors. Identical normalized imported rows are skipped on reimport; editing any field creates a new idea. This does not deduplicate against built-in ideas. Imported rows are stored in `imported_ideas`, available through the role-authenticated API alongside the built-in library. Refresh the library after importing. Restarting the website replaces imported ideas with the seed CSV. There is no browser upload endpoint.
 
 ## Implemented
 
 - Salted scrypt passwords; hashed opaque seven-day HttpOnly cookie sessions; logout revocation; exact-Origin mutation checks; PostgreSQL-backed attempt limits.
-- One private game with two fixed role slots. Row-locked, transactional entry automatically forms the shared pair; losing concurrent claims roll back. Invitation screens and API endpoints were removed. Old invitation records are retained as legacy data, never used for entry.
+- One private game with two reusable role identities. Row-locked entry reuses the same identity even for concurrent/repeated logins. No login attempt limit applies to role entry. Invitation screens and API endpoints were removed.
 - Versioned, immutable agreement history and unique per-user approvals. Changed terms suspend gameplay and cancel unfinished missions until two fresh approvals.
 - Independent pauses, owner-only release, irreversible stop and terminal expiry. Safety controls use an independent request path, available during a pending ordinary request. Requests time out after 15 seconds and refresh authoritative state; a timeout does not imply the server rolled back. Server clock counts only active time across the union of all suspensions.
 - Wife-owned draft editing, explicit sending, cancellation and scheduling; acknowledgement, penalty-free refusal, text completion, return for revision and one-time review/points. Delivered terms cannot be edited.
 - UUID retry keys for mission creation, messages, completion and review. Completion uses an expected submission version; reviews bind to the exact submission version. Duplicate completion/review UUIDs transactionally return their original stored results even after newer work or stop, without changing that work. Secret drafts are excluded from husband responses until delivery; history/inbox use generic metadata.
 - Persisted text, inbox/read state and history; content-free pair-authenticated SSE plus five-second authorized polling, including scheduling/reconnect fallback.
-- **42 bilingual suggestions**: your two supplied CSV tasks plus the retained 40 bold prompts across eight categories. The original 160 everyday suggestions were removed. The Custom content tag isolates your additions; missing CSV metadata uses 10 suggested minutes and intensity3. Hebrew wording is preserved with whitespace trimming only, with English translations. The CSV is manually integrated, not watched or automatically imported. Duration/intensity/activity filters, favorites, last-ten avoidance and editable dice suggestions remain available. Existing retained IDs stay stable; removed IDs are not reused. Existing database missions/history are unaffected.
+- **42 built-in bilingual suggestions plus 193 seeded custom tasks**. CSV metadata is validated on startup; intensity above 3 is normalized to 3. Duration/intensity/activity filters, favorites, last-ten avoidance and editable dice suggestions remain available.
 - Responsive burgundy/black/gold interface, Hebrew default/RTL and English/LTR, status/error announcements and keyboard focus styles.
 - Root PWA worker replacement/old-cache cleanup, SVG icons and manifest. Navigation is network-first with a nonsensitive offline notice; no authenticated response is cached and `/api` is never intercepted.
 
@@ -84,7 +88,7 @@ Nothing was deployed externally. To run the built app, `npm.cmd run build`, then
 - `TRUST_PROXY` is optional, comma-separated trusted proxy IPs/CIDRs (Express syntax, e.g. `loopback`). Configure it only when network access is restricted to those proxies; otherwise forwarded IPs are ignored. Rate limits are per trusted client IP, ten-minute fixed windows: guest entry/registration 20, login 40. Shared NATs share a bucket. Without trusted-proxy configuration, a proxy shares one bucket for all clients.
 - Back up PostgreSQL with managed encrypted snapshots or `pg_dump`; regularly restore to an isolated database. Backups and restore procedures have **not** been exercised for production. Never cache `/api` or HTML at a reverse proxy/CDN; redact cookies, bodies and invitation codes in access/error tooling.
 - Run periodic maintenance for expired auth sessions/invitations and old rate-limit windows. Retention, export/deletion policy and account recovery need operational design before real sensitive user data is collected. Session content is stored as database text/JSONB, not end-to-end encrypted.
-- Persisted inbox is the notification fallback. Delivery is evaluated on authorized reads, so scheduled content appears on reconnect/poll; no worker sends a background notification. iOS/Safari installation, icon raster fallbacks and real-device behavior require HTTPS/device QA. The app does not promise offline gameplay or reliable alerts while closed.
+- Inbox is the notification fallback until the next application reset. Delivery is evaluated on authorized reads, so scheduled content appears on reconnect/poll; no worker sends a background notification. iOS/Safari installation and real-device behavior require HTTPS/device QA.
 
 ## Explicit follow-up scope
 

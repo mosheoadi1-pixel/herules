@@ -25,7 +25,6 @@ try{
   const aliasContext=await browser.newContext();
   const aliasPage=await aliasContext.newPage();
   await aliasPage.goto('http://127.0.0.1:4180');
-  await aliasPage.getByLabel('כינוי פרטי (עד 40 תווים)',{exact:true}).fill('בדיקת כתובת');
   await aliasPage.getByRole('checkbox').check();
   await aliasPage.locator('form button.primary').click();
   await aliasPage.locator('.account').waitFor();
@@ -38,21 +37,22 @@ try{
   async function guestForm(page:any,role:string){
   await page.goto('http://localhost:4180');assert.equal(await page.locator('html').getAttribute('lang'),'he');assert.equal(await page.locator('html').getAttribute('dir'),'rtl');await page.getByRole('button',{name:'English',exact:true}).click();
   assert.equal(await page.getByLabel('Email',{exact:true}).count(),0);
-  await page.getByText('Guest access is bound only to this browser cookie',{exact:false}).waitFor();
-  await page.getByLabel('Private nickname (up to 40 characters)',{exact:true}).fill('Shared nickname');
-  await page.getByLabel('Fixed role in the pair').selectOption(role);
-   await page.getByRole('checkbox').check();await page.getByRole('button',{name:'Enter as guest',exact:true}).click();
+  await page.getByText('Every entry to a role returns to the same identity',{exact:false}).waitFor();
+  await page.locator('select[name="role"]').selectOption(role);
+   await page.getByRole('checkbox').check();await page.getByRole('button',{name:'Enter',exact:true}).click();
   }
   await w.getByRole('button',{name:'English',exact:true}).click();
   await w.getByRole('heading',{name:'Waiting for the second player',exact:true}).waitFor();
   assert.equal(await w.getByRole('button',{name:'Create new invitation',exact:true}).count(),0);
   await guestForm(h,'husband');await h.getByRole('heading',{name:'New session',exact:true}).waitFor();
-  await guestForm(x,'husband');await x.getByRole('alert').filter({hasText:'already occupied'}).waitFor();
+  await guestForm(x,'husband');await x.locator('.account').waitFor();
+  assert.equal(await x.evaluate(async()=> (await (await fetch('/api/state')).json()).user.id),await h.evaluate(async()=> (await (await fetch('/api/state')).json()).user.id));
+  await x.getByRole('button',{name:'Sign out',exact:true}).click();
   const guestIds=await Promise.all([w,h].map(p=>p.evaluate(async()=> (await (await fetch('/api/state')).json()).user.id)));assert.equal(new Set(guestIds).size,2);
   const pairIds=await Promise.all([w,h].map(p=>p.evaluate(async()=> (await (await fetch('/api/state')).json()).user.pair_id)));assert.ok(pairIds[0]);assert.equal(pairIds[0],pairIds[1]);
   await w.reload();await w.getByRole('heading',{name:'New session',exact:true}).waitFor();
  assert.equal(await w.evaluate(async()=> (await (await fetch('/api/state')).json()).user.id),guestIds[0]);
-  console.log('Browser checkpoint: two role slots, automatic shared game, third player rejected, no invitation UI, reload retains identity');
+  console.log('Browser checkpoint: two identities, automatic shared game, repeated role entry, no invitation UI, reload retains identity');
  await w.getByRole('heading',{name:'New session',exact:true}).waitFor();
  await w.getByLabel('Exact terms and boundaries for mutual review',{exact:true}).fill('Only optional tea and kind notes. No penalties for boundaries.');
  await w.getByRole('button',{name:'Create session for review',exact:true}).click();
@@ -185,12 +185,13 @@ try{
  await legacy.locator('[data-view="her"]').click();await legacy.locator('#missionBoard').getByRole('button',{name:'Remove',exact:true}).click();await legacy.locator('#missionBoard').getByText('No missions yet.',{exact:true}).waitFor();
  assert.deepEqual(await legacy.evaluate(()=>(window as any).cspViolations||[]),violations);
  await legacyContext.close();console.log('PASS legacy: strict CSP, session creation, agreement and delegated edit/send/acknowledge/complete/remove, zero CSP violations');
-  await w.getByRole('button',{name:'Sign out',exact:true}).click();await w.getByRole('button',{name:'Enter as guest',exact:true}).waitFor();
+  await w.getByRole('button',{name:'Sign out',exact:true}).click();await w.getByRole('button',{name:'Enter',exact:true}).waitFor();
   assert.equal((await w.request.get('http://127.0.0.1:4180/api/state')).status(),401);
-  await w.reload();await w.getByRole('button',{name:'Enter as guest',exact:true}).waitFor();
-  await w.getByLabel('Private nickname (up to 40 characters)',{exact:true}).fill('בדיקת כתובת');await w.getByRole('checkbox').check();await w.getByRole('button',{name:'Enter as guest',exact:true}).click();await w.getByRole('alert').filter({hasText:'already occupied'}).waitFor();
-  await x.getByRole('button',{name:'Existing account? Email and password sign in',exact:true}).click();await x.getByLabel('Email',{exact:true}).waitFor();
-  assert.deepEqual(errors,[]);console.log('PASS browser: logout loses guest access without releasing role, same nickname cannot take over, optional existing-account sign-in UI, third player denied, terminal stop, zero uncaught page errors');
+  await w.reload();await w.getByRole('button',{name:'Enter',exact:true}).waitFor();
+  await w.getByRole('checkbox').check();await w.getByRole('button',{name:'Enter',exact:true}).click();await w.locator('.account').waitFor();
+  assert.equal(await w.evaluate(async()=> (await (await fetch('/api/state')).json()).user.id),guestIds[0]);
+  assert.equal(await x.getByLabel('Email',{exact:true}).count(),0);
+  assert.deepEqual(errors,[]);console.log('PASS browser: logout and reload allow same-role re-entry, no email/password UI, terminal stop, zero uncaught page errors');
 }finally{
  if(browser)await browser.close();if(vite)await vite.close();if(server){server.closeAllConnections();await new Promise<void>(r=>server.close(r));}await pool.end();await db.stop();await rm(directory,{recursive:true,force:true});
 }

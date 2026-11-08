@@ -1,4 +1,4 @@
-import type { Pool } from 'pg';
+import { Pool, type PoolClient } from 'pg';
 import { createHash } from 'node:crypto';
 import { readFile } from 'node:fs/promises';
 import { z } from 'zod';
@@ -26,7 +26,7 @@ function parseCsv(csv:string):string[][] {
 }
 const ideaSchema=z.object({category:z.enum(categories),he:z.string().min(1).max(4000),en:z.string().min(1).max(4000),minutes:z.number().int().min(1).max(525600),intensity:z.number().int().min(1).transform(value=>Math.min(value,3)),tags:z.array(z.string().min(1).max(80)).max(50)});
 
-export async function importIdeas(pool:Pool,csv:string):Promise<number> {
+export async function importIdeas(pool:Pool|PoolClient,csv:string):Promise<number> {
   const [header,...rows]=parseCsv(csv);
   if(header?.join(',')!=='category,he,en,minutes,intensity,tags')throw new Error('Expected header: category,he,en,minutes,intensity,tags');
   const ideas=rows.map((row,index)=>{
@@ -36,15 +36,16 @@ export async function importIdeas(pool:Pool,csv:string):Promise<number> {
     if(!parsed.success)throw new Error(`CSV record ${index+2}: ${parsed.error.message}`);
     return parsed.data;
   });
-  const client=await pool.connect();let inserted=0;
+  const owned=pool instanceof Pool;
+  const client=owned?await pool.connect():pool;let inserted=0;
   try {
-    await client.query('BEGIN');
+    if(owned)await client.query('BEGIN');
     await client.query(await readFile(new URL('../db/004-imported-ideas.sql',import.meta.url),'utf8'));
     for(const idea of ideas){
       const id='csv-'+createHash('sha256').update(JSON.stringify(idea)).digest('hex');
       const result=await client.query('INSERT INTO imported_ideas(id,category,he,en,minutes,intensity,tags) VALUES($1,$2,$3,$4,$5,$6,$7) ON CONFLICT(id) DO NOTHING',[id,idea.category,idea.he,idea.en,idea.minutes,idea.intensity,idea.tags]);
       inserted+=result.rowCount!;
     }
-    await client.query('COMMIT');return inserted;
-  } catch(error){await client.query('ROLLBACK');throw error;}finally{client.release();}
+    if(owned)await client.query('COMMIT');return inserted;
+  } catch(error){if(owned)await client.query('ROLLBACK');throw error;}finally{if(owned)client.release();}
 }

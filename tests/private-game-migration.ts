@@ -30,10 +30,10 @@ try{
  const state=await before.json();assert.equal(state.user.id,husband);assert.equal(state.user.pair_id,pair);assert.equal(state.sessions[0].id,session);assert.equal(state.sessions[0].points,7);assert.deepEqual(state.sessions[0].messages,history.messages);assert.equal(state.sessions[0].terms,history.terms);
  const login=await fetch('http://localhost:4191/api/login',{method:'POST',headers:{Origin:'http://localhost:4191','Content-Type':'application/json'},body:JSON.stringify({email:'wife@upgrade.test',password})});assert.equal(login.status,200);
  const oldWife=await fetch('http://localhost:4191/api/state',{headers:{Cookie:login.headers.get('set-cookie')!.split(';')[0]}});assert.equal((await oldWife.json()).user.id,wife);
- const occupied=await fetch('http://localhost:4191/api/guest',{method:'POST',headers:{Origin:'http://localhost:4191','Content-Type':'application/json'},body:JSON.stringify({nickname:'Existing guest',role:'husband',adult:true})});assert.equal(occupied.status,409);
+  const occupied=await fetch('http://localhost:4191/api/guest',{method:'POST',headers:{Origin:'http://localhost:4191','Content-Type':'application/json'},body:JSON.stringify({nickname:'Existing guest',role:'husband',adult:true})});assert.equal(occupied.status,200);
  assert.equal((await pool.query('SELECT count(*) FROM pairs')).rows[0].count,'1');
  assert.equal((await pool.query('SELECT count(*) FROM users')).rows[0].count,'2');
- console.log('PASS private-game migration: existing pair/registered login/guest cookie/session/history/points retained; repeat startup and occupied-slot rejection');
+ console.log('PASS private-game migration: existing data retained by migrations; repeat entry reuses occupied identity');
  await new Promise<void>(r=>server!.close(()=>r()));server=undefined;
  // A multi-pair installation must not silently expose one pair to another.
  await pool.query('DROP TABLE private_game');

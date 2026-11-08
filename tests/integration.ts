@@ -42,7 +42,8 @@ try {
   for(const body of [{nickname:' ',role:'wife',adult:true},{nickname:'a'.repeat(41),role:'wife',adult:true},{nickname:'Name\nOther',role:'wife',adult:true},{nickname:'Name',role:'admin',adult:true},{nickname:'Name',role:'wife',adult:false},{nickname:'Name',role:'wife',adult:true,id:legacyId}])assert.equal((await guestRequest(body)).status,400);
   const guests:{user:User;cookie:string}[]=[];
   const contenders=await Promise.all([guestRequest({nickname:'Same name',role:'wife',adult:true}),guestRequest({nickname:'Same name',role:'wife',adult:true})]);
-  assert.deepEqual(contenders.map(r=>r.status).sort(),[200,409],'Only one simultaneous role claim may succeed');
+  assert.deepEqual(contenders.map(r=>r.status).sort(),[200,200],'Repeated role entry must succeed');
+  const repeated=await contenders[1].json();
   for(const response of [contenders.find(r=>r.status===200)!,await guestRequest({nickname:' Same name ',role:'husband',adult:true})]){
     assert.equal(response.status,200);
     const cookie=response.headers.get('set-cookie')!;assert.match(cookie,/HttpOnly/);assert.match(cookie,/SameSite=Lax/);assert.match(cookie,/Max-Age=604800/);
@@ -50,13 +51,14 @@ try {
     guests.push({user,cookie:cookie.split(';')[0]});
   }
   assert.equal(new Set(guests.map(g=>g.user.id)).size,2);
+  assert.equal(repeated.user.id,guests[0].user.id);
   assert.equal(Number((await pool.query('SELECT count(*) FROM users WHERE nickname IS NOT NULL')).rows[0].count),2,'Losing role claims must roll back identity creation');
-  for(const role of ['wife','husband'])assert.equal((await guestRequest({nickname:'Same name',role,adult:true})).status,409);
+  for(const role of ['wife','husband'])assert.equal((await guestRequest({nickname:'Same name',role,adult:true})).status,200);
   const guestCall=async(index:number,path:string,body?:any,status=200)=>{
     const r=await fetch('http://localhost:4179/api'+path,{method:body===undefined?'GET':'POST',headers:{Origin:'http://localhost:4179','Content-Type':'application/json',Cookie:guests[index].cookie},body:body===undefined?undefined:JSON.stringify(body)});assert.equal(r.status,status);return r.json();
   };
   assert.equal((await guestCall(0,'/state')).user.id,guests[0].user.id);
-  await guestCall(0,'/guest',{nickname:'Replacement',role:'husband',adult:true},409);
+  await guestCall(0,'/guest',{role:'wife',adult:true});
   const wifeState=await guestCall(0,'/state'),husbandState=await guestCall(1,'/state');
   assert.ok(wifeState.user.pair_id);assert.equal(wifeState.user.pair_id,husbandState.user.pair_id,'Both roles automatically share one game');
   await guestCall(0,'/invite',{},404);await guestCall(0,'/redeem',{token:'a'.repeat(64)},404);
@@ -69,7 +71,7 @@ try {
   assert.equal((await guestCall(0,`/sessions/${guestSession.id}`)).session.approvals.length,2);
   assert.equal((await pool.query('SELECT password FROM users WHERE id=$1',[guests[0].user.id])).rows[0].password,null);
   await pool.query('DELETE FROM approvals WHERE session_id=$1',[guestSession.id]);await pool.query('DELETE FROM sessions WHERE id=$1',[guestSession.id]);
-  console.log('PASS two players: concurrent slot claim, automatic shared game, third identity blocked, no invitations, separate same-name identities and independent approvals');
+  console.log('PASS two players: concurrent repeated entry, automatic shared game, same role reuses identity, no invitations and independent approvals');
   function account(cookie: string) {
     const call = async (path: string, body?: any, expected: number|number[] = 200) => {
       const r = await fetch('http://localhost:4179/api' + path, { method: body === undefined ? 'GET' : 'POST', headers: { Origin: 'http://localhost:4179', 'Content-Type': 'application/json', Cookie: cookie }, body: body === undefined ? undefined : JSON.stringify(body) });
@@ -197,13 +199,13 @@ try {
   const stopIndex=raced.history.findIndex((e:any)=>e.event==='stop');assert.ok(!raced.history.slice(stopIndex+1).some((e:any)=>e.event==='review'));
   await w(`/sessions/${rid}/review`,{mission:raceMission.mission.id,approve:true,submissionVersion:raceDone.submissionVersion,key:randomUUID()},409);
   await w('/logout',{});await w('/state',undefined,401);
-  assert.equal((await guestRequest({nickname:'Same name',role:'wife',adult:true})).status,409,'Logout never releases a role to another browser');
+  assert.equal((await guestRequest({role:'wife',adult:true})).status,200,'Logout permits re-entry');
   await pool.query("UPDATE auth_sessions SET expires=now()-interval '1 second' WHERE user_id=$1",[guests[1].user.id]);await h('/state',undefined,401);
-  assert.equal((await guestRequest({nickname:'Same name',role:'husband',adult:true})).status,409,'Expiry never releases a role');
+  assert.equal((await guestRequest({role:'husband',adult:true})).status,200,'Expiry permits re-entry');
   const reuse=await fetch('http://localhost:4179/api/logout',{method:'POST',headers:{Origin:'http://localhost:4179',Cookie:loginCookie,'Content-Type':'application/json'},body:'{}'});assert.equal(reuse.status,200);
   assert.equal((await fetch('http://localhost:4179/api/state',{headers:{Cookie:loginCookie}})).status,401);
   let lastLoginStatus=0;for(let attempt=0;attempt<41;attempt++){lastLoginStatus=(await fetch('http://localhost:4179/api/login',{method:'POST',headers:{Origin:'http://localhost:4179','Content-Type':'application/json'},body:JSON.stringify({email:'missing@example.test',password:'incorrect-password'})})).status;}assert.equal(lastLoginStatus,429);
-  let guestStatus=0;for(let attempt=0;attempt<21;attempt++)guestStatus=(await guestRequest({nickname:'Same name',role:'wife',adult:true})).status;assert.equal(guestStatus,429);
+  for(let attempt=0;attempt<41;attempt++)assert.equal((await guestRequest({role:'wife',adult:true})).status,200);
   console.log('PASS actual PostgreSQL: Origin/auth cookies/logout/expiry/rate limit, fixed role ownership, single shared pair, secret exclusion, immutable delivery, idempotency, acknowledgement, review-once, penalty-free refusal, pause union, stale consent, scheduling, stop/review ordering and terminal expiry');
 } finally {
   if (server) await new Promise<void>(r => server.close(r));

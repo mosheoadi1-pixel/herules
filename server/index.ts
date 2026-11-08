@@ -1,10 +1,12 @@
 import pg from 'pg';
 import express from 'express';
 import { createApp } from './app.ts';
+import { resetGame } from './reset.ts';
 const port=Number(process.env.PORT||3000);
 if(!process.env.DATABASE_URL)throw new Error('Set DATABASE_URL; see docs/DB-SETUP.md');
 const pool=new pg.Pool({connectionString:process.env.DATABASE_URL});
 const app=await createApp(pool,process.env.APP_ORIGIN||`http://localhost:${port}`);
+await resetGame(pool);
 app.use('/legacy',express.static('legacy'));
 app.use(express.static('public',{setHeaders(res,path){if(path.endsWith('sw.js'))res.setHeader('Cache-Control','no-cache');}}));
 if(process.env.NODE_ENV==='production'){
