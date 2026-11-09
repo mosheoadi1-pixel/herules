@@ -1,5 +1,70 @@
 # HER RULES — implementation verification
 
+## Final five-cycle verification — 2026-11-09
+
+All five approved cycles implemented on `improve-shared-experience`, with separate implementation and independent subagent review. Final review found an own-save edit race; the correction received independent scoped **PASS / Ship**. The earlier current/archive report-loss finding was also fixed and independently re-reviewed. Entries below retain historical stage evidence; their pending-review statements are superseded by this section.
+
+After the last code correction, the controller independently reran all commands in the existing checkout:
+
+| Command | Result |
+| --- | --- |
+| `npm.cmd test` | Exit 0, all seven suites; intentional `API failure 23514` verifies transaction rollback. |
+| `npm.cmd run build` | Exit 0, TypeScript and Vite, 17 modules; `index-BmaeEnjV.js`. |
+| `npm.cmd run test:browser` | Exit 0, all Chromium groups including held-save field locking, unsaved input retention, both completion styles, adjustment/replacement, guided sequence, optional reflections, RTL/LTR at 320/390/768, PWA, timeout/retry and independent safety controls. |
+| `npm.cmd run test:production` | Exit 0, disposable real production entry/database/assets/cookies/headers/Origin smoke. |
+| `git diff --check` | Exit 0; Windows line-ending warnings only. |
+
+No live application restart, deployment, new dependencies, or commits. Tests used disposable databases. Physical-device and screen-reader behavior, external deployment and load/security audits were not checked. Existing startup reset still deletes all game data. Unsaved form input is not preserved across reload or session switching.
+
+---
+
+## Current correction: independent final review P2 own-save race — 2026-11-09
+
+Independent final review supplied a reproduced **P2**: while an own check-in/reflection save of A was pending, fields still accepted B; the saved-own refresh effect then replaced B with A. Partner-refresh retention checks did not cover this distinct own-save race. This finding supersedes any implication of final acceptance in earlier entries.
+
+Minimal frontend correction: check-in fieldset uses `disabled={busy||ended}`; reflection uses a labelled fieldset with `disabled={busy}`. Existing `run` holds busy through the save and authoritative refresh and releases it in `finally`. Reflection remains editable after session end; terminal check-ins stay disabled. Safety controls retain their independent request path outside both fieldsets. No server or API changes.
+
+Fresh evidence on Node v26.13.0, disposable browser cluster 55435:
+
+| Actual command | Result |
+| --- | --- |
+| `npm.cmd run test:browser` before fix | Expected RED: `checkin: edits blocked while own save response is held`, actual disabled `false`, expected `true`. |
+| `npm.cmd run test:browser` final | **Exit 0**. For both operations, route forwards the real save, asserts HTTP 200, holds the committed response, checks every relevant input/select/textarea is disabled and pause/release plus stop stay enabled; releases response, waits for controls to re-enable, compares all submitted values and independently fetched own saved API values. Existing genuinely unsaved partner-refresh checks (including bilingual reflections), archive restoration, terminal reflection editing, unsaved mission report, mobile RTL/LTR, timeout/retry and actual stalled-request safety tests all PASS; zero uncaught page errors. |
+| `npm.cmd run build` | **Exit 0**: TypeScript + Vite, 17 modules, JS `index-BmaeEnjV.js`, CSS `index-DFOXiPn7.css`. |
+
+One intermediate post-fix browser run used the unpaused safety-button name during the already-paused reflection fixture; corrected the test to accept the actual **Release my pause** control, then reran the complete suite successfully. No full `npm.cmd test` or production smoke rerun for this frontend-only correction; their cycle5 passes below predate this correction. No subagents, commits, dependencies or live-process restart. Independent re-review, physical-device/screen-reader QA and external deployment remain unperformed. Startup-reset and unsaved-on-navigation limits remain unchanged.
+
+---
+
+## Current: shared experience cycle5 — 2026-11-09
+
+Fresh controller verification in `D:\her rules`, system Node **v26.13.0**. Prior uncommitted cycles were preserved. Cycle4 independent **PASS** is supplied by the user handoff; its reflection-edit retention conclusion was inspection-only. Cycle5 now supplies actual browser evidence for that gap. No independent final review has been performed in this run; it follows this handoff. Older “Latest” and acceptance entries below are historical, not evidence for this revision.
+
+### Changes and fresh results
+
+- Active invitation precedes optional check-ins and closing reflection. Reflection moved below session content and remains before the new-session form, with explicit stable textarea labels and separately labelled saved answers in Hebrew/English.
+- Terminal next-step guidance explains reflection/new session and offers keyboard-operable actions focusing the real appreciation/terms fields. No server interface or stable mission wrapper changed in cycle5.
+- Real Chromium regression edits both reflection fields to genuinely unsaved values, changes the partner's reflection, waits for that shared update, and checks both own controls plus independently fetched own persisted values. Repeated in Hebrew and English. Archive selection restores both saved values; switching back to the new session restores empty reflection fields. Existing unsaved written-report current → other → current regression remains passing.
+- 320/390/768px Hebrew RTL + English LTR: all six wife session tabs remain free of document overflow; new closing/new-session layouts and check-in controls fit the viewport. Keyboard Enter activates both terminal next-step actions and focuses their actual textareas at every width/language. Both completion styles, adjustment/replacement, held communication, guided sequence and prior foundation flows pass.
+
+| Actual command | Fresh result |
+| --- | --- |
+| `npm.cmd test` | **Exit 0**: all seven suites (library, guidance, integration, private-game migration, ideas import, startup reset, experience). Intentional `API failure 23514` is the asserted replacement rollback fixture. |
+| `npm.cmd run build` | **Exit 0**: TypeScript + Vite, 17 modules; production JS `index-CMdZBhNv.js`, CSS `index-DFOXiPn7.css`. |
+| `npm.cmd run test:browser` | **Exit 0**: all groups above plus PWA upgrade/offline, actual 15-second timeout/same-key retry, held-request pause/stop, legacy strict CSP, zero uncaught page errors. |
+| `npm.cmd run test:production` | **Exit 0**: actual isolated `server/index.ts`, PostgreSQL startup/migrations, built assets, Secure/HttpOnly/SameSite cookies, HSTS, HTTPS Origin enforcement, no source serving, worker headers and legacy CSP. This is production-entry smoke, not a full production-mode browser replay. |
+| `git diff --check` | **Exit 0**; existing LF/CRLF conversion warnings only. |
+
+Tests use disposable clusters on ports 55434–55440 (browser 55435, production 55436, experience 55440); no live process restart or live database access. The production test starts/stops only its disposable server. No subagents, commits, new dependencies, deployment or new explicit content.
+
+Test development: two preliminary browser runs exposed test selector issues (saved textarea text participates in implicit accessible names; text selector matched both summary and textarea). Corrected selectors, then observed the expected RED for the missing **Reflect on this session** action. After implementation the complete browser suite passed. Reflection retention itself passed before polish and needed coverage, not a state-management fix.
+
+### Current limits
+
+Independent final review pending. No physical-device, screen-reader, external HTTPS/proxy, load/security audit or deployment QA. Unsaved reflection fields survive partner refresh, not reload/session switching; saved entries restore on selection. The existing startup reset still erases gameplay, reflections, check-ins, cookies and imported data. No live-app acceptance is claimed from disposable checks.
+
+---
+
 ## Latest: user CSV integration and removal of everyday suggestions
 
 Applied the requested replacement: 42 suggestions (2 provided CSV rows +40 retained bold suggestions). Removed original160 everyday entries from library source, preserved retained IDs21–25 per category and gave custom entries separate IDs. Exact supplied Hebrew wording is preserved with whitespace trimming; English translations added, missing duration/intensity normalized to10minutes/3. No database, active mission or history deletion was performed; the predefined catalog lives in frontend source.

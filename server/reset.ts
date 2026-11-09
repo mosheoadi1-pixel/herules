@@ -8,7 +8,7 @@ export async function resetGame(pool:Pool) {
   const client=await pool.connect();
   try {
     await client.query('BEGIN');
-    await client.query('TRUNCATE private_game,request_keys,awards,approvals,sessions,invites,auth_sessions,pairs,users,rate_limits,imported_ideas');
+    await client.query('TRUNCATE private_game,request_keys,awards,approvals,sessions,invites,auth_sessions,pairs,users,rate_limits');
     const wife=randomUUID(),husband=randomUUID(),pair=randomUUID();
     await client.query("INSERT INTO users(id,nickname,role,adult,pair_id) VALUES($1,'Wife','wife',true,$3),($2,'Husband','husband',true,$3)",[wife,husband,pair]);
     await client.query('INSERT INTO pairs(id,wife,husband) VALUES($1,$2,$3)',[pair,wife,husband]);

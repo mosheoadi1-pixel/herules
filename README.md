@@ -20,13 +20,13 @@ $env:APP_ORIGIN = 'http://localhost:3000'
 npm.cmd run dev
 ```
 
-Open **http://localhost:3000** in two separate browser profiles or devices. Select wife in one, husband in the other, then self-attest adulthood. Both identities are already paired. Create a session, open Agreement in each browser and independently approve. The wife can draft/send/schedule; the husband acknowledges before written completion; the wife reviews for a single point award.
+Open **http://localhost:3000** in two separate browser profiles or devices. Select wife in one, husband in the other, then self-attest adulthood. Both identities are already paired. Create a session, open Agreement in each browser and independently approve. The wife can draft/send/schedule; the husband acknowledges before simple or written completion; the wife reviews for a single point award.
 
 Login cookies expire after seven days. Signing out, clearing cookies, or changing browsers is fine: choose the same role again. Anyone who can reach the app can enter either role; keep its address privately reachable.
 
 `.env.example` lists environment values, but files are **not automatically loaded**. `DATABASE_URL` is required. `APP_ORIGIN` is the canonical address; additional IP/domain addresses work automatically when the browser sends requests back to the same address serving the game.
 
-**Every application startup resets the game database**, including server restarts and deployments. It clears gameplay, messages, points, approvals, login cookies and imported ideas, creates the two paired identities, and seeds all **193 tasks from `custom-tasks-template.csv`**. The 42 built-in suggestions also remain available. Reset and seed run in one transaction before accepting requests; a seed failure rolls back the reset and prevents startup. Deploy the CSV with the application. Manually imported tasks survive only until the next restart; add permanent tasks to the seed CSV. No active gameplay session is created automatically.
+**Every application startup resets gameplay**, including server restarts and deployments. It clears gameplay (including adjustment requests and linked replacements), messages, points, approvals and login cookies, and creates the two paired identities. Imported ideas remain in the database, and the **193 tasks from `custom-tasks-template.csv`** are added if missing. The 42 built-in suggestions also remain available. Reset and seed run in one transaction before accepting requests; a seed failure rolls back the reset and prevents startup. Deploy the CSV with the application. Imported ideas persist when the server reconnects to the same persistent PostgreSQL database; moving to a different database requires copying the ideas or importing the CSV there. No active gameplay session is created automatically.
 
 Database process startup/shutdown details: [docs/DB-SETUP.md](docs/DB-SETUP.md). Older architecture and migration documents describe the previous persistent-account behavior; this startup-reset behavior supersedes it.
 
@@ -54,7 +54,7 @@ challenges,שיחה משותפת,A conversation together,5,2,conversation|home
 
 Categories: `challenges`, `timed`, `rewards`, `consequences`, `roleplay`, `anticipation`, `random`, `secret`. Minutes must be an integer from 1 to 525600; intensity must be a positive integer, with values above 3 automatically converted to 3 (Bold) before storage and duplicate checking. Both language texts are required (maximum 4000 characters). Separate tags with `|`; tags may be empty. Quote fields containing commas, double quotes, or newlines; escape an embedded quote as `""`.
 
-The importer validates the entire file before inserting and rolls back on database errors. Identical normalized imported rows are skipped on reimport; editing any field creates a new idea. This does not deduplicate against built-in ideas. Imported rows are stored in `imported_ideas`, available through the role-authenticated API alongside the built-in library. Refresh the library after importing. Restarting the website replaces imported ideas with the seed CSV. There is no browser upload endpoint.
+The importer validates the entire file before inserting and rolls back on database errors. Identical normalized imported rows are skipped on reimport; editing any field creates a new idea. This does not deduplicate against built-in ideas. Imported rows are stored in `imported_ideas`, available through the role-authenticated API alongside the built-in library. Refresh the library after importing. Ideas persist across website restarts when the same database is used. There is no browser upload endpoint.
 
 ## Implemented
 
@@ -62,23 +62,71 @@ The importer validates the entire file before inserting and rolls back on databa
 - One private game with two reusable role identities. Row-locked entry reuses the same identity even for concurrent/repeated logins. No login attempt limit applies to role entry. Invitation screens and API endpoints were removed.
 - Versioned, immutable agreement history and unique per-user approvals. Changed terms suspend gameplay and cancel unfinished missions until two fresh approvals.
 - Independent pauses, owner-only release, irreversible stop and terminal expiry. Safety controls use an independent request path, available during a pending ordinary request. Requests time out after 15 seconds and refresh authoritative state; a timeout does not imply the server rolled back. Server clock counts only active time across the union of all suspensions.
-- Wife-owned draft editing, explicit sending, cancellation and scheduling; acknowledgement, penalty-free refusal, text completion, return for revision and one-time review/points. Delivered terms cannot be edited.
-- UUID retry keys for mission creation, messages, completion and review. Completion uses an expected submission version; reviews bind to the exact submission version. Duplicate completion/review UUIDs transactionally return their original stored results even after newer work or stop, without changing that work. Secret drafts are excluded from husband responses until delivery; history/inbox use generic metadata.
-- Persisted text, inbox/read state and history; content-free pair-authenticated SSE plus five-second authorized polling, including scheduling/reconnect fallback.
+- Wife-owned draft editing, explicit sending, cancellation and scheduling; acknowledgement, penalty-free refusal, simple or written completion, return for revision and one-time review/points. Delivered terms cannot be edited.
+- Adjustable invitations: the husband may request a softer version or another adjustment on a pending, acknowledged or returned invitation, with an optional note. Completion waits in `adjustment`; the wife can author a linked replacement draft. Only successful replacement creation cancels the original, retaining its delivered terms and prior work. Replacement needs separate delivery and fresh acknowledgement. Decline requires no explanation, including while waiting for adjustment.
+- UUID retry keys for mission creation, messages, adjustment, replacement, completion and review. Completion uses an expected submission version; reviews bind to the exact submission version. Duplicate adjustment/replacement/completion/review UUIDs transactionally return their original stored results even after newer work or stop, without changing that work. Secret drafts are excluded from husband responses until delivery; existing nonsecret draft visibility is unchanged. History/inbox use generic metadata.
+- Persisted text, inbox/read state and history; messages work before agreement approval, during agreement review and during either/both personal pauses. Messages never approve terms, release pauses or resume gameplay; no sending after stop/expiry. Content-free pair-authenticated SSE plus five-second authorized polling, including scheduling/reconnect fallback.
 - **42 built-in bilingual suggestions plus 193 seeded custom tasks**. CSV metadata is validated on startup; intensity above 3 is normalized to 3. Duration/intensity/activity filters, favorites, last-ten avoidance and editable dice suggestions remain available.
 - Responsive burgundy/black/gold interface, Hebrew default/RTL and English/LTR, status/error announcements and keyboard focus styles.
 - Root PWA worker replacement/old-cache cleanup, SVG icons and manifest. Navigation is network-first with a nonsensitive offline notice; no authenticated response is cached and `/api` is never intercepted.
+
+### Cycle 1 operation contract
+
+Both operations are `POST /api/sessions/:id/:op`, require the current agreement revision, mutual approvals and no pauses for a **new** request, and return `{ mission: Mission }`:
+
+| Operation | Role | JSON body |
+| --- | --- | --- |
+| `adjust` | husband | `{ key: UUID, mission: UUID, reason: "softer" \| "adjust", note?: string }` |
+| `replace` | wife | `{ key: UUID, mission: UUID, title: string, text: string, points?: integer, secret?: boolean }` |
+
+`note` is trimmed, at most 4000 characters; absent/blank notes are omitted from storage. Replacement uses the same draft schema as mission creation: trimmed title 1–160 characters, trimmed text 1–4000, points 0–100 (default 0), secret default false. The UI prefills the original values for editing. For `adjust`, `mission` must be pending, acknowledged or revision. Only `replace` requires the original mission to be in `adjustment` and not already replaced. Fields from the client such as status, links, acknowledgement and submission version are not copied into a replacement.
+
+Optional `Mission` fields (old session JSON needs no migration): `adjustment: { reason: "softer" | "adjust", note?: string, at: number }` (server epoch milliseconds), `replacementId: UUID` on the cancelled original, `replaces: UUID` on the new draft. Adjustment metadata remains available on the original after replacement/refusal/cancellation. `adjustment` is a waiting state, never eligible for completion or review. Agreement revision and permanent stop still cancel unfinished invitations.
+
+Keys are scoped by session/user/operation. Reuse a key only to retry the same intent: a committed retry returns its original result, even during a hold or after terminal state, without applying it again. A fresh-key second adjustment/replacement is rejected by the mission state; concurrent replacements create at most one draft. Original cancellation, replacement, links, history and retry result commit or roll back together under the session row lock. New messages retain their existing `{ key: UUID, text: string }` contract and reject terminal sessions, including retries after terminal state.
+
+### Cycle 2 check-in contract
+
+`POST /api/sessions/:id/checkin` accepts `{ minutes: integer 1–1440, energy: "low" | "medium" | "high", mood: "connection" | "playful" | "quiet" }` and returns `{ ok: true }`. The row-locked update replaces only `Session.checkIns[authenticatedUser.id]`; supplied identity/map fields are ignored. Both participants see the optional map in session/state responses. Old sessions need no migration. Invalid input is 400; stopped/expired sessions reject updates with 409. Holds and missing agreement approvals do not block check-ins. Check-ins never approve agreements, release pauses, accept invitations or award points, and are never required to play. Reposting replaces the own entry; no retry UUID is needed.
+
+The bilingual form defaults to 15 minutes, medium energy and connection without saving automatically. It reloads own saved values on session/identity or saved-value changes; partner updates do not overwrite own edits. Both summaries remain visible in the archive, with editing disabled. Check-ins share the existing startup-reset lifecycle.
+
+### Cycle 3 guided session contract
+
+`POST /api/sessions/:id/sequence` accepts `{ missions: UUID[] }` (0–3 distinct existing mission IDs in the selected session) and returns `{ ok: true }`. Only the wife may update it, with mutual current agreement approvals, no personal pauses and a nonterminal session. The session row lock protects validation and replacement of optional `Session.sequence?: string[]`; no SQL migration is required. Invalid arrays/UUIDs/duplicates are 400, missing mission IDs 404, wrong role 403 during play, holds/terminal 409. `[]` clears the selection. Like check-ins, this is a replaceable setting without a retry UUID; reposting may add a generic notice. Husband responses filter sequence IDs through mission visibility so secret undelivered IDs are not exposed.
+
+Guidance chooses the first visible unfinished current-revision mission in the selected order. Otherwise it prioritizes role-actionable invitations (wife: review, adjustment, draft; husband: acknowledgement, completion/returned work), retaining existing order within each state, then a waiting invitation. Final/stale cards remain reachable in collapsible cards. A sequence is presentation only: it does not restrict other invitation actions, send, acknowledge, complete, award points or escalate. Replacement IDs are not silently substituted into a chosen sequence; they remain ordinary new drafts available through the existing cards/selector. Existing scheduled delivery rules remain unchanged.
+
+One current invitation renders its action forms once. Bilingual next-step guidance explains agreement, personal/partner pauses, partner waiting and terminal state, with direct focused agreement navigation. After entry the repeated hero is collapsed; the composer is collapsed initially and after save, and opens for editing/library choices with existing draft values intact. Other and archived cards remain reachable; check-ins follow the invitation area and do not determine guidance or eligibility. The sequence shares the existing startup-reset lifecycle.
+
+### Cycle 4 completion and reflection contracts
+
+`Mission.completionStyle?: "simple" | "written"` is optional for old JSON: **missing means written**. New `mission` and `replace` requests accept the enum and default to **simple**; invalid values return 400. `edit` accepts the same enum only on a draft, preserving the existing style if omitted. Delivered/queued terms cannot be edited; the wife selects the style in the bilingual draft or replacement form before delivery. Replacements are new drafts with their own choice, never inherited acceptance or work.
+
+`POST /api/sessions/:id/complete` retains `{ key: UUID, mission: UUID, expectedVersion: integer }`. Optional `text` is trimmed/max 4000; simple permits omitted/empty/whitespace text, stored as `""`. Written and missing-style legacy missions require nonempty trimmed text. Both need explicit acknowledgement (or returned work), mutual current approvals and no pauses; neither bypasses wife review. Response remains `{ mission: UUID, submissionVersion, completion, status: "submitted" }`. `review` still binds to `submissionVersion`, and committed keyed retries return their original snapshot after later work, holds or stop. Distinct-key stale submissions/reviews fail; awards remain one-time. The simple UI uses **Done**, while written retains the report-and-review form. Stable mission DOM preserves genuinely unsaved reports across focus changes.
+
+`POST /api/sessions/:id/reflection` accepts `{ appreciation?: string, repeat?: string }`, trims both (default `""`), max **1000 each**, at least one nonempty; invalid input is 400. Returns `{ ok: true }`. Under the existing authenticated pair/session row lock it upserts only `Session.reflections[authenticatedUser.id]`; supplied identity/map fields are ignored. Both users see the optional map in session/state responses. No migration or retry UUID: same-value retries do not duplicate entries or notices. Changed values replace the own entry and add only generic reflection history/inbox metadata.
+
+Reflection is optional before approval, during either/both pauses or agreement review, and after permanent stop/expiry. It does not advance/reset the clock or trigger scheduled delivery, alter approvals/pauses/status/missions/points, or resume gameplay. Ordinary authorized reads still perform existing clock advancement. The bilingual closing section remains editable after ending and appears before the new-session form. Appreciation is never compulsory or tied to points. Partner refreshes preserve unsaved own reflection fields. New sessions do not inherit reflections; startup reset clears these fields with all other session data.
+
+### Cycle 5 practical polish
+
+The active invitation comes before optional check-in editing and reflection in reading/keyboard order. Reflection follows session content rather than pushing the invitation down the page; saved answers identify **Appreciation** and **Next time** separately. Explicit textarea labels retain clear accessible names after typing. After stop/expiry, next-step guidance offers **Reflect on this session** and **Start another session** buttons that focus the actual forms. A new session still requires fresh independent approvals; neither navigation action resumes play.
+
+The browser suite checks genuinely unsaved reflection edits in **both languages** during changed partner reflections, with an independent API read proving own saved values stay unchanged. It also verifies saved reflection restoration when selecting an archive and blank fields on returning to the new session. Existing unsaved written-report retention across current/other/current invitation focus remains covered. At **320/390/768px**, Hebrew RTL and English LTR checks include closing reflection/new-session layouts, check-in controls, and keyboard-activated end-state focus actions. Unsaved reflection edits are not persisted across reload or session changes; save before leaving a session.
 
 ## Verification
 
 ```powershell
 npm.cmd test                 # library + isolated real PostgreSQL app integration
+npx.cmd tsx tests/experience.ts # focused cycles 1–4 real PostgreSQL coverage
+npx.cmd tsx tests/guidance.ts  # pure role/current-invitation derivation
 npm.cmd run build            # TypeScript check + Vite production bundle
 npm.cmd run test:browser     # Chromium, accounts, mobile, worker upgrade, stalled-request safety, legacy CSP
 npm.cmd run test:production  # after build: actual production entry/assets/cookie/CSP smoke
 ```
 
-The tests use independent disposable PostgreSQL clusters/ports **55434–55437**, never the development cluster. Browser testing loads the installed Playwright package (not its bundled Node executable); override `PLAYWRIGHT_MODULE` with its absolute package directory on another machine. Chromium must be installed. The legacy demo uses an external script and delegated mission handlers under the same strict script CSP as the remote app. See [QA-REVIEW.md](QA-REVIEW.md) for exact executed evidence and limitations.
+The tests use independent disposable PostgreSQL clusters/ports **55434–55440**, never the development cluster. `tests/experience.ts` uses port **55440** and an ephemeral HTTP port, and is included in `npm.cmd test`; its intentional database constraint failure logs `API failure 23514` while verifying replacement rollback and retry. Browser coverage includes adjustment, secret replacement/fresh acknowledgement, chat before approval and chat with both pauses active. Browser testing loads the installed Playwright package (not its bundled Node executable); override `PLAYWRIGHT_MODULE` with its absolute package directory on another machine. Chromium must be installed. The legacy demo uses an external script and delegated mission handlers under the same strict script CSP as the remote app. See the top of [QA-REVIEW.md](QA-REVIEW.md) for fresh cycle5 evidence and limitations (older entries are historical), and the [shared-experience progress ledger](docs/superpowers/plans/2026-11-09-shared-experience-progress.md) for cycle results.
 
 ## Hosting and operational requirements
 

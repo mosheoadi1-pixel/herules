@@ -32,6 +32,25 @@ try{
    console.log('PASS address aliases: nonconfigured 127.0.0.1 guest entry and cookie reload without Origin rejection');
   const contexts=[aliasContext,await browser.newContext(),await browser.newContext()];
   const w=aliasPage,h=await contexts[1].newPage(),x=await contexts[2].newPage();
+  async function heldOwnSave(kind:'checkin'|'reflection',controls:any[],values:string[],buttonName:string){
+    const pattern=`**/api/sessions/*/${kind}`;
+    let release!:()=>void,committed!:()=>void;
+    const gate=new Promise<void>(r=>release=r),saved=new Promise<void>(r=>committed=r);
+    const handler=async(route:any)=>{const response=await route.fetch();assert.equal(response.status(),200);committed();await gate;await route.fulfill({response}).catch(()=>{});};
+    await w.route(pattern,handler);
+    try{
+      await w.getByRole('button',{name:buttonName,exact:true}).click();await saved;
+      for(const control of controls)assert.equal(await control.isDisabled(),true,`${kind}: edits blocked while own save response is held`);
+      assert.equal(await w.getByRole('button',{name:/^(Pause my play|Release my pause)$/}).isEnabled(),true);
+      assert.equal(await w.getByRole('button',{name:'Stop permanently',exact:true}).isEnabled(),true);
+      release();
+      await w.getByRole('button',{name:buttonName,exact:true}).waitFor();
+      await w.waitForFunction((name:string)=>[...document.querySelectorAll('button')].some(b=>b.textContent===name&&!b.disabled),buttonName);
+      for(let i=0;i<controls.length;i++){assert.equal(await controls[i].isEnabled(),true);assert.equal(await controls[i].inputValue(),values[i]);}
+      const stored=await w.evaluate(async(kind:string)=>{const data=await (await fetch('/api/state')).json();return data.sessions[0][kind==='checkin'?'checkIns':'reflections'][data.user.id];},kind);
+      assert.deepEqual(kind==='checkin'?[String(stored.minutes),stored.energy,stored.mood]:[stored.appreciation,stored.repeat],values);
+    }finally{release();await w.unroute(pattern,handler);}
+  }
  const errors:string[]=[];
  for(const p of [w,h,x])p.on('pageerror',(e:Error)=>errors.push(e.message));
   async function guestForm(page:any,role:string){
@@ -55,32 +74,206 @@ try{
   console.log('Browser checkpoint: two identities, automatic shared game, repeated role entry, no invitation UI, reload retains identity');
  await w.getByRole('heading',{name:'New session',exact:true}).waitFor();
  await w.getByLabel('Exact terms and boundaries for mutual review',{exact:true}).fill('Only optional tea and kind notes. No penalties for boundaries.');
- await w.getByRole('button',{name:'Create session for review',exact:true}).click();
+   await w.getByRole('button',{name:'Create session for review',exact:true}).click();
+   await w.getByLabel('Available minutes',{exact:true}).fill('25');
+   await w.getByLabel('Energy').selectOption('low');
+   await w.getByLabel('Mood').selectOption('quiet');
+   await w.getByRole('button',{name:'Save my check-in',exact:true}).click();
+   await h.getByText('25 minutes · Energy: Low · Mood: Quiet',{exact:false}).waitFor();
+   assert.equal(await h.getByLabel('Available minutes',{exact:true}).inputValue(),'15');
+   await h.getByLabel('Available minutes',{exact:true}).fill('40');
+   await h.getByRole('button',{name:'Save my check-in',exact:true}).click();
+   await w.getByText('40 minutes · Energy: Medium · Mood: Connection',{exact:false}).waitFor();
+    assert.equal(await w.getByLabel('Available minutes',{exact:true}).inputValue(),'25');
+    // A partner refresh must preserve values that were NEVER saved, not merely reload saved values.
+    await w.getByLabel('Available minutes',{exact:true}).fill('73');
+    await w.getByLabel('Energy').selectOption('high');
+    await w.getByLabel('Mood').selectOption('playful');
+    await h.getByLabel('Available minutes',{exact:true}).fill('41');
+    await h.getByRole('button',{name:'Save my check-in',exact:true}).click();
+    await w.getByText('41 minutes · Energy: Medium · Mood: Connection',{exact:false}).waitFor();
+    assert.equal(await w.getByLabel('Available minutes',{exact:true}).inputValue(),'73');
+    assert.equal(await w.getByLabel('Energy').inputValue(),'high');
+    assert.equal(await w.getByLabel('Mood').inputValue(),'playful');
+    const savedCheckIn=await w.evaluate(async()=>{const data=await (await fetch('/api/state')).json();return data.sessions[0].checkIns[data.user.id];});
+    assert.deepEqual(savedCheckIn,{minutes:25,energy:'low',mood:'quiet'});
+    await w.getByLabel('Available minutes',{exact:true}).fill('25');await w.getByLabel('Energy').selectOption('low');await w.getByLabel('Mood').selectOption('quiet');
+    await h.getByLabel('Available minutes',{exact:true}).fill('40');await h.getByRole('button',{name:'Save my check-in',exact:true}).click();
+     console.log('PASS cycle 2 gap: partner refresh preserves genuinely unsaved minutes/energy/mood; persisted own entry unchanged');
+     await w.getByLabel('Available minutes',{exact:true}).fill('26');
+     await heldOwnSave('checkin',[w.getByLabel('Available minutes',{exact:true}),w.getByLabel('Energy'),w.getByLabel('Mood')],['26','low','quiet'],'Save my check-in');
+     await w.getByLabel('Available minutes',{exact:true}).fill('25');await w.getByRole('button',{name:'Save my check-in',exact:true}).click();
+     console.log('PASS own check-in save: held committed response locks all fields, safety stays enabled, refresh re-enables fields with submitted/API values');
+    await w.getByRole('region',{name:'Next step',exact:true}).getByRole('button',{name:'Review agreement',exact:true}).click();
+    await w.getByRole('heading',{name:'Explicit agreement · revision 1',exact:true}).waitFor();
+    assert.equal(await w.evaluate(()=>document.activeElement?.tagName),'H2');
+    assert.equal(await w.locator('.hero h1').isVisible(),false,'Repeated hero is collapsed after entry');
+  await w.getByRole('navigation').getByRole('button',{name:'Messages',exact:true}).click();
+  await w.getByLabel('New message',{exact:true}).fill('We can discuss boundaries before approval.');await w.getByRole('button',{name:'Send message',exact:true}).click();
+  await w.getByText('We can discuss boundaries before approval.',{exact:true}).waitFor();
  await w.getByRole('navigation').getByRole('button',{name:'Agreement',exact:true}).click();
  w.on('dialog',(d:any)=>d.accept());h.on('dialog',(d:any)=>d.accept());
  await w.getByRole('button',{name:'I have read and agree',exact:true}).click();
  await h.getByRole('navigation').getByRole('button',{name:'Agreement',exact:true}).click();await h.getByRole('button',{name:'I have read and agree',exact:true}).click();
- await w.getByRole('navigation').getByRole('button',{name:'Missions',exact:true}).click();
+  await w.getByRole('navigation').getByRole('button',{name:'Missions',exact:true}).click();
+  await w.getByText('New mission to review',{exact:true}).click();
  await w.getByLabel('Title',{exact:true}).fill('Private tea invitation');await w.getByLabel('Mission text and boundaries',{exact:true}).fill('Would you like to prepare optional mint tea?');
- await w.getByLabel('Secret until explicit sending or scheduled delivery',{exact:true}).check();
+  await w.getByLabel('Secret until explicit sending or scheduled delivery',{exact:true}).check();
+  await w.getByLabel('Completion style').selectOption('written');
  await w.getByRole('button',{name:'Save draft only',exact:true}).click();
- await w.getByRole('heading',{name:'Private tea invitation',exact:true}).waitFor();
+  await w.getByRole('heading',{name:'Private tea invitation',exact:true}).waitFor();
+  assert.equal(await w.getByLabel('Title',{exact:true}).isVisible(),false,'Composer collapses after saving');
  await h.getByRole('navigation').getByRole('button',{name:'Missions',exact:true}).click();
  assert.equal(await h.getByText('Would you like to prepare optional mint tea?',{exact:true}).count(),0);
   assert.equal((await x.request.get('http://localhost:4180/api/state')).status(),401);
  await w.getByRole('button',{name:'Send now',exact:true}).click();
- await h.getByRole('button',{name:'Read, acknowledge and choose to participate',exact:true}).waitFor();
+  await h.getByRole('button',{name:'Read, acknowledge and choose to participate',exact:true}).waitFor();
+  await w.getByRole('region',{name:'Next step',exact:true}).getByText('Waiting for your husband to acknowledge',{exact:false}).waitFor();
+   assert.equal(await h.getByRole('region',{name:'Current invitation',exact:true}).count(),1);
+   assert.ok(await h.getByRole('region',{name:'Current invitation',exact:true}).evaluate((el:HTMLElement)=>!!(el.compareDocumentPosition(document.querySelector('fieldset')!)&Node.DOCUMENT_POSITION_FOLLOWING)),'Current invitation precedes check-in editing');
+   assert.ok(await h.getByRole('region',{name:'Current invitation',exact:true}).evaluate((el:HTMLElement)=>!!(el.compareDocumentPosition(document.querySelector('.reflection')!)&Node.DOCUMENT_POSITION_FOLLOWING)),'Current invitation precedes optional reflection');
+  assert.equal(await h.getByRole('button',{name:'Read, acknowledge and choose to participate',exact:true}).count(),1);
  assert.equal(await h.getByLabel('Written completion',{exact:true}).count(),0);
- await h.getByRole('button',{name:'Read, acknowledge and choose to participate',exact:true}).click();
- await h.getByLabel('Written completion',{exact:true}).fill('Tea offered freely.');await h.getByRole('button',{name:'Submit completion',exact:true}).click();
+   await h.getByRole('button',{name:'Read, acknowledge and choose to participate',exact:true}).click();
+   await h.getByRole('button',{name:'Pause my play',exact:true}).click();
+   await h.getByRole('region',{name:'Next step',exact:true}).getByText('Your pause is active.',{exact:false}).waitFor();
+   await w.getByRole('region',{name:'Next step',exact:true}).getByText('Waiting on your partner’s pause.',{exact:false}).waitFor();
+   assert.equal(await h.getByRole('button',{name:'Submit completion',exact:true}).isDisabled(),true);
+   await h.getByRole('button',{name:'Release my pause',exact:true}).click();
+  await h.getByText('Request a softer version or adjustment',{exact:true}).click();
+  await h.getByLabel('Request type').selectOption('softer');
+  await h.getByLabel('Note (optional)',{exact:true}).fill('A smaller invitation please.');
+  await h.getByRole('button',{name:'Request adjustment',exact:true}).click();
+  await h.getByText('Awaiting adjustment',{exact:true}).waitFor();
+  assert.equal(await h.getByLabel('Written completion',{exact:true}).count(),0);
+  await w.getByText('Create replacement draft',{exact:true}).click();
+  await w.getByLabel('Replacement title',{exact:true}).fill('A smaller tea invitation');
+   await w.getByLabel('Replacement text and boundaries').fill('Would you like to choose a tea together?');
+   await w.getByRole('region',{name:'Current invitation',exact:true}).getByLabel('Completion style').selectOption('written');
+  await w.getByRole('button',{name:'Save replacement draft only',exact:true}).click();
+  await w.getByRole('heading',{name:'A smaller tea invitation',exact:true}).waitFor();
+   await h.locator('summary').filter({hasText:'Private tea invitation'}).click();
+   await h.getByText('A replacement draft was created and this invitation was cancelled.',{exact:true}).waitFor();
+  assert.equal(await h.getByRole('heading',{name:'A smaller tea invitation',exact:true}).count(),0);
+  await w.getByRole('button',{name:'Send now',exact:true}).click();
+  await h.getByRole('heading',{name:'A smaller tea invitation',exact:true}).waitFor();
+  assert.equal(await h.getByLabel('Written completion',{exact:true}).count(),0);
+  await h.getByRole('button',{name:'Read, acknowledge and choose to participate',exact:true}).click();
+   console.log('PASS cycle 1 browser: chat before agreement, adjustment/note, linked secret replacement, immutable original and fresh acknowledgement');
+   // Switching the focused card must not remount A's uncontrolled, genuinely unsaved report.
+   const unsavedReport='Still writing this report — not submitted.';
+   await h.getByRole('region',{name:'Current invitation',exact:true}).getByLabel('Written completion').fill(unsavedReport);
+   await w.getByText('New mission to review',{exact:true}).click();
+   await w.getByLabel('Title',{exact:true}).fill('Focus switch invitation B');
+   await w.getByLabel('Mission text and boundaries').fill('An optional second invitation for later.');
+   await w.getByRole('button',{name:'Save draft only',exact:true}).click();
+   await w.getByRole('region',{name:'Current invitation',exact:true}).getByRole('heading',{name:'Focus switch invitation B',exact:true}).waitFor();
+   await w.getByRole('region',{name:'Current invitation',exact:true}).getByRole('button',{name:'Send now',exact:true}).click();
+   await h.getByRole('region',{name:'Current invitation',exact:true}).getByRole('heading',{name:'Focus switch invitation B',exact:true}).waitFor();
+   assert.equal(await h.getByLabel('Written completion').isVisible(),false,'A moves into a collapsed other card');
+   await h.locator('.other-invitation > summary').filter({hasText:'A smaller tea invitation'}).click();
+   assert.equal(await h.getByLabel('Written completion').inputValue(),unsavedReport,'A retains its unsaved report when focus moves to B');
+   const unsubmitted=await h.evaluate(async()=>{const data=await (await fetch('/api/state')).json();return data.sessions[0].missions.find((m:any)=>m.title==='A smaller tea invitation');});
+   assert.equal(unsubmitted.status,'acknowledged');assert.equal(unsubmitted.completion,undefined);assert.equal(unsubmitted.submissionVersion,undefined);
+   await h.getByRole('region',{name:'Current invitation',exact:true}).getByRole('button',{name:'Decline without penalty',exact:true}).click();
+   await h.getByRole('region',{name:'Current invitation',exact:true}).getByRole('heading',{name:'A smaller tea invitation',exact:true}).waitFor();
+   assert.equal(await h.getByLabel('Written completion').inputValue(),unsavedReport,'A also retains its report when becoming current again');
+   console.log('PASS cycle 3 review regression: unsaved written report survives current → archive → current; API remains acknowledged without submission');
+  await h.getByLabel('Written completion',{exact:true}).fill('Tea offered freely.');await h.getByRole('button',{name:'Submit completion',exact:true}).click();
  await w.getByRole('button',{name:'Approve and award once',exact:true}).click();
- await w.getByText('5 points',{exact:false}).first().waitFor();
+   await w.getByText('5 points',{exact:false}).first().waitFor();
+   await w.getByText('New mission to review',{exact:true}).click();
+   assert.equal(await w.getByLabel('Completion style').inputValue(),'simple');
+   await w.getByLabel('Title',{exact:true}).fill('Simple closing invitation');
+   await w.getByLabel('Mission text and boundaries').fill('An optional quiet moment');
+   await w.getByLabel('Points on approved completion',{exact:true}).fill('0');
+   await w.getByRole('button',{name:'Save draft only',exact:true}).click();
+   await w.getByRole('region',{name:'Current invitation',exact:true}).getByRole('button',{name:'Send now',exact:true}).click();
+   await h.getByRole('button',{name:'Read, acknowledge and choose to participate',exact:true}).click();
+   assert.equal(await h.getByLabel('Written completion',{exact:true}).count(),0);
+   await h.getByRole('button',{name:'Done',exact:true}).click();
+   await w.getByRole('button',{name:'Approve and award once',exact:true}).click();
+   console.log('PASS cycle 4 browser: written choice and simple Done both retain explicit acknowledgement and wife review');
+  // The selected order changes focus only; draft editing and other/archive cards stay reachable.
+  const makeDraft=async(title:string)=>{
+    await w.getByText('New mission to review',{exact:true}).click();
+    await w.getByLabel('Title',{exact:true}).fill(title);await w.getByLabel('Mission text and boundaries',{exact:true}).fill('An optional kind conversation');
+    await w.getByRole('button',{name:'Save draft only',exact:true}).click();
+    await w.waitForFunction(()=>!(document.querySelector('#mission-composer') as HTMLDetailsElement)?.open);
+  };
+  await makeDraft('Sequence first');await makeDraft('Sequence second');
+  const draftIds=await w.evaluate(async()=>{const data=await (await fetch('/api/state')).json();return data.sessions[0].missions.filter((m:any)=>m.title.startsWith('Sequence ')).map((m:any)=>m.id);});
+  await w.getByText('Optional invitation sequence',{exact:true}).click();
+  await w.getByLabel('Invitation 1').selectOption(draftIds[1]);await w.getByLabel('Invitation 2').selectOption(draftIds[0]);
+  await w.getByRole('button',{name:'Save invitation sequence',exact:true}).click();
+  await w.getByRole('region',{name:'Current invitation',exact:true}).getByRole('heading',{name:'Sequence second',exact:true}).waitFor();
+  assert.equal(await w.getByRole('region',{name:'Current invitation',exact:true}).count(),1);
+  let ordered=await w.evaluate(async()=> (await (await fetch('/api/state')).json()).sessions[0]);
+  assert.deepEqual(ordered.sequence,[draftIds[1],draftIds[0]]);
+  assert.ok(ordered.missions.filter((m:any)=>draftIds.includes(m.id)).every((m:any)=>m.status==='draft'&&!m.deliveredAt&&!m.acknowledgedAt));
+  for(const width of [320,390,768]){
+    await w.setViewportSize({width,height:844});
+    for(const language of ['he','en']){
+      if(await w.locator('html').getAttribute('lang')!==language)await w.getByRole('button',{name:language==='he'?'עברית':'English',exact:true}).click();
+      assert.ok(await w.evaluate(()=>document.documentElement.scrollWidth<=innerWidth),`guided overflow ${width} ${language}`);
+      assert.equal(await w.locator('.current-invitation').count(),1);
+    }
+  }
+  await w.getByRole('button',{name:'Edit draft',exact:true}).click();
+  assert.equal(await w.getByLabel('Title',{exact:true}).inputValue(),'Sequence second');
+  assert.equal(await w.getByLabel('Title',{exact:true}).evaluate((el:HTMLElement)=>el===document.activeElement),true);
+  await w.getByLabel('Mission text and boundaries').fill('Edited optional conversation');await w.getByRole('button',{name:'Save draft only',exact:true}).click();
+  await w.getByRole('region',{name:'Current invitation',exact:true}).getByText('Edited optional conversation',{exact:true}).waitFor();
+  assert.equal(await w.getByLabel('Title',{exact:true}).isVisible(),false);
+  await w.getByRole('button',{name:'Send now',exact:true}).click();
+  await h.getByRole('region',{name:'Current invitation',exact:true}).getByRole('heading',{name:'Sequence second',exact:true}).waitFor();
+  assert.equal(await h.getByRole('button',{name:'Read, acknowledge and choose to participate',exact:true}).count(),1);
+  assert.equal(await h.getByLabel('Written completion',{exact:true}).count(),0);
+  await w.getByRole('button',{name:'Cancel mission',exact:true}).click();
+  await w.getByRole('region',{name:'Current invitation',exact:true}).getByRole('heading',{name:'Sequence first',exact:true}).waitFor();
+  ordered=await w.evaluate(async()=> (await (await fetch('/api/state')).json()).sessions[0]);
+  assert.equal(ordered.missions.find((m:any)=>m.id===draftIds[0]).status,'draft','Moving focus never delivers the next mission');
+  await w.getByRole('button',{name:'Cancel mission',exact:true}).click();
+  await w.locator('summary').filter({hasText:'A smaller tea invitation'}).click();
+  await w.getByRole('heading',{name:'A smaller tea invitation',exact:true}).waitFor();
+  assert.equal(await w.getByText('Tea offered freely.',{exact:true}).isVisible(),true,'Completed archive stays reachable');
+  await w.locator('summary').filter({hasText:'A smaller tea invitation'}).click();
+  console.log('PASS cycle 3 browser: direct agreement navigation/focus, collapsed hero/composer, one current invitation, ordered manual sequence, working edit/focus, no auto delivery/acknowledgement, reachable archive');
  await w.getByRole('navigation').getByRole('button',{name:'Messages',exact:true}).click();
  await contexts[1].route('**/api/events',async(route:any)=>route.abort());await h.reload();
  await w.getByLabel('New message',{exact:true}).fill('Thank you for the lovely tea.');await w.getByRole('button',{name:'Send message',exact:true}).click();
  await h.getByRole('navigation').getByRole('button',{name:'Messages',exact:true}).click();await h.getByText('Thank you for the lovely tea.',{exact:true}).waitFor();
  await h.reload();await h.getByRole('navigation').getByRole('button',{name:'Messages',exact:true}).click();await h.getByText('Thank you for the lovely tea.',{exact:true}).waitFor();
- await w.getByRole('button',{name:'Pause my play',exact:true}).click();await h.getByRole('button',{name:'Pause my play',exact:true}).click();
+  await w.getByRole('button',{name:'Pause my play',exact:true}).click();await h.getByRole('button',{name:'Pause my play',exact:true}).click();
+  await w.getByLabel('New message',{exact:true}).fill('Chat does not release either pause.');await w.getByRole('button',{name:'Send message',exact:true}).click();
+  await h.getByText('Chat does not release either pause.',{exact:true}).waitFor();
+   await w.getByText('2 active pauses',{exact:false}).waitFor();
+   await w.getByLabel('Appreciation (optional)',{exact:true}).fill('Thank you for choosing together.');
+   await w.getByRole('button',{name:'Save my reflection',exact:true}).click();
+    await h.getByRole('region',{name:'Optional closing reflection',exact:true}).getByText('Thank you for choosing together.',{exact:false}).waitFor();
+    await w.getByLabel('Repeat next time (optional)',{exact:true}).fill('Choose tea together again.');
+    await heldOwnSave('reflection',[w.getByLabel('Appreciation (optional)'),w.getByLabel('Repeat next time (optional)')],['Thank you for choosing together.','Choose tea together again.'],'Save my reflection');
+    console.log('PASS own reflection save: held committed response locks both fields, safety stays enabled, refresh re-enables fields with submitted/API values');
+    await w.getByRole('region',{name:'Optional closing reflection',exact:true}).locator('p').filter({hasText:'Choose tea together again.'}).waitFor();
+    for(const language of ['he','en']){
+      if(await w.locator('html').getAttribute('lang')!==language)await w.getByRole('button',{name:language==='he'?'עברית':'English',exact:true}).click();
+      const appreciation=w.getByLabel(language==='he'?'הערכה (לא חובה)':'Appreciation (optional)');
+      const repeat=w.getByLabel(language==='he'?'מה נרצה לחזור עליו (לא חובה)':'Repeat next time (optional)');
+      await appreciation.fill(`Unsaved appreciation ${language}`);await repeat.fill(`Unsaved repeat ${language}`);
+      await h.getByLabel('Appreciation (optional)').fill(`Partner reflection ${language}`);
+      await h.getByRole('button',{name:'Save my reflection',exact:true}).click();
+      await w.getByRole('region',{name:language==='he'?'שיתוף סיום אופציונלי':'Optional closing reflection',exact:true}).getByText(`Partner reflection ${language}`,{exact:false}).waitFor();
+      assert.equal(await appreciation.inputValue(),`Unsaved appreciation ${language}`);assert.equal(await repeat.inputValue(),`Unsaved repeat ${language}`);
+      const persisted=await w.evaluate(async()=>{const data=await (await fetch('/api/state')).json();return data.sessions[0].reflections[data.user.id];});
+      assert.deepEqual(persisted,{appreciation:'Thank you for choosing together.',repeat:'Choose tea together again.'});
+    }
+    await w.getByLabel('Appreciation (optional)').fill('Thank you for choosing together.');
+    await w.getByLabel('Repeat next time (optional)').fill('Choose tea together again.');
+    console.log('PASS reflection retention: genuinely unsaved own fields survive changed partner reflections in Hebrew and English; API retains saved own values');
+   await h.getByLabel('Energy').selectOption('high');
+   await h.getByRole('button',{name:'Save my check-in',exact:true}).click();
+   await w.getByText('40 minutes · Energy: High · Mood: Connection',{exact:false}).waitFor();
+   await w.getByText('2 active pauses',{exact:false}).waitFor();
  await w.getByRole('button',{name:'Release my pause',exact:true}).click();
  await w.getByText('1 active pauses',{exact:false}).waitFor();
  await h.getByRole('button',{name:'Release my pause',exact:true}).click();
@@ -143,7 +336,7 @@ try{
  console.log('PASS timeout: committed response stalled, actual 15-second timeout releases ordinary controls; retry reuses UUID and creates no duplicate');
  async function safetyWhilePending(kind:'mission'|'message'){
   await w.getByRole('navigation').getByRole('button',{name:kind==='mission'?'Missions':'Messages',exact:true}).click();
-  if(kind==='mission'){await w.getByLabel('Title',{exact:true}).fill('Held draft must not arrive');await w.getByLabel('Mission text and boundaries').fill('Held ordinary draft');}
+   if(kind==='mission'){if(!await w.getByLabel('Title',{exact:true}).isVisible())await w.getByText('New mission to review',{exact:true}).click();await w.getByLabel('Title',{exact:true}).fill('Held draft must not arrive');await w.getByLabel('Mission text and boundaries').fill('Held ordinary draft');}
   else await w.getByLabel('New message',{exact:true}).fill('Held message must not arrive');
   let release!:()=>void,entered!:()=>void;
   const gate=new Promise<void>(r=>release=r),holding=new Promise<void>(r=>entered=r);
@@ -156,13 +349,52 @@ try{
    const [pause]=await Promise.all([w.waitForResponse((r:any)=>r.url().endsWith('/pause')&&r.request().method()==='POST',{timeout:5000}),w.getByRole('button',{name:'Pause my play',exact:true}).click({timeout:2000})]);assert.equal(pause.status(),200);
    const [stop]=await Promise.all([w.waitForResponse((r:any)=>r.url().endsWith('/stop')&&r.request().method()==='POST',{timeout:5000}),w.getByRole('button',{name:'Stop permanently',exact:true}).click({timeout:2000})]);assert.equal(stop.status(),200);
    const late=w.waitForResponse((r:any)=>r.url().endsWith('/'+kind)&&r.request().method()==='POST');release();assert.equal((await late).status(),409);
-   await w.getByRole('heading',{name:'Stopped permanently',exact:true}).waitFor();
+     await w.getByRole('heading',{name:'Stopped permanently',exact:true}).waitFor();
+     await w.getByRole('region',{name:'Next step',exact:true}).getByRole('button',{name:'Reflect on this session',exact:true}).click();
+     assert.equal(await w.getByLabel('Appreciation (optional)').evaluate((el:HTMLElement)=>el===document.activeElement),true);
+    const closing=w.getByRole('region',{name:'Optional closing reflection',exact:true});
+     await closing.getByLabel('Repeat next time (optional)').fill('Another quiet conversation.');
+    await closing.getByRole('button',{name:'Save my reflection',exact:true}).click();
+     await closing.getByText('Another quiet conversation.',{exact:false}).waitFor();
+     for(const width of [320,390,768]){
+       await w.setViewportSize({width,height:844});
+       for(const language of ['he','en']){
+         if(await w.locator('html').getAttribute('lang')!==language)await w.getByRole('button',{name:language==='he'?'עברית':'English',exact:true}).click();
+         const next=w.getByRole('region',{name:language==='he'?'הצעד הבא':'Next step',exact:true});
+         await next.getByRole('button',{name:language==='he'?'לשיתוף על המפגש':'Reflect on this session',exact:true}).focus();await w.keyboard.press('Enter');
+         assert.equal(await w.locator('#reflection-appreciation').evaluate((el:HTMLElement)=>el===document.activeElement),true);
+         await next.getByRole('button',{name:language==='he'?'להתחלת מפגש נוסף':'Start another session',exact:true}).focus();await w.keyboard.press('Enter');
+         assert.equal(await w.locator('#new-session-terms').evaluate((el:HTMLElement)=>el===document.activeElement),true);
+         assert.ok(await w.evaluate(()=>document.documentElement.scrollWidth<=innerWidth),`closing/new session overflow ${width} ${language}`);
+         for(const selector of ['.reflection textarea','.reflection button','.session-select select','fieldset select','fieldset input']){
+           for(const control of await w.locator(selector).all()){
+             const box=await control.boundingBox();assert.ok(box&&box.x>=0&&box.x+box.width<=width,`control outside viewport ${selector} ${width} ${language}`);
+           }
+         }
+       }
+     }
+    assert.ok(await closing.evaluate((el:HTMLElement)=>!!(el.compareDocumentPosition([...document.querySelectorAll('h2')].find(h=>h.textContent==='New session')!)&Node.DOCUMENT_POSITION_FOLLOWING)),'Closing reflection appears before the new-session form');
    const snapshot=await w.evaluate(async()=>{const r=await fetch('/api/state');return r.json();});
    assert.ok(!JSON.stringify(snapshot).includes('must not arrive'));
   }finally{release();await w.unroute(pattern,handler);}
  }
  await safetyWhilePending('mission');
- await w.getByLabel('Exact terms and boundaries for mutual review').fill('A second safety regression session');await w.getByRole('button',{name:'Create session for review',exact:true}).click();
+  await w.getByLabel('Exact terms and boundaries for mutual review').fill('A second safety regression session');await w.getByRole('button',{name:'Create session for review',exact:true}).click();
+  await w.getByRole('heading',{name:'Active',exact:true}).waitFor();
+  assert.equal(await w.getByLabel('Available minutes',{exact:true}).inputValue(),'15');
+  const checkInSessions=await w.evaluate(async()=> (await (await fetch('/api/state')).json()).sessions);
+  const oldCheckIn=checkInSessions.find((s:any)=>s.checkIns),newCheckIn=checkInSessions.find((s:any)=>s.status==='active');
+   await w.getByLabel('Selected session / archive').selectOption(oldCheckIn.id);
+   assert.equal(await w.getByLabel('Appreciation (optional)').inputValue(),'Thank you for choosing together.');
+   assert.equal(await w.getByLabel('Repeat next time (optional)').inputValue(),'Another quiet conversation.');
+  assert.equal(await w.getByLabel('Available minutes',{exact:true}).inputValue(),'25');
+  assert.equal(await w.getByRole('button',{name:'Save my check-in',exact:true}).isDisabled(),true);
+   await w.getByLabel('Selected session / archive').selectOption(newCheckIn.id);
+   assert.equal(await w.getByLabel('Appreciation (optional)',{exact:true}).inputValue(),'');
+   assert.equal(await w.getByLabel('Repeat next time (optional)',{exact:true}).inputValue(),'');
+   console.log('PASS cycle 5: saved reflection fields restore from archive, new session is blank; 320/390/768 RTL/LTR closing/check-in controls fit and keyboard end-state actions focus real forms');
+  assert.equal(await w.getByLabel('Available minutes',{exact:true}).inputValue(),'15');
+  console.log('PASS cycle 2 browser: independent forms/shared summaries, held update, own values retained, session defaults/archive selection and terminal disabled');
  await w.getByRole('navigation').getByRole('button',{name:'Agreement',exact:true}).click();await w.getByRole('button',{name:'I have read and agree',exact:true}).click();
  await h.reload();await h.getByRole('navigation').getByRole('button',{name:'Agreement',exact:true}).click();await h.getByRole('button',{name:'I have read and agree',exact:true}).click();
  await safetyWhilePending('message');

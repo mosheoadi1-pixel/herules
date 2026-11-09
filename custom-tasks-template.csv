@@ -1,4 +1,104 @@
 category,he,en,minutes,intensity,tags
+consequences,"עמידה בפינה עם הפנים לקיר, ידיים מאחורי הגב","Stand in the corner facing the wall, hands behind back",15,1,home|control
+consequences,החזקת פלאנק עד שהיא מאשרת להפסיק,Hold a plank until she permits you to stop,2,2,home|control
+consequences,ישיבת קיר (Wall sit) מבלי לזוז,Wall sit without moving,3,2,home|control
+consequences,כריעת ברך על הרצפה עם ראש מורכן,Kneel on the floor with head bowed,20,2,home|control
+consequences,לעמוד על קצות האצבעות במרכז החדר,Stand on tiptoes in the center of the room,5,2,home|control
+consequences,להחזיק ספרים כבדים בשתי ידיים מושטות קדימה,Hold heavy books with both arms extended forward,5,2,home|control
+consequences,100 שכיבות סמיכה (אפשר לפצל לסטים),100 push-ups (can be split into sets),15,2,home|control
+consequences,לשבת על הרצפה בתנוחת לוטוס מבלי להוציא הגה,Sit on the floor in lotus position without making a sound,30,1,home|control
+consequences,עמידה זקופה עם ספר על הראש מבלי שייפול,Stand straight with a book on your head without letting it fall,15,1,home|control
+consequences,לזחול על הברכיים מהסלון לחדר השינה הלוך ושוב,Crawl on knees from living room to bedroom back and forth,10,2,home|control
+consequences,מקלחת קרה לגמרי בלי מים חמים,Completely cold shower with no hot water,10,3,home|control
+consequences,"לישון הלילה על הרצפה, ללא מזרן","Sleep on the floor tonight, without a mattress",480,3,home|sleep
+consequences,ללכת בבית עם אטבי כביסה על הפטמות,Walk around the house with clothespins on nipples,15,3,home|touch
+consequences,כפיפות בטן בזמן שהיא יושבת עליך,Sit-ups while she sits on you,5,2,home|control
+consequences,קפיצות במקום (Jumping jacks) עד שתתעייף,Jumping jacks until you are exhausted,10,2,home|control
+consequences,לעמוד בתנוחת עץ (יוגה) מבלי לאבד שיווי משקל,Stand in tree pose (yoga) without losing balance,5,1,home|control
+consequences,לרדת לברכיים בכל פעם שהיא נכנסת לחדר,Drop to your knees whenever she enters the room,120,2,home|control
+consequences,לשאת אותה על הידיים ברחבי הבית,Carry her in your arms around the house,5,2,home|touch
+consequences,לא לעשות שום תנועה פתאומית - לזוז בהילוך איטי,No sudden movements - move in slow motion,30,1,home|control
+consequences,לשבת על כיסא כשידיים קשורות מאחור,Sit on a chair with hands tied behind back,45,2,home|control
+consequences,לנקות את הפאנלים בכל הבית,Clean the baseboards around the house,60,2,home|cleaning
+consequences,לעשות לה מסאז׳ כפות רגליים מושקע,Give her a dedicated foot massage,20,1,touch|care
+consequences,לקרצף את השירותים והמקלחת ביסודיות,Scrub the toilet and shower thoroughly,45,2,home|cleaning
+consequences,לגהץ את כל הבגדים שבערימה,Iron all the clothes in the pile,30,1,home|cleaning
+consequences,להכין ארוחת ערב ולהגיש לה בזמן שהיא נחה,Cook dinner and serve her while she rests,60,2,home|cooking
+consequences,לנקות את פנים הרכב שלה עד שיבריק,Clean the interior of her car until it shines,60,2,outdoors|cleaning
+consequences,להכין לה את הקפה המושלם ולהגיש בכריעת ברך,Make her the perfect coffee and serve it kneeling,5,1,home|cooking
+consequences,לסדר את ארון הבגדים שלה בדיוק לפי הצבעים,Organize her wardrobe exactly by color,60,2,home|cleaning
+consequences,לנקות את חלונות הבית מבפנים ומבחוץ,Clean the windows of the house inside and out,90,2,home|cleaning
+consequences,לשטוף כלים ביד במקום להשתמש במדיח,Wash dishes by hand instead of using the dishwasher,30,1,home|cleaning
+consequences,לעשות לה טיפול מניקור/פדיקור בסיסי,Give her a basic manicure/pedicure treatment,30,1,touch|care
+consequences,לקרצף את התנור והכיריים משומנים,Scrub the oven and stove from grease,45,2,home|cleaning
+consequences,"להיות ""שולחן אנושי"" לצלחת או לכוס שלה","Act as a ""human table"" for her plate or cup",15,2,home|control
+consequences,לצחצח את הנעליים שלה עד שיבריקו,Polish her shoes until they shine,20,1,home|cleaning
+consequences,"לעשות קניות בסופר לבד, לפי רשימה נוקשה","Do the grocery shopping alone, following a strict list",60,1,outdoors|home
+consequences,להחזיק עבורה את המטריה / התיק בכל יציאה,Hold the umbrella / bag for her on every outing,120,1,outdoors|care
+consequences,לקפל את כל הכביסה מבלי להתלונן,Fold all the laundry without complaining,30,1,home|cleaning
+consequences,לסדר את הגינה או המרפסת,Tidy up the garden or balcony,60,2,outdoors|cleaning
+consequences,לעשות לה עיסוי גב עמוק עם שמן,Give her a deep back massage with oil,30,1,touch|care
+consequences,"לשרת אותה בארוחה באופן מלא - למזוג, לחתוך, לפנות","Serve her a meal fully - pour, cut, clear",45,1,home|cooking
+consequences,החרמת הטלפון הנייד לשעתיים,Confiscation of mobile phone for two hours,120,2,screen|control
+consequences,משחק השתיקה: אסור לדבר אלא אם נשאלת ישירות,Silence game: Do not speak unless spoken to directly,60,2,home|control
+consequences,כיסוי עיניים למשך שעה שלמה בבית,Blindfold for a full hour at home,60,3,home|control
+consequences,איסור מוחלט על אורגזמה (Denial) למשך 24 שעות,Absolute orgasm denial for 24 hours,1440,3,teasing|control
+consequences,ישיבה בחדר חשוך ללא מסכים או תעסוקה,Sit in a dark room with no screens or activity,30,2,home|control
+consequences,איסור צפייה בטלוויזיה להערב,No watching TV for tonight,180,1,screen|control
+consequences,אזיקים או קשירת ידיים מאחורי הגב,Handcuffs or hands tied behind the back,60,3,home|control
+consequences,צום ממתקים וסוכר למשך 48 שעות,Fast from sweets and sugar for 48 hours,2880,2,food|control
+consequences,איסור ישיבה על ספות או כורסאות - רק רצפה,No sitting on sofas or armchairs - floor only,240,2,home|control
+consequences,לשמוע פודקאסט משעמם שהיא בוחרת מבלי להירדם,Listen to a boring podcast she chooses without falling asleep,45,1,learning|control
+consequences,"לאכול ארוחה ללא סכו""ם (רק ידיים)",Eat a meal without cutlery (hands only),30,2,food|control
+consequences,ללבוש אוזניות אוטמות רעשים ולא לשמוע כלום,Wear noise-canceling headphones and hear nothing,45,2,home|control
+consequences,להישאר ער שעה אחת יותר מאוחר ממנה כדי לשמור,Stay awake one hour later than her to keep watch,60,2,home|sleep
+consequences,החרמת משחקי וידאו / פלייסטיישן לשבוע,Video game / PlayStation ban for a week,10080,2,game|screen
+consequences,ללכת לישון בשעה מוקדמת שהיא קובעת (כמו ילד),Go to bed at an early time she sets (like a child),480,1,home|sleep
+consequences,"כל תשובה חיבת להתחיל בתואר כבוד (""כן, מלכתי"")","Every answer must begin with a title (""Yes, my Queen"")",120,2,conversation|roleplay
+consequences,איסור מגע פיזי מיוזמתך (כולל חיבוק),No physical touch initiated by you (including hugs),240,2,touch|control
+consequences,הגבלת תנועה לחדר אחד בלבד בבית,Movement restricted to only one room in the house,120,2,home|control
+consequences,שתיית 3 כוסות מים ברצף עכשיו,Drink 3 glasses of water consecutively right now,5,1,food|control
+consequences,החרמת בגדים - להסתובב ערום בבית למשך שעתיים,Clothes confiscation - walk around naked at home for two hours,120,3,home|control
+consequences,"כתיבת 50 פעם: ""אני אלמד לציית לאשתי""","Write 50 times: ""I will learn to obey my wife""",20,2,writing|control
+consequences,לשיר שיר פופ לבחירתה ברצינות תהומית,Sing a pop song of her choice with complete seriousness,5,1,music|performance
+consequences,"ללבוש פריט לבוש שלה (חולצה, צעיף) לחצי שעה","Wear an item of her clothing (shirt, scarf) for half an hour",30,2,home|control
+consequences,ריקוד חסר חן במרכז הסלון לבקשתה,A graceless dance in the center of the living room at her request,5,1,music|performance
+consequences,למסור את הנייד ולהרשות לה לקרוא כל הודעה שתרצה,Hand over the phone and let her read any message,15,3,screen|secret
+consequences,לאכול רבע בצל חי מבלי לירוק אותו,Eat a quarter of a raw onion without spitting it out,5,3,food|control
+consequences,לכתוב לה מכתב התנצלות פואטי ומרגש,Write her a poetic and moving apology letter,30,2,writing|creative
+consequences,לפרסם סטטוס מביך/שובב בוואטסאפ ל-10 דקות,Post an embarrassing/naughty WhatsApp status for 10 mins,10,3,screen|performance
+consequences,לעשות פרצופים מצחיקים עד שהיא צוחקת,Make funny faces until she laughs,5,1,conversation|home
+consequences,ללכת בבית בהליכת ברווז 5 פעמים הלוך ושוב,Duck walk back and forth 5 times in the house,5,2,home|performance
+consequences,לקרוא בקול רם מאמר משעמם באינטונציה דרמטית,Read a boring article out loud with dramatic intonation,10,1,learning|performance
+consequences,להחמיא לה ברצף במשך 2 דקות בלי לחזור על עצמך,Compliment her continuously for 2 mins without repeating,2,1,conversation|care
+consequences,לשבת מתחת לשולחן בזמן שהיא אוכלת,Sit under the table while she eats,20,2,home|control
+consequences,ללבוש את הבגדים הפוך למשך שעה,Wear clothes inside out for an hour,60,1,home|control
+consequences,להקליט הודעה קולית רומנטית מוגזמת ולשלוח לה,Record an overly romantic voice note and send it to her,5,1,screen|creative
+consequences,לתת לה לצייר לך על הפנים עם איפור / לורד,Let her draw on your face with makeup / marker,60,2,home|creative
+consequences,לאכול ארוחה רק מהקצוות שנותרו בצלחת שלה,Eat a meal only from the leftovers on her plate,15,3,food|control
+consequences,לעמוד מול המראה ולהצהיר מה אתה אוהב בה,Stand in front of the mirror and declare what you love about her,5,1,conversation|performance
+consequences,לנבוח או לייבב כמו כלב כשאתה רוצה משהו,Bark or whine like a dog when you want something,30,3,roleplay|control
+consequences,לכתוב עליה פואמה בחרוזים ולהקריא אותה קומית,Write a rhyming poem about her and read it comically,15,2,writing|creative
+consequences,טיזינג אכזרי: צפייה בה נוגעת בעצמה בלי לגעת בה,Cruel teasing: Watching her touch herself without touching her,20,3,teasing|screen
+consequences,לקבל פליקים (Spanking) על הישבן בעוצמה מדורגת,Receive spanking on the buttocks with increasing intensity,10,3,touch|control
+consequences,קשירת קרח: להחזיק קוביית קרח ביד עד שתימס,Ice binding: Hold an ice cube in hand until it melts,10,2,home|control
+consequences,אדג'ינג (Edging) הובלה אל הסף 3 פעמים ללא שחרור,Edging: Brought to the edge 3 times with no release,30,3,teasing|touch
+consequences,נישוק וליקוק עדין של כפות הרגליים שלה,Gentle kissing and licking of her feet,10,3,touch|roleplay
+consequences,שפיכת שעווה חמה (של נר עיסוי) על הגב,Pouring hot wax (from a massage candle) on the back,15,3,touch|control
+consequences,דיגדוגים ללא רחמים למשך 3 דקות רצופות,Relentless tickling for 3 consecutive minutes,3,2,touch|teasing
+consequences,ללבוש פלאג אנאלי בזמן ביצוע מטלות הבית,Wear a butt plug while doing household chores,60,3,home|secret
+consequences,לעסות לה את הקרקפת באופן איטי ומרגיע,Massage her scalp slowly and soothingly,15,1,touch|care
+consequences,לנשק כל סנטימטר בגוף שלה מבלי לגעת באזורים אינטימיים,Kiss every inch of her body without touching intimate areas,20,2,touch|teasing
+consequences,קולר או סרט קשירה על הצוואר למשך הערב,Collar or ribbon tied around the neck for the evening,120,2,roleplay|home
+consequences,שריטות עדינות או העברת ציפורניים על הגב,Gentle scratches or running nails along the back,10,2,touch|teasing
+consequences,לטעום ולהבדיל בין מאכלים כשעיניך קשורות,Taste and differentiate foods blindfolded,15,2,food|game
+consequences,לשבת עם הפנים בין הרגליים שלה ולהריח מבלי לגעת,Sit with face between her legs and smell without touching,15,3,teasing|touch
+consequences,לשים אטבים על ירכיים פנימיות למספר דקות,Place clothespins on inner thighs for a few minutes,5,3,touch|control
+consequences,לצפות בה מתלבשת/מתפשטת דרך חריץ הדלת בלבד,Watch her dress/undress only through the door crack,10,2,teasing|secret
+consequences,ללקק דבש או שוקולד מהאצבעות שלה,Lick honey or chocolate off her fingers,5,1,food|touch
+consequences,משיכות קלות בשיער על כל תגובה חצופה,Light hair pulls for every cheeky response,60,2,touch|control
+consequences,לנשק לה את היד בכל פעם שאתה עובר לידה,Kiss her hand every time you walk past her,180,1,touch|roleplay
+consequences,חשיפה מלאה: לעמוד עירום מולה בזמן שהיא בוחנת אותך,Full exposure: Stand naked in front of her while she inspects you,10,3,teasing|performance
 challenges,"להתלבש בבגדים חשופים במיוחד ליציאה, כאשר אסור לגעת בך כל הערב מחוץ לבית","Dress in extremely provocative clothes for going out, with no touching allowed all evening outside",120,3,hotwife|teasing|public
 challenges,לשלוח תמונה פרובוקטיבית שלך בזמן שהשולט/ת נמצא/ת עם אדם אחר בחדר סמוך,Send a provocative photo of yourself while the dominant is in the next room with someone else,10,3,hotwife|secret|provocative
 challenges,לשבת בבר או מסעדה ולהתחיל שיחה קלה עם זר/ה זר זר בזמן שהשולט/ת צופה מהצד,Sit at a bar or restaurant and strike up polite flirting with a stranger while the dominant watches from afar,30,3,hotwife|public|daring

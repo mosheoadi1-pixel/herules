@@ -98,7 +98,7 @@ try {
   await w('/sessions',{terms:'Another active session',minutes:30},409);
   await action(h, 'mission', { key: randomUUID(), title: 'bad', text: 'bad' }, 403);
   const key = randomUUID();
-  const m = await action(w, 'mission', { key, title: 'Tea', text: 'Offer a cup of tea', points: 7, secret: true });
+  const m = await action(w, 'mission', { key, title: 'Tea', text: 'Offer a cup of tea', points: 7, secret: true, completionStyle:'written' });
   assert.equal((await action(w, 'mission', { key, title: 'Tea', text: 'Offer a cup of tea', points: 7, secret: true })).mission.id, m.mission.id);
   assert.ok(!JSON.stringify(await h(`/sessions/${id}`)).includes('Offer a cup'));
   const safe=JSON.stringify(await h('/state'));for(const forbidden of ['Offer a cup','password','hash'])assert.ok(!safe.includes(forbidden));
@@ -113,7 +113,7 @@ try {
   const reviews=await Promise.all([action(w,'review',firstReview),action(w,'review',firstReview)]);assert.deepEqual(reviews[0],reviews[1]);
   assert.equal((await h(`/sessions/${id}`)).session.points, 7);
   assert.equal(Number((await pool.query('SELECT count(*) FROM awards')).rows[0].count),1);
-  const returnable=await action(w,'mission',{key:randomUUID(),title:'Revise work',text:'Write a kind note',points:2});await action(w,'deliver',{mission:returnable.mission.id});await action(h,'ack',{mission:returnable.mission.id});
+  const returnable=await action(w,'mission',{key:randomUUID(),title:'Revise work',text:'Write a kind note',points:2,completionStyle:'written'});await action(w,'deliver',{mission:returnable.mission.id});await action(h,'ack',{mission:returnable.mission.id});
   const oldCompletion={mission:returnable.mission.id,text:'OLD',expectedVersion:0,key:randomUUID()};
   const oldResult=await action(h,'complete',oldCompletion);assert.equal(oldResult.submissionVersion,1);
   const oldReturn={mission:returnable.mission.id,approve:false,submissionVersion:1,key:randomUUID()};

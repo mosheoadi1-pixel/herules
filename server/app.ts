@@ -8,10 +8,16 @@ const scrypt = promisify(scryptCallback);
 const hash = (v: string) => createHash('sha256').update(v).digest('hex');
 const text = z.string().trim().min(1).max(4000);
 const uuid = z.string().uuid();
+const completionStyle=z.enum(['simple','written']);
+const draftSchema=z.object({title:z.string().trim().min(1).max(160),text,points:z.number().int().min(0).max(100).default(0),secret:z.boolean().default(false),completionStyle:completionStyle.default('simple')});
+const checkInSchema=z.object({minutes:z.number().int().min(1).max(1440),energy:z.enum(['low','medium','high']),mood:z.enum(['connection','playful','quiet'])});
+export type CheckIn=z.infer<typeof checkInSchema>;
+const reflectionSchema=z.object({appreciation:z.string().trim().max(1000).default(''),repeat:z.string().trim().max(1000).default('')}).refine(v=>!!(v.appreciation||v.repeat));
+export type Reflection=z.infer<typeof reflectionSchema>;
 const fail = (status: number, message: string): never => { throw Object.assign(new Error(message), { status }); };
 export type User = { id: string; email: string|null; nickname: string|null; role: 'wife'|'husband'; pair_id: string|null };
-export type Mission = { id: string; revision: number; title: string; text: string; points: number; secret: boolean; status: string; scheduledAt?: number; completion?: string; submissionVersion?: number; deliveredAt?: number; acknowledgedAt?: number };
-export type Session = { id: string; status: string; terms: string; revision: number; revisions: { revision: number; terms: string }[]; approvals: string[]; pauses: string[]; remaining: number; last: number; started: boolean; points: number; missions: Mission[]; messages: {id:string; by:string; text:string; at:number}[]; history: { at:number; event:string; by:string }[]; inbox: {id:string; at:number; event:string; readBy:string[]}[] };
+export type Mission = { id: string; revision: number; title: string; text: string; points: number; secret: boolean; completionStyle?: 'simple'|'written'; status: string; scheduledAt?: number; completion?: string; submissionVersion?: number; deliveredAt?: number; acknowledgedAt?: number; adjustment?: {reason:'softer'|'adjust';note?:string;at:number}; replaces?: string; replacementId?: string };
+export type Session = { id: string; status: string; terms: string; revision: number; revisions: { revision: number; terms: string }[]; approvals: string[]; pauses: string[]; remaining: number; last: number; started: boolean; points: number; missions: Mission[]; sequence?: string[]; checkIns?: Record<string,CheckIn>; reflections?: Record<string,Reflection>; messages: {id:string; by:string; text:string; at:number}[]; history: { at:number; event:string; by:string }[]; inbox: {id:string; at:number; event:string; readBy:string[]}[] };
 const suspended = (s: Session) => s.approvals.length !== 2 || s.pauses.length > 0;
 const terminal = (s: Session) => ['stopped','expired'].includes(s.status);
 function notice(s: Session, event: string, by: string) {
@@ -28,7 +34,8 @@ function advance(s: Session) {
   s.last = now;
 }
 function visible(s: Session, user: User) {
-  return { ...s, missions: s.missions.filter(m => user.role === 'wife' || !m.secret || !!m.deliveredAt) };
+  const missions=s.missions.filter(m => user.role === 'wife' || !m.secret || !!m.deliveredAt);
+  return { ...s, missions, ...(s.sequence?{sequence:s.sequence.filter(id=>missions.some(m=>m.id===id))}:{}) };
 }
 export async function createApp(pool: Pool, origin: string) {
   const configured = new URL(origin);
@@ -127,10 +134,10 @@ export async function createApp(pool: Pool, origin: string) {
     const timer = setInterval(async()=>{ try { await auth(req); res.write(': heartbeat\n\n'); } catch { res.end(); } },15000);
     req.on('close',()=>{ clearInterval(timer); set.delete(res); if (!set.size) listeners.delete(u.pair_id!); });
   });
-  async function locked(c: PoolClient, id: string, u: User) {
+  async function locked(c: PoolClient, id: string, u: User, tick=true) {
     const r=await c.query('SELECT * FROM sessions WHERE id=$1 FOR UPDATE',[uuid.parse(id)]);
     if(!r.rows[0] || r.rows[0].pair_id!==u.pair_id) fail(403,'Session unavailable');
-    const s=r.rows[0].data as Session; advance(s); return s;
+    const s=r.rows[0].data as Session; if(tick)advance(s); return s;
   }
   async function save(c:PoolClient,s:Session) {await c.query('UPDATE sessions SET status=$2,data=$3 WHERE id=$1',[s.id,s.status,JSON.stringify(s)]);}
   app.get('/api/state',async(req,res)=>{
@@ -149,11 +156,18 @@ export async function createApp(pool: Pool, origin: string) {
   app.post('/api/sessions/:id/:op',async(req,res)=>{
     const u=await auth(req),op=req.params.op as string,b=req.body;
     const result=await transaction(async c=>{
-      const s=await locked(c,req.params.id as string,u);
-      const submissionRequest=op==='complete'||op==='review';
+      const s=await locked(c,req.params.id as string,u,op!=='reflection');
+      if(op==='reflection'){
+        const data=reflectionSchema.parse(b),previous=s.reflections?.[u.id];
+        if(previous?.appreciation!==data.appreciation||previous?.repeat!==data.repeat){
+          (s.reflections??={})[u.id]=data;notice(s,op,u.id);await save(c,s);
+        }
+        return {ok:true};
+      }
+      const keyedRequest=['complete','review','adjust','replace'].includes(op);
       let requestKey:string|undefined;
-      if(submissionRequest){
-        if(u.role!==(op==='complete'?'husband':'wife'))fail(403,'Wrong role for submission action');
+      if(keyedRequest){
+        if(u.role!==(['review','replace'].includes(op)?'wife':'husband'))fail(403,'Wrong role for action');
         requestKey=uuid.parse(b.key);
         const previous=await c.query('SELECT result FROM request_keys WHERE session_id=$1 AND user_id=$2 AND kind=$3 AND key=$4',[s.id,u.id,op,requestKey]);
         // A committed retry is a read of the original result, even after return, pause or stop.
@@ -165,7 +179,7 @@ export async function createApp(pool: Pool, origin: string) {
       const husband=()=>{if(u.role!=='husband')fail(403,'Husband role required');};
       const gameplay=()=>{if(suspended(s))fail(409,'Mutual approval and no pauses required');};
       let mission:Mission|undefined;
-      if(['edit','queue','deliver','cancel','ack','refuse','complete','review'].includes(op)){mission=s.missions.find(m=>m.id===uuid.parse(b.mission));if(!mission)fail(404,'Mission unavailable');}
+      if(['edit','queue','deliver','cancel','ack','refuse','complete','review','adjust','replace'].includes(op)){mission=s.missions.find(m=>m.id===uuid.parse(b.mission));if(!mission)fail(404,'Mission unavailable');}
       let response:any={ok:true};
       if(op==='stop'){s.status='stopped';for(const m of s.missions)if(!['approved','refused','cancelled'].includes(m.status))m.status='cancelled';}
       else if(op==='pause'){if(!s.pauses.includes(u.id))s.pauses.push(u.id);}
@@ -180,33 +194,58 @@ export async function createApp(pool: Pool, origin: string) {
         for(const m of s.missions)if(!['approved','refused','cancelled'].includes(m.status))m.status='cancelled';
       }
       else if(op==='read'){const ids=z.array(uuid).max(500).parse(b.ids);for(const n of s.inbox)if(ids.includes(n.id)&&!n.readBy.includes(u.id))n.readBy.push(u.id);}
+      else if(op==='checkin'){
+        const data=checkInSchema.parse(b);(s.checkIns??={})[u.id]=data;
+      }
+      else if(op==='message'){
+        const key=uuid.parse(b.key);
+        const previous=await c.query('SELECT result FROM request_keys WHERE session_id=$1 AND user_id=$2 AND kind=$3 AND key=$4',[s.id,u.id,op,key]);
+        if(previous.rowCount){await save(c,s);return previous.rows[0].result;}
+        const message={id:randomUUID(),by:u.id,text:text.parse(b.text),at:Date.now()};s.messages.push(message);response={message};
+        await c.query('INSERT INTO request_keys VALUES($1,$2,$3,$4,$5)',[s.id,u.id,op,key,JSON.stringify(response)]);
+      }
       else {
         gameplay();
         if(op==='extend'){wife();s.remaining+=z.number().int().min(1).max(525600).parse(b.minutes)*60000;}
-        else if(op==='mission'||op==='message'){
-          if(op==='mission')wife();const key=uuid.parse(b.key);
+        else if(op==='sequence'){
+          wife();const ids=z.array(uuid).max(3).refine(ids=>new Set(ids).size===ids.length).parse(b.missions);
+          for(const id of ids)if(!s.missions.some(m=>m.id===id))fail(404,'Mission unavailable');
+          s.sequence=ids;
+        }
+        else if(op==='mission'){
+          wife();const key=uuid.parse(b.key);
           const previous=await c.query('SELECT result FROM request_keys WHERE session_id=$1 AND user_id=$2 AND kind=$3 AND key=$4',[s.id,u.id,op,key]);
           if(previous.rowCount)return previous.rows[0].result;
-          if(op==='mission'){
-            const data=z.object({title:z.string().trim().min(1).max(160),text,points:z.number().int().min(0).max(100).default(0),secret:z.boolean().default(false)}).parse(b);
-            const m:Mission={...data,id:randomUUID(),revision:s.revision,status:'draft'};s.missions.push(m);response={mission:m};
-          }else{const message={id:randomUUID(),by:u.id,text:text.parse(b.text),at:Date.now()};s.messages.push(message);response={message};}
+          const data=draftSchema.parse(b);
+          const m:Mission={...data,id:randomUUID(),revision:s.revision,status:'draft'};s.missions.push(m);response={mission:m};
           await c.query('INSERT INTO request_keys VALUES($1,$2,$3,$4,$5)',[s.id,u.id,op,key,JSON.stringify(response)]);
         }
         else if(mission){
           const m=mission;if(m.revision!==s.revision)fail(409,'Mission belongs to a previous agreement');
-          if(['edit','queue','deliver','cancel','review'].includes(op))wife();else husband();
-          if(op==='edit'){if(m.status!=='draft')fail(409,'Delivered terms are immutable');const data=z.object({title:z.string().trim().min(1).max(160),text,points:z.number().int().min(0).max(100),secret:z.boolean()}).parse(b);Object.assign(m,data);}
+          if(['edit','queue','deliver','cancel','review','replace'].includes(op))wife();else husband();
+          if(op==='edit'){if(m.status!=='draft')fail(409,'Delivered terms are immutable');const data=draftSchema.extend({points:z.number().int().min(0).max(100),secret:z.boolean(),completionStyle:completionStyle.optional()}).parse(b);Object.assign(m,data);}
           else if(op==='queue'){if(!['draft','queued'].includes(m.status))fail(409,'Draft required');m.scheduledAt=z.number().int().min(Date.now()).max(Date.now()+31536000000).parse(b.scheduledAt);m.status='queued';}
           else if(op==='deliver'){if(!['draft','queued'].includes(m.status))fail(409,'Draft required');m.status='pending';m.deliveredAt=Date.now();}
           else if(op==='cancel'){if(['approved','refused'].includes(m.status))fail(409,'Mission already final');m.status='cancelled';}
           else if(op==='ack'){if(!['pending','acknowledged'].includes(m.status))fail(409,'Pending mission required');m.status='acknowledged';m.acknowledgedAt??=Date.now();}
-          else if(op==='refuse'){if(!['pending','acknowledged','revision','refused'].includes(m.status))fail(409,'Mission cannot be refused here');m.status='refused';}
+          else if(op==='refuse'){if(!['pending','acknowledged','revision','adjustment','refused'].includes(m.status))fail(409,'Mission cannot be refused here');m.status='refused';}
+          else if(op==='adjust'){
+            if(!['pending','acknowledged','revision'].includes(m.status))fail(409,'Pending, acknowledged or returned invitation required');
+            const data=z.object({reason:z.enum(['softer','adjust']),note:z.string().trim().max(4000).optional()}).parse(b);
+            m.adjustment={reason:data.reason,...(data.note?{note:data.note}:{}),at:Date.now()};m.status='adjustment';
+            response={mission:m};
+          }
+          else if(op==='replace'){
+            if(m.status!=='adjustment'||m.replacementId)fail(409,'Unreplaced adjustment required');
+            const data=draftSchema.parse(b);
+            const replacement:Mission={...data,id:randomUUID(),revision:s.revision,status:'draft',replaces:m.id};
+            s.missions.push(replacement);m.replacementId=replacement.id;m.status='cancelled';response={mission:replacement};
+          }
           else if(op==='complete'){
             const expectedVersion=z.number().int().min(0).parse(b.expectedVersion);
             if(expectedVersion!==(m.submissionVersion??0))fail(409,'Submission changed; refresh before completing');
             if(!['acknowledged','revision'].includes(m.status))fail(409,'Acknowledged or returned work required');
-            m.completion=text.parse(b.text);m.submissionVersion=expectedVersion+1;m.status='submitted';
+            m.completion=m.completionStyle==='simple'?z.string().trim().max(4000).default('').parse(b.text):text.parse(b.text);m.submissionVersion=expectedVersion+1;m.status='submitted';
             response={mission:m.id,submissionVersion:m.submissionVersion,completion:m.completion,status:m.status};
           }
           else if(op==='review'){

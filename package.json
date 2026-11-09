@@ -10,7 +10,7 @@
     "dev": "tsx server/index.ts",
     "build": "tsc --noEmit && vite build",
     "start": "tsx server/index.ts",
-    "test": "tsx tests/library.ts && tsx tests/integration.ts && tsx tests/private-game-migration.ts && tsx tests/ideas-import.ts && tsx tests/startup-reset.ts",
+    "test": "tsx tests/library.ts && tsx tests/guidance.ts && tsx tests/integration.ts && tsx tests/private-game-migration.ts && tsx tests/ideas-import.ts && tsx tests/startup-reset.ts && tsx tests/experience.ts",
     "import:ideas": "tsx scripts/import-ideas.ts",
     "test:browser": "tsx tests/browser.ts",
     "test:production": "tsx tests/production.ts",
