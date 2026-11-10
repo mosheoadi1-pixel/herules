@@ -60,6 +60,9 @@ The importer validates the entire file before inserting and rolls back on databa
 
 ## Implemented
 
+- The optional idea wheel draws from all consequence ideas, independently of library filters, and displays the result in a dialog for review or editing. It does not send a mission automatically.
+- On supported browsers, each player can enable notifications using the account control. When the game tab is open but hidden, new partner or server updates produce a generic notification without sensitive content. This is not web push: a closed tab cannot receive notifications. Browser permission and a secure context (HTTPS or localhost) are required.
+
 - Each session has a reward shop. The wife defines a title, description and nonnegative integer cost; the husband requests a snapshot of a reward. The wife can decline without a charge or approve if the current available balance is sufficient. Requests do not reserve points. Approval is an in-game decision and does not obligate real-world activity.
 - The Rewards tab shows available points, requests and the number of unique approved missions towards five. At five, the wife can open the ordinary mission composer for an optional bonus; no invitation is created or delivered automatically. Progress remains visible during holds and in archived sessions.
 - Salted scrypt passwords; hashed opaque seven-day HttpOnly cookie sessions; logout revocation; exact-Origin mutation checks; PostgreSQL-backed attempt limits.

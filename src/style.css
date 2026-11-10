@@ -127,8 +127,8 @@ footer { border-color: #694153; color: #cfb4bf; }
   .panel { border-radius: 16px; }
   .safety { width: 100%; }
   .safety button { flex: 1 1 180px; }
-  nav { gap: 4px; }
-  nav button { flex: 1 1 auto; }
+  nav { gap: 4px; flex-wrap: nowrap; overflow-x: auto; }
+  nav button { flex: 0 0 auto; white-space: nowrap; }
 }
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { scroll-behavior: auto !important; animation-duration: .01ms !important; animation-iteration-count: 1 !important; transition-duration: .01ms !important; }
