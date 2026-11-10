@@ -75,6 +75,26 @@ try {
   assert.deepEqual(messages[0],messages[1]);
   assert.equal((await state()).messages.length,1);assert.deepEqual((await state()).approvals,[]);
   await approve();
+  const surprise=(await action(w,'mission',{key:randomUUID(),title:'Hidden title',text:'Hidden invitation text',points:9,secret:true,surprise:true,category:'Conversation',completionStyle:'written'})).mission;
+  await action(w,'sequence',{missions:[surprise.id]});
+  assert.equal((await h(`/sessions/${id}`)).session.missions.some((m:any)=>m.id===surprise.id),false);
+  await action(w,'deliver',{mission:surprise.id});
+  for(const view of [(await h(`/sessions/${id}`)).session,(await h('/state')).sessions.find((s:Session)=>s.id===id)]){
+    const placeholder=view.missions.find((m:any)=>m.id===surprise.id);
+    assert.equal(placeholder.category,'Conversation');
+    for(const key of ['title','text','points','completionStyle','completion','adjustment'])assert.equal(placeholder[key],undefined,key);
+    assert.ok(!view.sequence.includes(surprise.id));
+  }
+  await action(h,'ack',{mission:surprise.id},409);
+  await action(h,'adjust',{mission:surprise.id,key:randomUUID(),reason:'adjust'},409);
+  await action(w,'reveal',{mission:surprise.id},403);
+  await action(h,'reveal',{mission:surprise.id});
+  const revealed=(await h(`/sessions/${id}`)).session.missions.find((m:any)=>m.id===surprise.id);
+  assert.equal(revealed.title,'Hidden title');assert.equal(revealed.status,'pending');
+  await action(h,'ack',{mission:surprise.id});
+  const declinedSurprise=(await action(w,'mission',{key:randomUUID(),title:'Declined surprise',text:'Hidden',surprise:true,category:'Care'})).mission;
+  await action(w,'deliver',{mission:declinedSurprise.id});await action(h,'refuse',{mission:declinedSurprise.id});
+  assert.equal((await h(`/sessions/${id}`)).session.missions.find((m:any)=>m.id===declinedSurprise.id).title,undefined);
   await action(h,'persona',{persona:'playful'},403);
   await action(w,'persona',{persona:'unknown'},400);
   await action(w,'persona',{persona:'playful'});

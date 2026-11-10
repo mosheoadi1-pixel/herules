@@ -55,6 +55,7 @@ function App(){
    const current=s&&u?currentMission(s,u.role):undefined;
    const savedSequence=JSON.stringify(s?.sequence??[]);
    useEffect(()=>{setSequence(JSON.parse(savedSequence));setComposerOpen(false);setEditing('');setDrawnFollowup('');},[s?.id]);
+   useEffect(()=>{setCategory(s?.persona?{strict:'challenges',playful:'teasing',caring:'rewards'}[s.persona]:'');},[s?.id,s?.persona]);
    useEffect(()=>{setSequence(JSON.parse(savedSequence));},[savedSequence]);
   const [checkIn,setCheckIn]=useState<CheckIn>({minutes:15,energy:'medium',mood:'connection'});
   useEffect(()=>{setCheckIn(ownCheckIn??{minutes:15,energy:'medium',mood:'connection'});},[s?.id,u?.id,ownCheckIn?.minutes,ownCheckIn?.energy,ownCheckIn?.mood]);

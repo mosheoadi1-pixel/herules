@@ -471,8 +471,22 @@ try{
    await w.getByText('2 active pauses',{exact:false}).waitFor();
  await w.getByRole('button',{name:'Release my pause',exact:true}).click();
  await w.getByText('1 active pauses',{exact:false}).waitFor();
- await h.getByRole('button',{name:'Release my pause',exact:true}).click();
- await w.getByRole('navigation').getByRole('button',{name:'Idea library',exact:true}).click();
+  await h.getByRole('button',{name:'Release my pause',exact:true}).click();
+  for(const [persona,category] of [['Strict','challenges'],['Playful','teasing'],['Caring','rewards']]){
+   await w.getByRole('navigation').getByRole('button',{name:'Missions',exact:true}).click();
+   await w.getByRole('button',{name:persona,exact:true}).click();
+   await w.waitForFunction((value:string)=>document.querySelector('main')?.classList.contains(`persona-${value}`),persona.toLowerCase());
+   await h.waitForFunction((value:string)=>document.querySelector('main')?.classList.contains(`persona-${value}`),persona.toLowerCase());
+   await w.getByRole('navigation').getByRole('button',{name:'Idea library',exact:true}).click();
+   assert.equal(await w.getByLabel('Category').inputValue(),category);
+   await w.getByLabel('Category').selectOption('roleplay');
+   await w.waitForTimeout(5200);
+   assert.equal(await w.getByLabel('Category').inputValue(),'roleplay','Manual override survives ordinary refresh');
+  }
+  await w.reload();
+  await w.getByRole('navigation').getByRole('button',{name:'Idea library',exact:true}).click();
+  assert.equal(await w.getByLabel('Category').inputValue(),'rewards','Reload uses the shared persona');
+  console.log('PASS persona library defaults: three mappings, shared visual style, manual override through refresh, reload');
   await w.getByRole('heading',{name:'42 ways to choose together',exact:true}).waitFor();
   await w.getByLabel('Category').selectOption('roleplay');assert.equal(await w.locator('.library article').count(),6);
   await w.getByLabel('Intensity').selectOption('3');assert.equal(await w.locator('.library article').count(),6);

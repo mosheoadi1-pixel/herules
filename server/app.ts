@@ -9,35 +9,38 @@ const hash = (v: string) => createHash('sha256').update(v).digest('hex');
 const text = z.string().trim().min(1).max(4000);
 const uuid = z.string().uuid();
 const completionStyle=z.enum(['simple','written']);
-const draftSchema=z.object({title:z.string().trim().min(1).max(160),text,points:z.number().int().min(0).max(100).default(0),secret:z.boolean().default(false),completionStyle:completionStyle.default('simple')});
+const draftSchema=z.object({title:z.string().trim().min(1).max(160),text,points:z.number().int().min(0).max(100).default(0),secret:z.boolean().default(false),completionStyle:completionStyle.default('simple'),surprise:z.boolean().default(false),category:z.string().trim().min(1).max(80).optional()}).refine(v=>!v.surprise||!!v.category);
 const checkInSchema=z.object({minutes:z.number().int().min(1).max(1440),energy:z.enum(['low','medium','high']),mood:z.enum(['connection','playful','quiet'])});
 export type CheckIn=z.infer<typeof checkInSchema>;
 const reflectionSchema=z.object({appreciation:z.string().trim().max(1000).default(''),repeat:z.string().trim().max(1000).default('')}).refine(v=>!!(v.appreciation||v.repeat));
 export type Reflection=z.infer<typeof reflectionSchema>;
 const fail = (status: number, message: string): never => { throw Object.assign(new Error(message), { status }); };
 export type User = { id: string; email: string|null; nickname: string|null; role: 'wife'|'husband'; pair_id: string|null };
-export type Mission = { id: string; revision: number; title: string; text: string; points: number; secret: boolean; completionStyle?: 'simple'|'written'; status: string; scheduledAt?: number; completion?: string; submissionVersion?: number; deliveredAt?: number; acknowledgedAt?: number; adjustment?: {reason:'softer'|'adjust';note?:string;at:number}; replaces?: string; replacementId?: string };
+export type Mission = { id: string; revision: number; title: string; text: string; points: number; secret: boolean; surprise?:boolean; category?:string; revealedAt?:number; completionStyle?: 'simple'|'written'; status: string; scheduledAt?: number; completion?: string; submissionVersion?: number; deliveredAt?: number; acknowledgedAt?: number; adjustment?: {reason:'softer'|'adjust';note?:string;at:number}; replaces?: string; replacementId?: string };
 export type Reward = {id:string; title:string; description:string; cost:number};
 export type RewardRequest = Reward & {rewardId:string; status:'pending'|'approved'|'declined'};
 export type Session = { id: string; status: string; terms: string; revision: number; revisions: { revision: number; terms: string }[]; approvals: string[]; pauses: string[]; remaining: number; last: number; started: boolean; points: number; missions: Mission[]; rewards?: Reward[]; rewardRequests?: RewardRequest[]; sequence?: string[]; persona?:'strict'|'playful'|'caring'; followups?:string[]; checkIns?: Record<string,CheckIn>; reflections?: Record<string,Reflection>; messages: {id:string; by:string; text:string; at:number}[]; history: { at:number; event:string; by:string; rewardRequestId?:string; outcome?:'approved'|'declined' }[]; inbox: {id:string; at:number; event:string; readBy:string[]}[] };
 const suspended = (s: Session) => s.approvals.length !== 2 || s.pauses.length > 0;
 const terminal = (s: Session) => ['stopped','expired'].includes(s.status);
-function notice(s: Session, event: string, by: string, reward?:{rewardRequestId:string;outcome?:'approved'|'declined'}) {
+function notice(s: Session, event: string, by: string, reward?:{rewardRequestId:string;outcome?:'approved'|'declined';missionId?:string}) {
   const at = Date.now(); s.history.push({ at, event, by, ...reward });
-  s.inbox.push({ id: randomUUID(), at, event, readBy: [] });
+  s.inbox.push({ id: randomUUID(), at, event, readBy: [], ...reward });
 }
 function advance(s: Session) {
   const now = Date.now();
   if (!terminal(s) && s.started && !suspended(s)) {
     s.remaining = Math.max(0, s.remaining - (now - s.last));
     if (!s.remaining) { s.status = 'expired'; notice(s, 'expired', 'server'); }
-    else for (const m of s.missions) if (m.status === 'queued' && m.scheduledAt! <= now) { m.status = 'pending'; m.deliveredAt = now; notice(s, 'mission-delivered', 'server'); }
+    else for (const m of s.missions) if (m.status === 'queued' && m.scheduledAt! <= now) { m.status = 'pending'; m.deliveredAt = now; notice(s, 'mission-delivered', 'server',m.surprise?{missionId:m.id}:undefined); }
   }
   s.last = now;
 }
 function visible(s: Session, user: User) {
-  const missions=s.missions.filter(m => user.role === 'wife' || !m.secret || !!m.deliveredAt);
-  return { ...s, missions, ...(s.sequence?{sequence:s.sequence.filter(id=>missions.some(m=>m.id===id))}:{}) };
+  if(user.role==='wife')return s;
+  const hidden=new Set(s.missions.filter(m=>m.surprise&&!m.revealedAt).map(m=>m.id));
+  const missions=s.missions.filter(m => (!(m.secret||m.surprise) || !!m.deliveredAt)).map(m=>hidden.has(m.id)?{id:m.id,revision:m.revision,status:m.status,surprise:true,category:m.category,deliveredAt:m.deliveredAt}:m);
+  const allowed=(n:{missionId?:string})=>!n.missionId||!hidden.has(n.missionId);
+  return { ...s, missions, history:s.history.filter(allowed),inbox:s.inbox.filter(allowed), ...(s.sequence?{sequence:s.sequence.filter(id=>!hidden.has(id)&&missions.some(m=>m.id===id))}:{}) };
 }
 export async function createApp(pool: Pool, origin: string) {
   const configured = new URL(origin);
@@ -181,7 +184,7 @@ export async function createApp(pool: Pool, origin: string) {
       const husband=()=>{if(u.role!=='husband')fail(403,'Husband role required');};
       const gameplay=()=>{if(suspended(s))fail(409,'Mutual approval and no pauses required');};
       let mission:Mission|undefined;
-      if(['edit','queue','deliver','cancel','ack','refuse','complete','review','adjust','replace'].includes(op)){mission=s.missions.find(m=>m.id===uuid.parse(b.mission));if(!mission)fail(404,'Mission unavailable');}
+      if(['edit','queue','deliver','cancel','ack','refuse','complete','review','adjust','replace','reveal'].includes(op)){mission=s.missions.find(m=>m.id===uuid.parse(b.mission));if(!mission)fail(404,'Mission unavailable');}
       let response:any={ok:true};
       if(op==='stop'){s.status='stopped';for(const m of s.missions)if(!['approved','refused','cancelled'].includes(m.status))m.status='cancelled';}
       else if(op==='pause'){if(!s.pauses.includes(u.id))s.pauses.push(u.id);}
@@ -241,13 +244,15 @@ export async function createApp(pool: Pool, origin: string) {
         else if(mission){
           const m=mission;if(m.revision!==s.revision)fail(409,'Mission belongs to a previous agreement');
           if(['edit','queue','deliver','cancel','review','replace'].includes(op))wife();else husband();
-          if(op==='edit'){if(m.status!=='draft')fail(409,'Delivered terms are immutable');const data=draftSchema.extend({points:z.number().int().min(0).max(100),secret:z.boolean(),completionStyle:completionStyle.optional()}).parse(b);Object.assign(m,data);}
+          if(op==='edit'){if(m.status!=='draft')fail(409,'Delivered terms are immutable');const data=draftSchema.parse({...m,...b});Object.assign(m,data);}
           else if(op==='queue'){if(!['draft','queued'].includes(m.status))fail(409,'Draft required');m.scheduledAt=z.number().int().min(Date.now()).max(Date.now()+31536000000).parse(b.scheduledAt);m.status='queued';}
           else if(op==='deliver'){if(!['draft','queued'].includes(m.status))fail(409,'Draft required');m.status='pending';m.deliveredAt=Date.now();}
           else if(op==='cancel'){if(['approved','refused'].includes(m.status))fail(409,'Mission already final');m.status='cancelled';}
-          else if(op==='ack'){if(!['pending','acknowledged'].includes(m.status))fail(409,'Pending mission required');m.status='acknowledged';m.acknowledgedAt??=Date.now();}
+          else if(op==='reveal'){if(!m.surprise||!m.deliveredAt||m.status!=='pending')fail(409,'Pending surprise required');m.revealedAt??=Date.now();}
+          else if(op==='ack'){if(m.surprise&&!m.revealedAt)fail(409,'Reveal invitation first');if(!['pending','acknowledged'].includes(m.status))fail(409,'Pending mission required');m.status='acknowledged';m.acknowledgedAt??=Date.now();}
           else if(op==='refuse'){if(!['pending','acknowledged','revision','adjustment','refused'].includes(m.status))fail(409,'Mission cannot be refused here');m.status='refused';}
           else if(op==='adjust'){
+            if(m.surprise&&!m.revealedAt)fail(409,'Reveal invitation first');
             if(!['pending','acknowledged','revision'].includes(m.status))fail(409,'Pending, acknowledged or returned invitation required');
             const data=z.object({reason:z.enum(['softer','adjust']),note:z.string().trim().max(4000).optional()}).parse(b);
             m.adjustment={reason:data.reason,...(data.note?{note:data.note}:{}),at:Date.now()};m.status='adjustment';
@@ -275,7 +280,7 @@ export async function createApp(pool: Pool, origin: string) {
           }
         }else fail(404,'Unknown action');
       }
-      if(op!=='read')notice(s,op,u.id,op==='reward-request'?{rewardRequestId:response.request.id}:op==='reward-decision'?{rewardRequestId:response.request.id,outcome:response.request.status}:undefined);
+      if(op!=='read')notice(s,op,u.id,op==='reward-request'?{rewardRequestId:response.request.id}:op==='reward-decision'?{rewardRequestId:response.request.id,outcome:response.request.status}:(mission?.surprise?{missionId:mission.id}:op==='mission'&&response.mission?.surprise?{missionId:response.mission.id}:undefined));
       if(requestKey)await c.query('INSERT INTO request_keys VALUES($1,$2,$3,$4,$5)',[s.id,u.id,op,requestKey,JSON.stringify(response)]);
       s.last=Date.now();await save(c,s);return response;
     });
