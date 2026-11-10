@@ -16,6 +16,7 @@ try {
   assert.equal((await pool.query('SELECT count(*) FROM users')).rows[0].count,'2');
   assert.equal((await pool.query('SELECT count(*) FROM pairs')).rows[0].count,'1');
   assert.ok(Number((await pool.query('SELECT count(*) FROM imported_ideas')).rows[0].count)>100,'Custom CSV must be seeded');
+  assert.equal((await pool.query('SELECT count(*) FROM imported_ideas WHERE he=$1 AND en=$2',['העניקי לו עבודת יד מפנקת למשך 5 דקות, אסור לו לגמור. אם הוא גומר וואי שזו תהיה אורגזמה הרוס והעניקי לו עונש. אם הוא מצליח תני לו פרס, אורגזמה הרוס.','Walk five kilometers in high heels or very uncomfortable shoes with controlled pace'])).rows[0].count,'1','Last seed record must retain both authored fields');
   assert.equal(await importIdeas(pool,'category,he,en,minutes,intensity,tags\nchallenges,רעיון ייחודי,Unique imported idea,5,1,test'),1);
   const ideas=(await pool.query('SELECT * FROM imported_ideas ORDER BY id')).rows;
   const pair=(await pool.query('SELECT pair_id FROM private_game')).rows[0].pair_id;

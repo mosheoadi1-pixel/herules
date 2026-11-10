@@ -131,6 +131,10 @@ The browser suite checks genuinely unsaved reflection edits in **both languages*
 npm.cmd test                 # library + isolated real PostgreSQL app integration
 npx.cmd tsx tests/experience.ts # focused cycles 1–4 real PostgreSQL coverage
 npx.cmd tsx tests/guidance.ts  # pure role/current-invitation derivation
+npx.cmd tsx tests/idea-destinations.ts # destination filtering and suggestion pools
+npx.cmd tsx tests/roulette.ts   # roulette spin landing calculations
+npx.cmd tsx tests/inspiration-browser.ts # inspiration browser coverage
+npx.cmd tsx tests/redesign-browser.ts # responsive redesign browser coverage
 npm.cmd run build            # TypeScript check + Vite production bundle
 npm.cmd run test:browser     # Chromium, accounts, mobile, worker upgrade, stalled-request safety, legacy CSP
 npm.cmd run test:production  # after build: actual production entry/assets/cookie/CSP smoke

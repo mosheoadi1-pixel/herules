@@ -22,7 +22,7 @@ rewards:[
  ['הציעי נשיקה כפרס אפשרי רק לאחר בדיקה מחודשת ששניכם רוצים בה.','Offer a kiss as an optional reward only after a fresh check that both want it.',2,3,'touch'],
  ['תני לו לבחור בין מחמאה בלחש לריקוד משותף; אפשר גם לבחור באף אחת.','Let him choose between a whispered compliment and a shared dance; neither is also a choice.',5,3,'flirtation'],
  ['הזמיני אותו לערב שבו את מתכננת את החיזור והוא בוחר אם להצטרף.','Invite him to an evening where you plan the courtship and he chooses whether to join.',30,3,'control'],
- ['העניקי לו הודעה פרטית עם תיאור מפורש של מה שתעשי לו בהמשך, ישיבה על הפנים/ 69... .','Give him a private note describing, without explicit detail, what you find attractive about him.',5,3,'writing'],
+  ['העניקי לו הודעה פרטית עם תיאור מפורש של מה שתעשי לו בהמשך, ישיבה על הפנים/ 69... .','Give him a private message explicitly describing what you will do to him later: face-sitting, 69... .',5,3,'writing'],
  ['הציעי חיבוק ממושך או זמן שקט יחד, ובקשו אישור לפני כל מגע.','Offer a lingering hug or quiet time together, asking permission before any touch.',5,3,'touch']
 ],
 consequences:[
