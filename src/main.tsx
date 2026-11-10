@@ -3,6 +3,7 @@ import { createRoot } from 'react-dom/client';
 import type { Session, Mission, User, CheckIn } from '../server/app';
 import { library as builtInLibrary, categories, ideasForDestination, suggest, type Idea } from './library';
 import { currentMission } from './guidance';
+import { newPartnerUpdates } from './notifications';
 import { Roulette } from './Roulette';
 import './style.css';
 type State={user:User;sessions:Session[];serverNow:number};
@@ -52,10 +53,8 @@ function App(){
   useEffect(()=>{
    if(!state){knownNotices.current=null;noticeUser.current='';return;}
    if(noticeUser.current!==state.user.id){noticeUser.current=state.user.id;knownNotices.current=null;}
-   const seen=knownNotices.current,next=new Set<string>();let partnerUpdate=false;
-   for(const session of state.sessions)for(const notice of session.inbox){next.add(notice.id);if(seen&&!seen.has(notice.id)&&session.history.some(event=>event.at===notice.at&&event.event===notice.event&&event.by!==state.user.id))partnerUpdate=true;}
-   knownNotices.current=next;
-   if(partnerUpdate&&document.hidden&&typeof Notification!=='undefined'&&Notification.permission==='granted')try{new Notification('HER RULES',{body:lang==='he'?'יש עדכון חדש במשחק.':'There is a new game update.',tag:'her-rules-update'});}catch{/* Some browsers do not support window notifications. */}
+   const {next,hasUpdate}=newPartnerUpdates(state.sessions,state.user.id,knownNotices.current);knownNotices.current=next;
+   if(hasUpdate&&document.hidden&&typeof Notification!=='undefined'&&Notification.permission==='granted')try{new Notification('HER RULES',{body:lang==='he'?'יש עדכון חדש במשחק.':'There is a new game update.',tag:'her-rules-update'});}catch{/* Some browsers do not support window notifications. */}
   },[state,lang]);
    const errorMessage=(e:any,prefix:string)=>e.message==='Insufficient points'?t('אין מספיק נקודות לאישור הפרס. הבקשה נשארה ממתינה.','Not enough points to approve this reward. The request remains pending.'):e.message?.startsWith('Role occupied')?t('התפקיד כבר תפוס במשחק הפרטי. חזרו לדפדפן ולכתובת שבהם נכנסתם לראשונה. הכינוי אינו משחזר גישה.','That role is already occupied in this private game. Return to the browser and address used for your first entry. A nickname cannot recover access.'):e.message==='Origin rejected'?t(`הבקשה הגיעה מכתובת שונה מכתובת המשחק. פתחו את המשחק מחדש באותה כתובת, או בכתובת הראשית: ${e.expectedOrigin||'הכתובת שהוגדרה בשרת'}.`,`The request came from a different address than the game. Reopen the game at the same address, or at the canonical address: ${e.expectedOrigin||'the configured server address'}.`):prefix+e.message;
   const run=async(fn:()=>Promise<any>)=>{if(busy||needsRefresh.current||unknownRef.current)return;setBusy(true);setError('');try{await fn();}catch(e:any){if(e.unknownOutcome)setUnknown(true);setError(errorMessage(e,t('הפעולה לא הושלמה. בדקו הרשאות, הסכמות ומצב מפגש. פרטי שרת: ','Action failed. Check permissions, agreement and session state. Server detail: ')));}finally{await reconcile();setBusy(false);}};
