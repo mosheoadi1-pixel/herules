@@ -32,6 +32,11 @@ try {
  assert.equal(await h.getByRole('navigation').getByRole('button',{name:'Punishments inspiration',exact:true}).count(),0);
  assert.equal(await w.getByRole('navigation').getByRole('button',{name:'Punishments inspiration',exact:true}).count(),1);
  await w.getByRole('navigation').getByRole('button',{name:'Rewards',exact:true}).click();
+ await w.getByRole('checkbox',{name:'Away from home'}).check();
+ assert.equal(await w.locator('.cards.library article').count(),0);
+ assert.ok(await w.getByRole('status').filter({hasText:'No reviewed away-from-home ideas'}).isVisible());
+ assert.ok(await w.getByRole('button',{name:'Roll a suggestion to review'}).isDisabled());
+ await w.getByRole('checkbox',{name:'Away from home'}).uncheck();
  const cards=w.locator('.cards.library article');
  const first=await cards.nth(0).locator('p').first().innerText(),second=await cards.nth(1).locator('p').first().innerText();
  await cards.nth(0).getByRole('button',{name:'Choose and edit',exact:true}).click();
@@ -48,6 +53,10 @@ try {
  assert.equal(await w.getByLabel('Reward cost',{exact:true}).evaluate((el:HTMLInputElement)=>el.required&&!el.checkValidity()),true);
  assert.equal(await w.evaluate(async()=> ((await(await fetch('/api/state')).json()).sessions[0].rewards??[]).length),0);
   await w.getByRole('navigation').getByRole('button',{name:'Punishments inspiration',exact:true}).click();
+  await w.getByRole('checkbox',{name:'Away from home'}).check();
+  assert.equal(await w.locator('.cards.library article').count(),0);
+  assert.ok(await w.getByRole('button',{name:'Spin the idea wheel',exact:true}).isDisabled());
+  await w.getByRole('checkbox',{name:'Away from home'}).uncheck();
   await w.emulateMedia({reducedMotion:'reduce'});
    await w.getByRole('button',{name:'Spin the idea wheel',exact:true}).click();
    assert.equal(await w.locator('.roulette-wheel text').first().textContent(),'1');

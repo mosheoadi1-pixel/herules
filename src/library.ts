@@ -67,5 +67,7 @@ const supplied:Idea[]=[
  {id:'custom-anticipation-2',category:'anticipation',he:'הוא נוגע בעצמו בהתאם להוראות המדויקות שלך',en:'Bring me to the edge 5 times in a row without orgasm. Then allow him to finish alone with a ruined orgasm, and lock him in a chastity belt.',minutes:10,intensity:3,tags:['anticipation']}
 ];
 export const library:Idea[]=[...supplied,...categories.flatMap(category=>bold[category].map(([he,en,minutes,intensity,tag],i)=>({id:`${category}-${i+21}`,category,he,en,minutes,intensity,tags:[tag]})))];
-export function ideasForDestination(ideas:Idea[],destination:'library'|'rewards'|'consequences') {return ideas.filter(i=>destination==='library'?!['rewards','consequences'].includes(i.category):i.category===destination);}
+// Only reviewed built-in texts belong here; tags and imported IDs are not evidence of suitability.
+const awayIdeas=new Set(library.filter(i=>['random-22'].includes(i.id)));
+export function ideasForDestination(ideas:Idea[],destination:'library'|'rewards'|'consequences',away=false) {return ideas.filter(i=>(!away||awayIdeas.has(i))&&(destination==='library'?!['rewards','consequences'].includes(i.category):i.category===destination));}
 export function suggest(ideas:Idea[],recent:string[]) {const eligible=ideas.filter(i=>!recent.slice(-10).includes(i.id));return eligible[Math.floor(Math.random()*eligible.length)];}
