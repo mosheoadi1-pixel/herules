@@ -63,7 +63,8 @@ secret:[
 // User-supplied CSV wording, trimmed only; missing duration/intensity default to 10 minutes/Bold.
 const supplied:Idea[]=[
  {id:'custom-roleplay-1',category:'roleplay',he:'בחרי כינוי משחק מוסכם ומעכשיו הוא חייב לקרוא לך רק בשם זה.',en:'Choose an agreed scene nickname, and from now on he must address you only by that name.',minutes:10,intensity:3,tags:['custom','control']},
- {id:'custom-anticipation-1',category:'anticipation',he:'הביאי אותי לקצה 5 פעמים ברצף ללא אורגזמה. לאחר מכן הרשי לו לגמור לבד באורגזמה הרוסה. ונעלי אותו בחגורת צניעות',en:'Bring me to the edge 5 times in a row without orgasm. Then allow him to finish alone with a ruined orgasm, and lock him in a chastity belt.',minutes:10,intensity:3,tags:['custom','anticipation']}
+ {id:'custom-anticipation-1',category:'anticipation',he:'דחיה מתוקה: הביאי אותו לקצה מספר פעמים ללא סיום. ואז הרשי לו לסיים לבד בזמן שאת מפקחת, אבל הרסי את זה. ונעלי אותו במכשיר צאסטיטי.',en:'Bring me to the edge 5 times in a row without orgasm. Then allow him to finish alone with a ruined orgasm, and lock him in a chastity belt.',minutes:10,intensity:3,tags:['custom','anticipation']}
+ {id:'custom-anticipation-2',category:'anticipation',he:'הוא נוגע בעצמו בהתאם להוראות המדויקות שלך',en:'Bring me to the edge 5 times in a row without orgasm. Then allow him to finish alone with a ruined orgasm, and lock him in a chastity belt.',minutes:10,intensity:3,tags:['custom','anticipation']}
 ];
 export const library:Idea[]=[...supplied,...categories.flatMap(category=>bold[category].map(([he,en,minutes,intensity,tag],i)=>({id:`${category}-${i+21}`,category,he,en,minutes,intensity,tags:[tag]})))];
 export function suggest(ideas:Idea[],recent:string[]) {const eligible=ideas.filter(i=>!recent.slice(-10).includes(i.id));return eligible[Math.floor(Math.random()*eligible.length)];}

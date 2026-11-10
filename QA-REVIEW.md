@@ -1,5 +1,57 @@
 # HER RULES — implementation verification
 
+## Timeout uncertainty and form locking — 2026-11-09
+
+Timeouts of mutation requests now retain a bilingual unknown-outcome warning and block ordinary actions until explicit risk acknowledgement, even after successful state reads. Pause and stop remain independent. A same-payload retry of a keyed action retains its UUID only while the page stays open. The warning survives reload within the same tab when session storage is available; it does not coordinate other tabs or survive unavailable/cleared storage. A read cannot establish that an unkeyed timed-out request has finished, and acknowledging the warning does not make a retry safe.
+
+The reward, check-in and reflection fieldsets also remain disabled while a failed refresh is unreconciled. Chromium first reproduced enabled check-in inputs and the missing timeout warning. The final regression holds an unkeyed check-in until timeout, waits for a successful state read, then sends its captured request separately to model late arrival and verifies that the server commits it while ordinary controls stay blocked; it checks warning persistence across a same-tab reload. A separate committed-but-held keyed message response verifies explicit acknowledgement and reuse of the original UUID without a duplicate. The browser suite also checks each field in the three fieldsets and existing independent safety paths.
+
+Final `npm.cmd test`, `npm.cmd run build`, `npm.cmd run test:browser`, and `git diff --check` exited 0 (line-ending warnings only for diff check; two intentional database rollback fixtures log `API failure 23514`). No live server restart or physical-device testing.
+
+---
+
+## Failed reconciliation correction — 2026-11-09
+
+After a mutation response or error, ordinary submissions remain locked until a successful state read begun after the latest action; newer safety actions invalidate older in-flight reads. The status is explained in Hebrew and English, polling retries automatically, and pause/stop remain independent. A fresh 401 clears the stale identity and releases the lock for sign-in.
+
+The browser regression initially timed out waiting for the missing recovery status. It now commits a real check-in, returns 503 to state reads, verifies both localized statuses and blocked submission, performs a real successful pause while locked, then restores state reads and observes polling recovery. A separate browser identity verifies a post-save 401 returns to an enabled sign-in and can re-enter. The earlier response-order test now observes the check-in JSON being consumed instead of sleeping 100ms. Existing held-save, bounded-burst and safety tests pass.
+
+Final `npm.cmd test`, `npm.cmd run build`, and `npm.cmd run test:browser` exited 0; `git diff --check` exited 0 with line-ending warnings. The two `API failure 23514` messages are expected rollback fixtures. No live server restart or physical-device testing.
+
+---
+
+## Bounded refresh correction — 2026-11-09
+
+The previous refresh coordination queued one read per trigger. Refresh now shares one pending follow-up while a read is active; a mutation waits for a read that starts after its response, including when an earlier follow-up has already begun. Safety requests remain independent.
+
+Chromium regression first reproduced 11 reads for a held state response and eight partner events. The corrected test holds the old response across two five-second polls and an event burst, commits a check-in, and verifies at most two reads and a fresh post-commit snapshot while controls remain locked. A second ordering holds a mutation response while the prior follow-up starts, then verifies a further read after that response. Existing held-save, pause and stop checks still pass. An unrelated timing-sensitive browser assertion was changed to wait for the delivered acknowledgement button rather than only the already-visible draft heading.
+
+Final `npm.cmd test`, `npm.cmd run build`, and `npm.cmd run test:browser` all exited 0. `git diff --check` exited 0 with line-ending warnings. Two intentional `API failure 23514` messages are rollback fixtures. No live server restart or physical-device testing.
+
+---
+
+## Reward review corrections — 2026-11-09
+
+- Reward request and decision history entries now carry an optional request ID; decisions also carry their immutable approved/declined outcome. The history view resolves only the associated request snapshot (title, description, cost); old generic history remains readable, and inbox notices remain generic. PostgreSQL checks both roles, duplicate decisions and archive state; Chromium checks both roles, both outcomes and the stopped archive, an injected legacy generic entry and absence of unrelated secret mission text.
+- Milestone navigation now retains unsaved composer fields and the existing edit target. Chromium exercises a genuinely unsaved draft while a partner's committed check-in response is held, then an unsaved edit to an existing draft, saving that edit to the original mission.
+- The reward form uses a disabled fieldset while saving and refreshing; independent pause/stop controls remain enabled. Chromium holds the committed reward response and then a separate authoritative state response, checks all three inputs disabled during both stages, then confirms the form unlocks and one reward exists. This exposed a pre-existing refresh-coalescing race: a busy refresh used to return without waiting. Refreshes now wait for preceding reads and perform their own read before returning.
+- Test-first evidence: missing history request metadata failed the focused PostgreSQL test; Chromium separately observed the unlocked reward input, missing detailed history and cleared unsaved title. An additional held-state test observed premature unlocking during refresh before the refresh coordination fix. A later browser run exposed a strict selector collision in an existing reflection assertion; it was narrowed to the saved paragraph.
+- Final verification: `npm.cmd test`, `npm.cmd run build`, and `npm.cmd run test:browser` each exited 0; `git diff --check` exited 0 with line-ending warnings. The two `API failure 23514` log lines are intentional rollback fixtures. Browser tests use disposable PostgreSQL and headless Chromium; no live server was restarted.
+
+---
+
+## Rewards and milestones — 2026-11-09
+
+Implemented the session reward catalog, snapshot requests and wife decisions using the existing PostgreSQL session row lock and retry-key transaction. Five distinct approved missions expose an optional ordinary bonus composer; nothing is created or delivered automatically. The existing imported-ideas reset/seed code was not changed.
+
+Test-first evidence: the focused experience test initially returned 404 `Unknown action` for reward creation; the browser test initially timed out waiting for the Rewards tab. After implementation, `npm.cmd test` and `npm.cmd run build` exited 0. The PostgreSQL suite exercises role restrictions, invalid and zero costs, request snapshots, insufficient funds, concurrent competing approvals and duplicate retries, transaction rollback, holds, archive/new-session isolation and unique mission progress. Two intentional constraint fixtures log `API failure 23514`.
+
+`npm.cmd run test:browser` exited 0 with two isolated roles exercising creation, requests, approval, insufficient-balance feedback and decline, and milestone availability during pause plus opening the optional composer without creating a mission. Reward navigation is included in 320/390/768px Hebrew/English overflow checks. `npm.cmd run test:production` exited 0 against a disposable PostgreSQL instance and production entry. Browser testing required fixes to test selectors and waiting for the asynchronous pause refresh; those intermediate failures are not passing evidence.
+
+No live server restart, deployment, dependency installation or commit. Physical-device and screen-reader checks were not performed.
+
+---
+
 ## Final five-cycle verification — 2026-11-09
 
 All five approved cycles implemented on `improve-shared-experience`, with separate implementation and independent subagent review. Final review found an own-save edit race; the correction received independent scoped **PASS / Ship**. The earlier current/archive report-loss finding was also fixed and independently re-reviewed. Entries below retain historical stage evidence; their pending-review statements are superseded by this section.

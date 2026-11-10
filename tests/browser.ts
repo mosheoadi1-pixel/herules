@@ -98,6 +98,7 @@ try{
     const savedCheckIn=await w.evaluate(async()=>{const data=await (await fetch('/api/state')).json();return data.sessions[0].checkIns[data.user.id];});
     assert.deepEqual(savedCheckIn,{minutes:25,energy:'low',mood:'quiet'});
     await w.getByLabel('Available minutes',{exact:true}).fill('25');await w.getByLabel('Energy').selectOption('low');await w.getByLabel('Mood').selectOption('quiet');
+    await h.waitForFunction(()=>[...document.querySelectorAll('button')].some(b=>b.textContent==='Save my check-in'&&!b.disabled));
     await h.getByLabel('Available minutes',{exact:true}).fill('40');await h.getByRole('button',{name:'Save my check-in',exact:true}).click();
      console.log('PASS cycle 2 gap: partner refresh preserves genuinely unsaved minutes/energy/mood; persisted own entry unchanged');
      await w.getByLabel('Available minutes',{exact:true}).fill('26');
@@ -114,7 +115,107 @@ try{
  await w.getByRole('navigation').getByRole('button',{name:'Agreement',exact:true}).click();
  w.on('dialog',(d:any)=>d.accept());h.on('dialog',(d:any)=>d.accept());
  await w.getByRole('button',{name:'I have read and agree',exact:true}).click();
- await h.getByRole('navigation').getByRole('button',{name:'Agreement',exact:true}).click();await h.getByRole('button',{name:'I have read and agree',exact:true}).click();
+  await h.getByRole('navigation').getByRole('button',{name:'Agreement',exact:true}).click();await h.getByRole('button',{name:'I have read and agree',exact:true}).click();
+  // Hold an old state read while real partner updates and a local mutation arrive.
+  let releaseOld!:()=>void,releaseFresh!:()=>void,oldStarted!:()=>void,freshStarted!:()=>void;
+  const oldGate=new Promise<void>(r=>releaseOld=r),freshGate=new Promise<void>(r=>releaseFresh=r);
+  const oldHeld=new Promise<void>(r=>oldStarted=r),freshHeld=new Promise<void>(r=>freshStarted=r);
+  let reads=0,freshSnapshot:any;
+  const stateHandler=async(route:any)=>{const number=++reads,response=await route.fetch();if(number===1){oldStarted();await oldGate;}else if(number===2){freshSnapshot=await response.json();freshStarted();await freshGate;}await route.fulfill({response}).catch(()=>{});};
+  await w.route('**/api/state',stateHandler);
+  try{
+    const sendPartner=async(count:number)=>h.evaluate(async(count:number)=>{const state=await(await fetch('/api/state')).json(),id=state.sessions.find((s:any)=>s.status==='active').id;for(let i=0;i<count;i++){const r=await fetch(`/api/sessions/${id}/message`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({key:crypto.randomUUID(),text:`refresh burst ${crypto.randomUUID()}`})});if(!r.ok)throw new Error(`burst ${r.status}`);}},count);
+    await sendPartner(1);await oldHeld;await sendPartner(8);
+    await new Promise(r=>setTimeout(r,10500)); // Two five-second polls while the old read is held.
+    await w.getByLabel('Available minutes',{exact:true}).fill('27');
+    const committed=w.waitForResponse((r:any)=>r.url().endsWith('/checkin')&&r.request().method()==='POST');
+    await w.getByRole('button',{name:'Save my check-in',exact:true}).click();assert.equal((await committed).status(),200);
+    releaseOld();await freshHeld;
+    assert.equal(freshSnapshot.sessions.find((s:any)=>s.status==='active').checkIns[freshSnapshot.user.id].minutes,27,'reconciliation read starts after mutation');
+    assert.equal(await w.getByLabel('Available minutes',{exact:true}).isDisabled(),true);
+    releaseFresh();
+    await w.waitForFunction(()=>[...document.querySelectorAll('button')].some(b=>b.textContent==='Save my check-in'&&!b.disabled));
+    await new Promise(r=>setTimeout(r,1000));
+    assert.ok(reads<=2,`burst must coalesce into at most two state reads, got ${reads}`);
+    assert.equal(await w.getByLabel('Available minutes',{exact:true}).inputValue(),'27');
+  }finally{releaseOld();releaseFresh();await w.unroute('**/api/state',stateHandler);}
+  // A read begun while the mutation response is held cannot satisfy that mutation.
+  let releaseA!:()=>void,releaseB!:()=>void,releaseC!:()=>void,releaseMutation!:()=>void;
+  let seenA!:()=>void,seenB!:()=>void,seenC!:()=>void,mutationCommitted!:()=>void;
+  const gateA=new Promise<void>(r=>releaseA=r),gateB=new Promise<void>(r=>releaseB=r),gateC=new Promise<void>(r=>releaseC=r),mutationGate=new Promise<void>(r=>releaseMutation=r);
+  const heldA=new Promise<void>(r=>seenA=r),heldB=new Promise<void>(r=>seenB=r),heldC=new Promise<void>(r=>seenC=r),mutationSaved=new Promise<void>(r=>mutationCommitted=r);
+  let orderedReads=0,afterResponse:any;
+  const orderedState=async(route:any)=>{const n=++orderedReads,response=await route.fetch();if(n===1){seenA();await gateA;}else if(n===2){seenB();await gateB;}else if(n===3){afterResponse=await response.json();seenC();await gateC;}await route.fulfill({response}).catch(()=>{});};
+  const heldMutation=async(route:any)=>{const response=await route.fetch();assert.equal(response.status(),200);mutationCommitted();await mutationGate;await route.fulfill({response}).catch(()=>{});};
+  await w.route('**/api/state',orderedState);await w.route('**/api/sessions/*/checkin',heldMutation);
+  await w.evaluate(()=>{const original=window.fetch;(window as any).originalFetch=original;(window as any).checkinParsed=false;window.fetch=async(...args)=>{const response=await original(...args);if(String(args[0]).endsWith('/checkin')){const json=response.json.bind(response);response.json=async()=>{const body=await json();(window as any).checkinParsed=true;return body;};}return response;};});
+  try{
+    await h.evaluate(async()=>{const state=await(await fetch('/api/state')).json(),id=state.sessions.find((s:any)=>s.status==='active').id;await fetch(`/api/sessions/${id}/message`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({key:crypto.randomUUID(),text:'refresh ordering'})});});
+    await heldA;await w.getByLabel('Available minutes',{exact:true}).fill('28');await w.getByRole('button',{name:'Save my check-in',exact:true}).click();await mutationSaved;
+    releaseA();await heldB;
+    const response=w.waitForResponse((r:any)=>r.url().endsWith('/checkin')&&r.request().method()==='POST');releaseMutation();await response;await w.waitForFunction(()=>(window as any).checkinParsed===true);
+    releaseB();await heldC;
+    assert.equal(afterResponse.sessions.find((s:any)=>s.status==='active').checkIns[afterResponse.user.id].minutes,28);
+    assert.equal(await w.getByLabel('Available minutes',{exact:true}).isDisabled(),true);
+    releaseC();await w.waitForFunction(()=>[...document.querySelectorAll('button')].some(b=>b.textContent==='Save my check-in'&&!b.disabled));
+  }finally{releaseA();releaseB();releaseC();releaseMutation();await w.unroute('**/api/state',orderedState);await w.unroute('**/api/sessions/*/checkin',heldMutation);await w.evaluate(()=>{window.fetch=(window as any).originalFetch;});}
+  const failedState=async(route:any)=>route.fulfill({status:503,contentType:'application/json',body:JSON.stringify({error:'temporary failure'})});
+  await w.route('**/api/state',failedState);
+  try{
+    await w.getByLabel('Available minutes',{exact:true}).fill('29');
+    const saved=w.waitForResponse((r:any)=>r.url().endsWith('/checkin')&&r.request().method()==='POST');
+    await w.getByRole('button',{name:'Save my check-in',exact:true}).click();assert.equal((await saved).status(),200);
+    await w.getByText('Waiting for a fresh server update before further actions.',{exact:false}).waitFor();
+    await w.getByRole('button',{name:'עברית',exact:true}).click();
+    await w.getByText('ממתינים לעדכון חדש מהשרת לפני פעולות נוספות.',{exact:false}).waitFor();
+    await w.getByRole('button',{name:'English',exact:true}).click();
+    assert.equal(await w.getByRole('button',{name:'Save my check-in',exact:true}).isDisabled(),true);
+    for(const name of ['Available minutes','Energy','Mood','Appreciation (optional)','Repeat next time (optional)'])assert.equal(await w.getByLabel(name).isDisabled(),true,`${name} disabled until reconciliation`);
+    await w.getByRole('navigation').getByRole('button',{name:'Rewards',exact:true}).click();
+    for(const name of ['Reward title','Reward description','Reward cost'])assert.equal(await w.getByLabel(name,{exact:true}).isDisabled(),true,`${name} disabled until reconciliation`);
+    const paused=w.waitForResponse((r:any)=>r.url().endsWith('/pause')&&r.request().method()==='POST');
+    await w.getByRole('button',{name:'Pause my play',exact:true}).click();assert.equal((await paused).status(),200);
+    assert.equal(await w.getByRole('button',{name:'Stop permanently',exact:true}).isEnabled(),true);
+  }finally{await w.unroute('**/api/state',failedState);}
+  await w.getByRole('button',{name:'Release my pause',exact:true}).waitFor({timeout:12000});
+  await w.getByRole('button',{name:'Release my pause',exact:true}).click();
+  await w.waitForFunction(()=>[...document.querySelectorAll('button')].some(b=>b.textContent==='Save my check-in'&&!b.disabled));
+  assert.equal(await w.getByLabel('Available minutes',{exact:true}).inputValue(),'29');
+  await w.getByRole('navigation').getByRole('button',{name:'Agreement',exact:true}).click();
+  // A fresh 401 releases the reconciliation lock into the sign-in flow.
+  await x.locator('select[name="role"]').selectOption('wife');await x.getByRole('checkbox').check();await x.getByRole('button',{name:'Enter',exact:true}).click();
+  await x.getByRole('button',{name:'Save my check-in',exact:true}).waitFor();
+  const unauthorized=async(route:any)=>route.fulfill({status:401,contentType:'application/json',body:'{"error":"Please sign in"}'});
+  const expireAfterSave=async(route:any)=>{const response=await route.fetch();assert.equal(response.status(),200);await x.route('**/api/state',unauthorized);await route.fulfill({response});};
+  await x.route('**/api/sessions/*/checkin',expireAfterSave);
+  try{
+    await x.getByLabel('Available minutes',{exact:true}).fill('30');await x.getByRole('button',{name:'Save my check-in',exact:true}).click();
+    await x.getByRole('button',{name:'Enter',exact:true}).waitFor();assert.equal(await x.getByRole('button',{name:'Enter',exact:true}).isEnabled(),true);
+  }finally{await x.unroute('**/api/state',unauthorized);await x.unroute('**/api/sessions/*/checkin',expireAfterSave);}
+  await x.locator('select[name="role"]').selectOption('wife');await x.getByRole('checkbox').check();await x.getByRole('button',{name:'Enter',exact:true}).click();
+  await x.getByRole('button',{name:'Sign out',exact:true}).click();await x.getByRole('button',{name:'Enter',exact:true}).waitFor();
+  // An unkeyed request can arrive after timeout and after a successful state read.
+  let releaseLate!:()=>void,lateEntered!:()=>void,lateRequest:any;
+  const lateGate=new Promise<void>(r=>releaseLate=r),lateHeld=new Promise<void>(r=>lateEntered=r);
+  const lateHandler=async(route:any)=>{lateRequest={url:route.request().url(),headers:route.request().headers(),body:route.request().postData()};lateEntered();await lateGate;await route.abort().catch(()=>{});};
+  await w.route('**/api/sessions/*/checkin',lateHandler);
+  try{
+    await w.getByLabel('Available minutes',{exact:true}).fill('31');await w.getByRole('button',{name:'Save my check-in',exact:true}).click();await lateHeld;
+    await w.getByText('The timed-out action may still complete after a refresh.',{exact:false}).waitFor({timeout:20000});
+    const unlock=w.getByRole('button',{name:'I understand the risk; unlock actions',exact:true});await unlock.waitFor();
+    await w.waitForFunction(()=>[...document.querySelectorAll('button')].some(b=>b.textContent==='I understand the risk; unlock actions'&&!b.disabled));
+    assert.equal(await w.getByRole('button',{name:'Save my check-in',exact:true}).isDisabled(),true);
+    const beforeLate=await h.evaluate(async()=> (await(await fetch('/api/state')).json()).sessions[0].checkIns);
+    assert.notEqual(beforeLate[guestIds[0]].minutes,31);
+    const late=await fetch(lateRequest.url,{method:'POST',headers:{Origin:'http://127.0.0.1:4180',Cookie:lateRequest.headers.cookie,'Content-Type':'application/json'},body:lateRequest.body});assert.equal(late.status,200);
+    const afterLate=await h.evaluate(async()=> (await(await fetch('/api/state')).json()).sessions[0].checkIns);assert.equal(afterLate[guestIds[0]].minutes,31);
+    assert.equal(await w.getByRole('button',{name:'Save my check-in',exact:true}).isDisabled(),true);
+    await w.reload();await w.getByText('The timed-out action may still complete after a refresh.',{exact:false}).waitFor();
+    assert.equal(await w.getByRole('button',{name:'Save my check-in',exact:true}).isDisabled(),true);
+    await w.getByRole('button',{name:'I understand the risk; unlock actions',exact:true}).click();
+  }finally{releaseLate();await w.unroute('**/api/sessions/*/checkin',lateHandler);}
+  await w.getByLabel('Available minutes',{exact:true}).fill('25');await w.getByRole('button',{name:'Save my check-in',exact:true}).click();
+  console.log('PASS bounded refresh: held stale read, event burst and committed mutation coalesce into fresh reconciliation');
   await w.getByRole('navigation').getByRole('button',{name:'Missions',exact:true}).click();
   await w.getByText('New mission to review',{exact:true}).click();
  await w.getByLabel('Title',{exact:true}).fill('Private tea invitation');await w.getByLabel('Mission text and boundaries',{exact:true}).fill('Would you like to prepare optional mint tea?');
@@ -181,7 +282,58 @@ try{
    console.log('PASS cycle 3 review regression: unsaved written report survives current → archive → current; API remains acknowledged without submission');
   await h.getByLabel('Written completion',{exact:true}).fill('Tea offered freely.');await h.getByRole('button',{name:'Submit completion',exact:true}).click();
  await w.getByRole('button',{name:'Approve and award once',exact:true}).click();
-   await w.getByText('5 points',{exact:false}).first().waitFor();
+    await w.getByText('5 points',{exact:false}).first().waitFor();
+    await w.getByRole('navigation').getByRole('button',{name:'Rewards',exact:true}).click();
+    await w.getByLabel('Reward title',{exact:true}).fill('Shared tea');
+    await w.getByLabel('Reward description',{exact:true}).fill('A cup together');
+    await w.getByLabel('Reward cost',{exact:true}).fill('3');
+    let releaseReward!:()=>void,rewardCommitted!:()=>void;
+    const rewardGate=new Promise<void>(r=>releaseReward=r),rewardSaved=new Promise<void>(r=>rewardCommitted=r);
+    const rewardHandler=async(route:any)=>{const response=await route.fetch();assert.equal(response.status(),200);rewardCommitted();await rewardGate;await route.fulfill({response}).catch(()=>{});};
+    let releaseRefresh!:()=>void,refreshStarted!:()=>void;
+    const refreshGate=new Promise<void>(r=>releaseRefresh=r),refreshHeld=new Promise<void>(r=>refreshStarted=r);
+    const refreshHandler=async(route:any)=>{const response=await route.fetch();refreshStarted();await refreshGate;await route.fulfill({response}).catch(()=>{});};
+    await w.route('**/api/sessions/*/reward',rewardHandler);
+    try{
+      await w.getByRole('button',{name:'Create reward',exact:true}).click();await rewardSaved;
+      for(const name of ['Reward title','Reward description','Reward cost'])assert.equal(await w.getByLabel(name,{exact:true}).isDisabled(),true,`${name} locked until save refresh`);
+      assert.equal(await w.getByRole('button',{name:'Pause my play',exact:true}).isEnabled(),true);
+      assert.equal(await w.getByRole('button',{name:'Stop permanently',exact:true}).isEnabled(),true);
+      await w.route('**/api/state',refreshHandler);
+      releaseReward();await refreshHeld;
+      for(const name of ['Reward title','Reward description','Reward cost'])assert.equal(await w.getByLabel(name,{exact:true}).isDisabled(),true,`${name} locked during authoritative refresh`);
+      releaseRefresh();await w.unroute('**/api/state',refreshHandler);
+      await w.waitForFunction(()=>[...document.querySelectorAll('button')].some(b=>b.textContent==='Create reward'&&!b.disabled));
+      assert.equal(await w.getByLabel('Reward title',{exact:true}).inputValue(),'');
+      const savedRewards=await w.evaluate(async()=> (await(await fetch('/api/state')).json()).sessions[0].rewards);
+      assert.equal(savedRewards.filter((r:any)=>r.title==='Shared tea').length,1);
+    }finally{releaseReward();releaseRefresh();await w.unroute('**/api/state',refreshHandler);await w.unroute('**/api/sessions/*/reward',rewardHandler);}
+    await h.getByRole('navigation').getByRole('button',{name:'Rewards',exact:true}).click();
+    await h.getByRole('button',{name:'Request reward',exact:true}).click();
+    await w.getByRole('button',{name:'Approve reward',exact:true}).waitFor();
+    await h.getByRole('button',{name:'Request reward',exact:true}).click();
+    await w.getByRole('button',{name:'Approve reward',exact:true}).first().click();
+    await h.getByText('2 points available',{exact:true}).waitFor();
+    await w.getByRole('button',{name:'Approve reward',exact:true}).click();
+    await w.getByRole('alert').getByText('Not enough points to approve this reward. The request remains pending.',{exact:false}).waitFor();
+    await w.getByRole('button',{name:'Decline reward',exact:true}).click();
+    await h.getByText('3 points · Declined',{exact:true}).waitFor();
+    await pool.query("UPDATE sessions SET data=jsonb_set(data,'{history}',data->'history' || jsonb_build_array(jsonb_build_object('at',$1::bigint,'event','reward-decision','by','server'))) WHERE status='active'",[Date.now()]);
+    for(const page of [w,h]){
+      await page.getByRole('navigation').getByRole('button',{name:'History',exact:true}).click();
+      await page.locator('article').filter({hasText:'Reward request decided'}).filter({hasText:'Shared tea'}).filter({hasText:'Approved'}).waitFor();
+      await page.locator('article').filter({hasText:'Reward request decided'}).filter({hasText:'Shared tea'}).filter({hasText:'Declined'}).waitFor();
+      assert.equal(await page.locator('article').filter({hasText:'Reward request decided'}).filter({hasText:'Shared tea'}).filter({hasText:'A cup together'}).filter({hasText:'3 points'}).count(),2);
+      await page.locator('article').filter({hasText:'Reward request decided'}).filter({hasText:'Server'}).waitFor();
+      assert.equal(await page.getByText('Private tea invitation',{exact:true}).count(),0);
+      await page.getByRole('navigation').getByRole('button',{name:'Rewards',exact:true}).click();
+    }
+    await h.getByRole('button',{name:'עברית',exact:true}).click();
+    assert.equal(await h.locator('html').getAttribute('dir'),'rtl');
+    await h.getByRole('heading',{name:'חנות הפרסים',exact:true}).waitFor();
+    await h.getByRole('button',{name:'English',exact:true}).click();
+    await w.getByRole('navigation').getByRole('button',{name:'Missions',exact:true}).click();
+    await h.getByRole('navigation').getByRole('button',{name:'Missions',exact:true}).click();
    await w.getByText('New mission to review',{exact:true}).click();
    assert.equal(await w.getByLabel('Completion style').inputValue(),'simple');
    await w.getByLabel('Title',{exact:true}).fill('Simple closing invitation');
@@ -192,7 +344,49 @@ try{
    await h.getByRole('button',{name:'Read, acknowledge and choose to participate',exact:true}).click();
    assert.equal(await h.getByLabel('Written completion',{exact:true}).count(),0);
    await h.getByRole('button',{name:'Done',exact:true}).click();
-   await w.getByRole('button',{name:'Approve and award once',exact:true}).click();
+    await w.getByRole('button',{name:'Approve and award once',exact:true}).click();
+    const post=async(page:any,op:string,body:any)=>page.evaluate(async({op,body}:any)=>{const state=await(await fetch('/api/state')).json();const session=state.sessions.find((s:any)=>s.status==='active');const r=await fetch(`/api/sessions/${session.id}/${op}`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});if(!r.ok)throw new Error(`${op}: ${r.status}`);return r.json();},{op,body});
+    for(let i=0;i<3;i++){
+      const mission=(await post(w,'mission',{key:crypto.randomUUID(),title:`Milestone browser ${i}`,text:'Optional',points:0})).mission;
+      await post(w,'deliver',{mission:mission.id});await post(h,'ack',{mission:mission.id});await post(h,'complete',{key:crypto.randomUUID(),mission:mission.id,expectedVersion:0});await post(w,'review',{key:crypto.randomUUID(),mission:mission.id,submissionVersion:1,approve:true});
+    }
+    await w.getByRole('navigation').getByRole('button',{name:'Rewards',exact:true}).click();
+    await w.getByText('Unique approved missions: 5/5',{exact:true}).waitFor();
+    const beforeBonus=await w.evaluate(async()=> (await(await fetch('/api/state')).json()).sessions[0].missions.length);
+    await w.getByRole('button',{name:'Pause my play',exact:true}).click();
+    await w.getByRole('button',{name:'Release my pause',exact:true}).waitFor();
+    assert.equal(await w.getByRole('button',{name:'Draft a bonus invitation',exact:true}).isDisabled(),true);
+    await w.getByRole('button',{name:'Release my pause',exact:true}).click();
+    await w.getByRole('navigation').getByRole('button',{name:'Missions',exact:true}).click();
+    await w.getByText('New mission to review',{exact:true}).click();
+    await w.getByLabel('Title',{exact:true}).fill('Unsaved bonus navigation');
+    await w.getByLabel('Mission text and boundaries').fill('Keep this unsaved text');
+    let releasePartner!:()=>void,partnerCommitted!:()=>void;
+    const partnerGate=new Promise<void>(r=>releasePartner=r),partnerSaved=new Promise<void>(r=>partnerCommitted=r);
+    const partnerHandler=async(route:any)=>{const response=await route.fetch();assert.equal(response.status(),200);partnerCommitted();await partnerGate;await route.fulfill({response}).catch(()=>{});};
+    await h.route('**/api/sessions/*/checkin',partnerHandler);
+    try{
+      await h.getByLabel('Available minutes',{exact:true}).fill('44');await h.getByRole('button',{name:'Save my check-in',exact:true}).click();await partnerSaved;
+      await w.getByText('44 minutes · Energy:',{exact:false}).waitFor();
+      await w.getByRole('navigation').getByRole('button',{name:'Rewards',exact:true}).click();
+      await w.getByRole('button',{name:'Draft a bonus invitation',exact:true}).click();
+      assert.equal(await w.getByLabel('Title',{exact:true}).isVisible(),true);
+      assert.equal(await w.getByLabel('Title',{exact:true}).inputValue(),'Unsaved bonus navigation');
+      assert.equal(await w.getByLabel('Mission text and boundaries').inputValue(),'Keep this unsaved text');
+    }finally{releasePartner();await h.unroute('**/api/sessions/*/checkin',partnerHandler);}
+    await h.waitForFunction(()=>[...document.querySelectorAll('button')].some(b=>b.textContent==='Save my check-in'&&!b.disabled));
+    await h.getByLabel('Available minutes',{exact:true}).fill('40');await h.getByRole('button',{name:'Save my check-in',exact:true}).click();
+    assert.equal(await w.evaluate(async()=> (await(await fetch('/api/state')).json()).sessions[0].missions.length),beforeBonus);
+    await w.getByRole('button',{name:'Save draft only',exact:true}).click();
+    await w.getByRole('region',{name:'Current invitation',exact:true}).getByRole('button',{name:'Edit draft',exact:true}).click();
+    await w.getByLabel('Mission text and boundaries').fill('Unsaved edit remains');
+    await w.getByRole('navigation').getByRole('button',{name:'Rewards',exact:true}).click();
+    await w.getByRole('button',{name:'Draft a bonus invitation',exact:true}).click();
+    assert.equal(await w.getByText('Edit draft',{exact:true}).first().isVisible(),true);
+    assert.equal(await w.getByLabel('Mission text and boundaries').inputValue(),'Unsaved edit remains');
+    await w.getByRole('button',{name:'Save draft only',exact:true}).click();
+    await w.getByRole('region',{name:'Current invitation',exact:true}).getByText('Unsaved edit remains',{exact:true}).waitFor();
+    await w.getByRole('region',{name:'Current invitation',exact:true}).getByRole('button',{name:'Cancel mission',exact:true}).click();
    console.log('PASS cycle 4 browser: written choice and simple Done both retain explicit acknowledgement and wife review');
   // The selected order changes focus only; draft editing and other/archive cards stay reachable.
   const makeDraft=async(title:string)=>{
@@ -226,8 +420,9 @@ try{
   await w.getByRole('region',{name:'Current invitation',exact:true}).getByText('Edited optional conversation',{exact:true}).waitFor();
   assert.equal(await w.getByLabel('Title',{exact:true}).isVisible(),false);
   await w.getByRole('button',{name:'Send now',exact:true}).click();
-  await h.getByRole('region',{name:'Current invitation',exact:true}).getByRole('heading',{name:'Sequence second',exact:true}).waitFor();
-  assert.equal(await h.getByRole('button',{name:'Read, acknowledge and choose to participate',exact:true}).count(),1);
+   await h.getByRole('region',{name:'Current invitation',exact:true}).getByRole('heading',{name:'Sequence second',exact:true}).waitFor();
+   await h.getByRole('button',{name:'Read, acknowledge and choose to participate',exact:true}).waitFor();
+   assert.equal(await h.getByRole('button',{name:'Read, acknowledge and choose to participate',exact:true}).count(),1);
   assert.equal(await h.getByLabel('Written completion',{exact:true}).count(),0);
   await w.getByRole('button',{name:'Cancel mission',exact:true}).click();
   await w.getByRole('region',{name:'Current invitation',exact:true}).getByRole('heading',{name:'Sequence first',exact:true}).waitFor();
@@ -294,13 +489,13 @@ try{
   for(const language of ['he','en']){
    const current=await w.locator('html').getAttribute('lang');if(current!==language)await w.getByRole('button',{name:language==='he'?'עברית':'English',exact:true}).click();
    assert.equal(await w.locator('html').getAttribute('dir'),language==='he'?'rtl':'ltr');
-   for(const id of ['missions','agreement','library','messages','inbox','history']){
-    const index=['missions','agreement','library','messages','inbox','history'].indexOf(id);await w.getByRole('navigation').getByRole('button').nth(index).click();
+    for(const id of ['missions','rewards','agreement','library','messages','inbox','history']){
+     const index=['missions','rewards','agreement','library','messages','inbox','history'].indexOf(id);await w.getByRole('navigation').getByRole('button').nth(index).click();
     assert.ok(await w.evaluate(()=>document.documentElement.scrollWidth<=window.innerWidth),`overflow ${width} ${language} ${id}`);
    }
   }
  }
- console.log('PASS mobile: 320/390/768px, Hebrew RTL + English LTR, all six session tabs have no horizontal overflow');
+  console.log('PASS mobile: 320/390/768px, Hebrew RTL + English LTR, all seven session tabs have no horizontal overflow');
  // Install an old root worker and old cache, then let the app replace it at the same URL.
  const upgrade=await browser.newContext();const p=await upgrade.newPage();
  serveOldWorker=true;
@@ -326,6 +521,10 @@ try{
  try{
   await w.getByRole('button',{name:'Send message',exact:true}).click();await commitReached;
   await w.getByRole('alert').filter({hasText:'Request timed out'}).waitFor({timeout:20000});
+   await w.getByText('The timed-out action may still complete after a refresh.',{exact:false}).waitFor();
+   assert.equal(await w.getByRole('button',{name:'Send message',exact:true}).isDisabled(),true);
+   assert.equal(await w.getByRole('button',{name:'Pause my play',exact:true}).isEnabled(),true);
+   await w.getByRole('button',{name:'I understand the risk; unlock actions',exact:true}).click();
   await w.getByRole('button',{name:'Send message',exact:true}).click();
   await w.waitForFunction(()=>(document.querySelector('textarea[name="text"]') as HTMLTextAreaElement)?.value==='');
   for(let i=0;i<50&&timeoutKeys.length<2;i++)await new Promise(r=>setTimeout(r,100));
@@ -333,7 +532,7 @@ try{
   const snapshot=await w.evaluate(async()=>{const r=await fetch('/api/state');return r.json();});
   assert.equal(snapshot.sessions.flatMap((s:any)=>s.messages).filter((m:any)=>m.text==='Timeout retry must appear once').length,1);
  }finally{releaseTimeout();await w.unroute(timeoutPattern,timeoutHandler);}
- console.log('PASS timeout: committed response stalled, actual 15-second timeout releases ordinary controls; retry reuses UUID and creates no duplicate');
+  console.log('PASS timeout: explicit risk acknowledgement precedes same-key retry; committed message appears once');
  async function safetyWhilePending(kind:'mission'|'message'){
   await w.getByRole('navigation').getByRole('button',{name:kind==='mission'?'Missions':'Messages',exact:true}).click();
    if(kind==='mission'){if(!await w.getByLabel('Title',{exact:true}).isVisible())await w.getByText('New mission to review',{exact:true}).click();await w.getByLabel('Title',{exact:true}).fill('Held draft must not arrive');await w.getByLabel('Mission text and boundaries').fill('Held ordinary draft');}
@@ -349,13 +548,18 @@ try{
    const [pause]=await Promise.all([w.waitForResponse((r:any)=>r.url().endsWith('/pause')&&r.request().method()==='POST',{timeout:5000}),w.getByRole('button',{name:'Pause my play',exact:true}).click({timeout:2000})]);assert.equal(pause.status(),200);
    const [stop]=await Promise.all([w.waitForResponse((r:any)=>r.url().endsWith('/stop')&&r.request().method()==='POST',{timeout:5000}),w.getByRole('button',{name:'Stop permanently',exact:true}).click({timeout:2000})]);assert.equal(stop.status(),200);
    const late=w.waitForResponse((r:any)=>r.url().endsWith('/'+kind)&&r.request().method()==='POST');release();assert.equal((await late).status(),409);
-     await w.getByRole('heading',{name:'Stopped permanently',exact:true}).waitFor();
+      await w.getByRole('heading',{name:'Stopped permanently',exact:true}).waitFor();
+      if(kind==='mission')for(const page of [w,h]){
+        await page.getByRole('navigation').getByRole('button',{name:'History',exact:true}).click();
+        await page.locator('article').filter({hasText:'Reward request decided'}).filter({hasText:'Shared tea'}).filter({hasText:'Approved'}).waitFor();
+        await page.locator('article').filter({hasText:'Reward request decided'}).filter({hasText:'Shared tea'}).filter({hasText:'Declined'}).waitFor();
+      }
      await w.getByRole('region',{name:'Next step',exact:true}).getByRole('button',{name:'Reflect on this session',exact:true}).click();
      assert.equal(await w.getByLabel('Appreciation (optional)').evaluate((el:HTMLElement)=>el===document.activeElement),true);
     const closing=w.getByRole('region',{name:'Optional closing reflection',exact:true});
      await closing.getByLabel('Repeat next time (optional)').fill('Another quiet conversation.');
     await closing.getByRole('button',{name:'Save my reflection',exact:true}).click();
-     await closing.getByText('Another quiet conversation.',{exact:false}).waitFor();
+      await closing.locator('p').filter({hasText:'Another quiet conversation.'}).waitFor();
      for(const width of [320,390,768]){
        await w.setViewportSize({width,height:844});
        for(const language of ['he','en']){

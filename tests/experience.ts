@@ -67,12 +67,16 @@ try {
   assert.deepEqual((await h(`/sessions/${id}`)).session.checkIns,checked.checkIns);
   assert.deepEqual((await h('/state')).sessions.find((s:Session)=>s.id===id).checkIns,checked.checkIns);
   await action(w,'mission',{key:randomUUID(),title:'Still held',text:'Check-in is not approval'},409);
+  // Reward creation is gameplay and must remain blocked until both approve.
+  await action(w,'reward',{key:randomUUID(),title:'Tea',description:'A shared cup',cost:0},409);
   // A misplaced gameplay guard must not block communication or let it resume the clock.
   const before=await state(),message={key:randomUUID(),text:'Let us review at our own pace'};
   const messages=await Promise.all([action(w,'message',message),action(w,'message',message)]);
   assert.deepEqual(messages[0],messages[1]);
   assert.equal((await state()).messages.length,1);assert.deepEqual((await state()).approvals,[]);
   await approve();
+  const reward=(await action(w,'reward',{key:randomUUID(),title:'Tea',description:'A shared cup',cost:0})).reward;
+  assert.equal(reward.cost,0);
   // Style defaults/immutability, legacy fallback, and review CAS must survive both styles.
   for(const style of ['simple','written','legacy'] as const){
     const m=(await action(w,'mission',{key:randomUUID(),title:'Completion choice',text:'Optional conversation',points:0,...(style==='written'?{completionStyle:'written'}:{})})).mission;
@@ -253,6 +257,69 @@ try {
   assert.equal((await state()).checkIns,undefined,'New sessions do not inherit check-ins');
   console.log('PASS experience: own validated check-ins, spoof resistance, shared visibility, updates/boundaries, holds, terminal rejection and unchanged gameplay');
   console.log('PASS experience: revised agreements cancel adjustments, stale revision blocked, distinct-key replacement race, terminal stop/expiry block new operations');
+  id=(await w('/sessions',{terms:'Rewards test',minutes:30})).session.id;
+  assert.equal((await state()).rewards,undefined);assert.equal((await state()).rewardRequests,undefined);assert.equal((await state()).points,0);
+  const rewardBody={key:randomUUID(),title:'Shared tea',description:'A quiet cup',cost:4};
+  await action(w,'reward',rewardBody,409);await approve();
+  await action(h,'reward',{...rewardBody,key:randomUUID()},403);
+  for(const cost of [-1,1.5,'4',null])await action(w,'reward',{...rewardBody,key:randomUUID(),cost},400);
+  const created=(await action(w,'reward',rewardBody)).reward;
+  assert.deepEqual((await action(w,'reward',rewardBody)).reward,created);
+  await action(w,'reward-request',{key:randomUUID(),reward:created.id},403);
+  const reqBody={key:randomUUID(),reward:created.id};
+  const requested=await Promise.all([action(h,'reward-request',reqBody),action(h,'reward-request',reqBody)]);
+  assert.deepEqual(requested[0],requested[1]);const request=requested[0].request;
+  assert.equal((await state()).points,0);
+  await action(h,'reward-decision',{key:randomUUID(),request:request.id,approve:true},403);
+  await action(w,'reward-decision',{key:randomUUID(),request:request.id,approve:true},409);
+  assert.equal((await state()).rewardRequests?.[0].status,'pending');
+  await pool.query("UPDATE sessions SET data=jsonb_set(data,'{rewards,0,title}',to_jsonb('Changed catalog'::text)) WHERE id=$1",[id]);
+  const snapshot=(await state()).rewardRequests![0];assert.deepEqual([snapshot.title,snapshot.description,snapshot.cost],['Shared tea','A quiet cup',4]);
+  const declinedReward=(await action(h,'reward-request',{key:randomUUID(),reward:created.id})).request;
+  await action(w,'reward-decision',{key:randomUUID(),request:declinedReward.id,approve:false});
+  for(const who of [w,h]){
+    const view=(await who(`/sessions/${id}`)).session,history=view.history;
+    assert.ok(history.some((n:any)=>n.event==='reward-request'&&n.rewardRequestId===declinedReward.id));
+    assert.ok(history.some((n:any)=>n.event==='reward-decision'&&n.rewardRequestId===declinedReward.id&&n.outcome==='declined'));
+    assert.ok(view.inbox.filter((n:any)=>n.event==='reward-decision').every((n:any)=>!('rewardRequestId' in n)&&!('outcome' in n)));
+  }
+  assert.equal((await state()).points,0);
+  const free=(await action(w,'reward',{key:randomUUID(),title:'Free',description:'Optional',cost:0})).reward;
+  const freeRequest=(await action(h,'reward-request',{key:randomUUID(),reward:free.id})).request;
+  const freeDecision={key:randomUUID(),request:freeRequest.id,approve:true};
+  await pool.query("ALTER TABLE request_keys ADD CONSTRAINT reject_reward_decision CHECK(kind<>'reward-decision') NOT VALID");
+  try {await action(w,'reward-decision',freeDecision,500);assert.equal((await state()).rewardRequests?.find(r=>r.id===freeRequest.id)?.status,'pending');}
+  finally {await pool.query('ALTER TABLE request_keys DROP CONSTRAINT reject_reward_decision');}
+  const freeResults=await Promise.all([action(w,'reward-decision',freeDecision),action(w,'reward-decision',freeDecision)]);assert.deepEqual(freeResults[0],freeResults[1]);assert.equal((await state()).points,0);
+  assert.equal((await state()).history.filter(n=>n.event==='reward-decision'&&(n as any).rewardRequestId===freeRequest.id&&(n as any).outcome==='approved').length,1);
+  const refused=(await action(w,'mission',{key:randomUUID(),title:'Freely refused',text:'Optional',points:7})).mission;
+  await action(w,'deliver',{mission:refused.id});await action(h,'refuse',{mission:refused.id});assert.equal((await state()).points,0);
+  for(let i=0;i<5;i++){
+    const m=(await action(w,'mission',{key:randomUUID(),title:`Milestone ${i}`,text:'Optional',points:1})).mission;
+    await action(w,'deliver',{mission:m.id});await action(h,'ack',{mission:m.id});await action(h,'complete',{key:randomUUID(),mission:m.id,expectedVersion:0});
+    const decision={key:randomUUID(),mission:m.id,submissionVersion:1,approve:true};await action(w,'review',decision);await action(w,'review',decision);
+    assert.equal(new Set((await state()).missions.filter(m=>m.status==='approved').map(m=>m.id)).size,i+1);
+  }
+  const rival=(await action(h,'reward-request',{key:randomUUID(),reward:created.id})).request;
+  const decisions=[request.id,rival.id].map(request=>({key:randomUUID(),request,approve:true}));
+  const raced=await Promise.all(decisions.map(b=>w(`/sessions/${id}/reward-decision`,b,[200,409])));
+  assert.deepEqual(raced.map(v=>v._status).sort(),[200,409]);assert.equal((await state()).points,1);
+  const winner=decisions[raced.findIndex(v=>v._status===200)];
+  const retry=await action(w,'reward-decision',winner);assert.equal(retry.points,1);
+  await action(w,'reward-decision',{...winner,key:randomUUID()},409);
+  const beforePause=await state();await action(h,'pause');
+  for(const [who,op,body] of [[w,'reward',rewardBody],[h,'reward-request',reqBody],[w,'reward-decision',{key:randomUUID(),request:rival.id,approve:false}]] as const)await action(who,op,{...body,key:randomUUID()},409);
+  assert.equal(new Set((await state()).missions.filter(m=>m.status==='approved').map(m=>m.id)).size,5);
+  await action(h,'resume');await action(h,'stop');
+  await action(w,'reward',{...rewardBody,key:randomUUID()},409);await action(h,'reward-request',{...reqBody,key:randomUUID()},409);
+  await action(w,'reward-decision',{key:randomUUID(),request:decisions.find(v=>v.request!==winner.request)!.request,approve:false},409);
+  assert.deepEqual(await action(w,'reward-decision',winner),retry);
+  assert.deepEqual((await h(`/sessions/${id}`)).session.rewardRequests,(await state()).rewardRequests);
+  assert.ok((await h(`/sessions/${id}`)).session.history.some((n:any)=>n.rewardRequestId===declinedReward.id&&n.outcome==='declined'));
+  assert.ok(beforePause.history.some(n=>n.event==='reward-request')&&beforePause.history.some(n=>n.event==='reward-decision'));
+  id=(await w('/sessions',{terms:'Fresh store',minutes:30})).session.id;
+  assert.equal((await state()).rewards,undefined);assert.equal((await state()).rewardRequests,undefined);assert.equal((await state()).points,0);
+  console.log('PASS rewards: roles, validation, snapshots, holds, archive, retries, five unique approvals and competing deductions');
 } finally {
   if(server)await new Promise<void>(resolve=>server!.close(()=>resolve()));
   await pool.end();await db.stop();await rm(directory,{recursive:true,force:true,maxRetries:10,retryDelay:100});

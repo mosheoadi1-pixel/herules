@@ -17,11 +17,13 @@ export type Reflection=z.infer<typeof reflectionSchema>;
 const fail = (status: number, message: string): never => { throw Object.assign(new Error(message), { status }); };
 export type User = { id: string; email: string|null; nickname: string|null; role: 'wife'|'husband'; pair_id: string|null };
 export type Mission = { id: string; revision: number; title: string; text: string; points: number; secret: boolean; completionStyle?: 'simple'|'written'; status: string; scheduledAt?: number; completion?: string; submissionVersion?: number; deliveredAt?: number; acknowledgedAt?: number; adjustment?: {reason:'softer'|'adjust';note?:string;at:number}; replaces?: string; replacementId?: string };
-export type Session = { id: string; status: string; terms: string; revision: number; revisions: { revision: number; terms: string }[]; approvals: string[]; pauses: string[]; remaining: number; last: number; started: boolean; points: number; missions: Mission[]; sequence?: string[]; checkIns?: Record<string,CheckIn>; reflections?: Record<string,Reflection>; messages: {id:string; by:string; text:string; at:number}[]; history: { at:number; event:string; by:string }[]; inbox: {id:string; at:number; event:string; readBy:string[]}[] };
+export type Reward = {id:string; title:string; description:string; cost:number};
+export type RewardRequest = Reward & {rewardId:string; status:'pending'|'approved'|'declined'};
+export type Session = { id: string; status: string; terms: string; revision: number; revisions: { revision: number; terms: string }[]; approvals: string[]; pauses: string[]; remaining: number; last: number; started: boolean; points: number; missions: Mission[]; rewards?: Reward[]; rewardRequests?: RewardRequest[]; sequence?: string[]; checkIns?: Record<string,CheckIn>; reflections?: Record<string,Reflection>; messages: {id:string; by:string; text:string; at:number}[]; history: { at:number; event:string; by:string; rewardRequestId?:string; outcome?:'approved'|'declined' }[]; inbox: {id:string; at:number; event:string; readBy:string[]}[] };
 const suspended = (s: Session) => s.approvals.length !== 2 || s.pauses.length > 0;
 const terminal = (s: Session) => ['stopped','expired'].includes(s.status);
-function notice(s: Session, event: string, by: string) {
-  const at = Date.now(); s.history.push({ at, event, by });
+function notice(s: Session, event: string, by: string, reward?:{rewardRequestId:string;outcome?:'approved'|'declined'}) {
+  const at = Date.now(); s.history.push({ at, event, by, ...reward });
   s.inbox.push({ id: randomUUID(), at, event, readBy: [] });
 }
 function advance(s: Session) {
@@ -164,10 +166,10 @@ export async function createApp(pool: Pool, origin: string) {
         }
         return {ok:true};
       }
-      const keyedRequest=['complete','review','adjust','replace'].includes(op);
+      const keyedRequest=['complete','review','adjust','replace','reward','reward-request','reward-decision'].includes(op);
       let requestKey:string|undefined;
       if(keyedRequest){
-        if(u.role!==(['review','replace'].includes(op)?'wife':'husband'))fail(403,'Wrong role for action');
+        if(u.role!==(['review','replace','reward','reward-decision'].includes(op)?'wife':'husband'))fail(403,'Wrong role for action');
         requestKey=uuid.parse(b.key);
         const previous=await c.query('SELECT result FROM request_keys WHERE session_id=$1 AND user_id=$2 AND kind=$3 AND key=$4',[s.id,u.id,op,requestKey]);
         // A committed retry is a read of the original result, even after return, pause or stop.
@@ -207,6 +209,20 @@ export async function createApp(pool: Pool, origin: string) {
       else {
         gameplay();
         if(op==='extend'){wife();s.remaining+=z.number().int().min(1).max(525600).parse(b.minutes)*60000;}
+        else if(op==='reward'){
+          wife();const data=z.object({title:z.string().trim().min(1).max(160),description:text,cost:z.number().int().min(0).max(Number.MAX_SAFE_INTEGER)}).parse(b);
+          const reward={...data,id:randomUUID()};(s.rewards??=[]).push(reward);response={reward};
+        }
+        else if(op==='reward-request'){
+          husband();const rewardId=uuid.parse(b.reward);const reward=s.rewards?.find(r=>r.id===rewardId)??fail(404,'Reward unavailable');
+          const request:RewardRequest={...reward,id:randomUUID(),rewardId:reward.id,status:'pending'};(s.rewardRequests??=[]).push(request);response={request};
+        }
+        else if(op==='reward-decision'){
+          wife();const requestId=uuid.parse(b.request);const request=s.rewardRequests?.find(r=>r.id===requestId)??fail(404,'Reward request unavailable');
+          const approve=z.boolean().parse(b.approve);if(request.status!=='pending')fail(409,'Reward request already decided');
+          if(approve&&s.points<request.cost)fail(409,'Insufficient points');
+          if(approve)s.points-=request.cost;request.status=approve?'approved':'declined';response={request,points:s.points};
+        }
         else if(op==='sequence'){
           wife();const ids=z.array(uuid).max(3).refine(ids=>new Set(ids).size===ids.length).parse(b.missions);
           for(const id of ids)if(!s.missions.some(m=>m.id===id))fail(404,'Mission unavailable');
@@ -257,7 +273,7 @@ export async function createApp(pool: Pool, origin: string) {
           }
         }else fail(404,'Unknown action');
       }
-      if(op!=='read')notice(s,op,u.id);
+      if(op!=='read')notice(s,op,u.id,op==='reward-request'?{rewardRequestId:response.request.id}:op==='reward-decision'?{rewardRequestId:response.request.id,outcome:response.request.status}:undefined);
       if(requestKey)await c.query('INSERT INTO request_keys VALUES($1,$2,$3,$4,$5)',[s.id,u.id,op,requestKey,JSON.stringify(response)]);
       s.last=Date.now();await save(c,s);return response;
     });
