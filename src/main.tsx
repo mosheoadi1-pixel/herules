@@ -3,6 +3,7 @@ import { createRoot } from 'react-dom/client';
 import type { Session, Mission, User, CheckIn } from '../server/app';
 import { library as builtInLibrary, categories, ideasForDestination, suggest, type Idea } from './library';
 import { currentMission } from './guidance';
+import { Roulette } from './Roulette';
 import './style.css';
 type State={user:User;sessions:Session[];serverNow:number};
 const stored=(key:string,fallback:any)=>{try{return JSON.parse(localStorage.getItem(key)||'null')??fallback;}catch{return fallback;}};
@@ -69,7 +70,7 @@ function App(){
  const destination=tab==='rewards'?'rewards':tab==='punishments'?'consequences':'library';
  const destinationIdeas=ideasForDestination(library,destination);
  const filtered=destinationIdeas.filter(i=>(destination!=='library'||!category||i.category===category)&&(!intensity||i.intensity===Number(intensity))&&(!tag||i.tags.includes(tag))&&(!onlyFavorites||favorites.includes(i.id))&&`${i.he} ${i.en}`.toLowerCase().includes(query.toLowerCase()));
- function useIdea(i:Idea){const text=lang==='he'?i.he:i.en;if(i.category==='rewards'){setRewardDraft({title:text.slice(0,160),description:text,cost:''});document.getElementById('reward-title')?.focus();}else{setDraft({title:text.slice(0,150),text,points:5,secret:i.category==='secret',completionStyle:'simple'});setEditing('');setComposerOpen(true);setTab('missions');}setRecent(v=>[...v.filter(id=>id!==i.id),i.id].slice(-10));}
+ function useIdea(i:Idea){const text=lang==='he'?i.he:i.en;if(i.category==='rewards'){setRewardDraft({title:text.slice(0,160),description:text,cost:''});document.getElementById('reward-title')?.focus();}else{setDraft({title:text.slice(0,150),text,points:5,secret:i.category==='secret',completionStyle:'simple'});setEditing('');setComposerOpen(true);setTab('missions');setTimeout(()=>document.querySelector<HTMLInputElement>('#mission-composer input')?.focus(),0);}setRecent(v=>[...v.filter(id=>id!==i.id),i.id].slice(-10));}
  const remaining=s?Math.max(0,s.remaining-(play?now-received:0)):0;
  const date=(at:number)=>new Date(at).toLocaleString(lang==='he'?'he-IL':'en-GB');
  const displayName=(id:string)=>id==='server'?t('השרת','Server'):id===u?.id?t('אני','Me'):t('השותף/ה','Partner');
@@ -165,7 +166,8 @@ function App(){
    <label>{t('תג גבול / פעילות','Boundary / activity tag')}<select value={tag} onChange={e=>setTag(e.target.value)}><option value="">{t('הכל','All')}</option>{[...new Set(destinationIdeas.flatMap(i=>i.tags))].map(tag=><option key={tag} value={tag}>{label(tag)}</option>)}</select></label>
   </div>
   <div className="row"><label className="check"><input type="checkbox" checked={onlyFavorites} onChange={e=>setOnlyFavorites(e.target.checked)}/>{t('מועדפים בלבד (במכשיר זה)','Favorites only (this device)')}</label><button className="gold" onClick={()=>{const idea=suggest(filtered,recent);if(idea)useIdea(idea);else setError(t('אין הצעות חדשות במסנן הנוכחי; הרחיבו את הבחירה.','No fresh suggestions in these filters; broaden the selection.'));}}>⚄ {t('הצעה אקראית לבדיקה','Roll a suggestion to review')}</button><span>{filtered.length} {t('הצעות','ideas')}</span></div>
- </section><div className="cards library">{filtered.map(i=><article className="panel" key={i.id}>
+  {tab==='punishments'&&<Roulette key={JSON.stringify(filtered.map(i=>i.id))} ideas={filtered} lang={lang} onChoose={useIdea}/>}
+  </section><div className="cards library">{filtered.map(i=><article className="panel" key={i.id}>
   <div className="row between"><span className="eyebrow">{label(i.category)}</span><button className="quiet" aria-label={favorites.includes(i.id)?t('הסרה ממועדפים','Remove favorite'):t('שמירה במועדפים','Save favorite')} aria-pressed={favorites.includes(i.id)} onClick={()=>{const next=favorites.includes(i.id)?favorites.filter(id=>id!==i.id):[...favorites,i.id];setFavorites(next);save('hr-favorites',next);}}>{favorites.includes(i.id)?'★':'☆'}</button></div>
   <p>{lang==='he'?i.he:i.en}</p><p className="small">{i.minutes} {t('דקות','min')} · {i.intensity===3?t('נועזת','Bold'):i.intensity===1?t('עדינה','Gentle'):t('מעורבות','Engaged')} · {i.tags.map(label).join(', ')}</p><button onClick={()=>useIdea(i)}>{t('בחירה ועריכה','Choose and edit')}</button>
  </article>)}</div></>}

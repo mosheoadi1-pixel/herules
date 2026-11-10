@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { spinAngle } from '../src/roulette';
+import { spinAngle } from '../src/wheelMath';
 
 for (const count of [1, 2, 5, 12]) {
  for (let index=0; index<count; index++) {
