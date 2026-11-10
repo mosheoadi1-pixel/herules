@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { library, suggest } from '../src/library.ts';
-assert.equal(library.length,42);
+assert.equal(library.length,43);
 assert.equal(new Set(library.map(i=>i.en)).size,43);
 assert.equal(new Set(library.map(i=>i.he)).size,43);
 for(const c of ['challenges','timed','rewards','consequences','roleplay','anticipation','random','secret']){
