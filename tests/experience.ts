@@ -174,6 +174,38 @@ try {
     await action(who,'pause');await action(w,'sequence',{missions:[]},409);await action(who,'resume');
   }
   await action(w,'sequence',{missions:[]});assert.deepEqual((await state()).sequence,[]);
+  // Opt-in progression delivers only the immediate draft, atomically with approval.
+  const autoFirst=(await action(w,'mission',{key:randomUUID(),title:'Auto first',text:'Optional'})).mission,autoNext=(await action(w,'mission',{key:randomUUID(),title:'Auto secret title',text:'Auto secret body',secret:true,surprise:true,category:'Care'})).mission,autoLast=await create();
+  await action(w,'sequence',{missions:[autoFirst.id,autoNext.id,autoLast.id],autoProgress:true});
+  assert.equal((await state()).autoProgress,true);
+  await action(w,'deliver',{mission:autoFirst.id});await action(h,'ack',{mission:autoFirst.id});await action(h,'complete',{mission:autoFirst.id,key:randomUUID(),expectedVersion:0});
+  const autoReview={mission:autoFirst.id,key:randomUUID(),submissionVersion:1,approve:true};
+  await pool.query("ALTER TABLE request_keys ADD CONSTRAINT reject_auto_review CHECK(kind<>'review') NOT VALID");
+  try {await action(w,'review',autoReview,500);assert.equal((await state()).missions.find(m=>m.id===autoNext.id)?.status,'draft');assert.equal((await state()).missions.find(m=>m.id===autoFirst.id)?.status,'submitted');}
+  finally {await pool.query('ALTER TABLE request_keys DROP CONSTRAINT reject_auto_review');}
+  const autoResults=await Promise.all([action(w,'review',autoReview),action(w,'review',autoReview)]);assert.deepEqual(autoResults[0],autoResults[1]);
+  let autoState=await state();assert.equal(autoState.missions.find(m=>m.id===autoNext.id)?.status,'pending');assert.equal(autoState.missions.find(m=>m.id===autoLast.id)?.status,'draft');
+  const autoView=(await h(`/sessions/${id}`)).session;assert.ok(!JSON.stringify(autoView).includes('Auto secret title'));assert.ok(!JSON.stringify(autoView).includes('Auto secret body'));
+  await action(h,'ack',{mission:autoNext.id},409);await action(h,'reveal',{mission:autoNext.id});assert.equal((await state()).missions.find(m=>m.id===autoNext.id)?.status,'pending');
+  await action(h,'refuse',{mission:autoNext.id});assert.equal((await state()).missions.find(m=>m.id===autoLast.id)?.status,'draft');
+  await action(w,'sequence',{missions:[]});
+  for(const mode of ['off','legacy','queued','final','stale','missing','unselected','return','pause'] as const){
+    const first=(await action(w,'mission',{key:randomUUID(),title:`First ${mode}`,text:'Optional'})).mission,next=await create(),last=await create();
+    await action(w,'sequence',{missions:[first.id,next.id,last.id],autoProgress:mode!=='off'});
+    if(mode==='legacy')await pool.query("UPDATE sessions SET data=data-'autoProgress' WHERE id=$1",[id]);
+    if(mode==='queued')await action(w,'queue',{mission:next.id,scheduledAt:Date.now()+3600000});
+    if(mode==='final')await action(w,'cancel',{mission:next.id});
+    if(mode==='stale')await pool.query("UPDATE sessions SET data=jsonb_set(data,'{missions}',(SELECT jsonb_agg(CASE WHEN value->>'id'=$2 THEN jsonb_set(value,'{revision}','0') ELSE value END) FROM jsonb_array_elements(data->'missions'))) WHERE id=$1",[id,next.id]);
+    if(mode==='missing')await pool.query("UPDATE sessions SET data=jsonb_set(data,'{sequence,1}',to_jsonb($2::text)) WHERE id=$1",[id,randomUUID()]);
+    if(mode==='unselected')await action(w,'sequence',{missions:[next.id,last.id],autoProgress:true});
+    await action(w,'deliver',{mission:first.id});await action(h,'ack',{mission:first.id});await action(h,'complete',{mission:first.id,key:randomUUID(),expectedVersion:0});
+    const review={mission:first.id,key:randomUUID(),submissionVersion:1,approve:mode!=='return'};
+    if(mode==='pause'){await action(h,'pause');await action(w,'review',review,409);await action(h,'resume');}
+    else await action(w,'review',review);
+    const checkedAuto=await state();assert.equal(checkedAuto.missions.find(m=>m.id===last.id)?.status,'draft',mode);assert.equal(checkedAuto.missions.find(m=>m.id===next.id)?.status,mode==='queued'?'queued':mode==='final'?'cancelled':'draft',mode);
+  }
+  await action(w,'sequence',{missions:[],autoProgress:'yes'},400);
+  await action(w,'sequence',{missions:[]});
   for(const owner of [w,h])await action(owner,'pause');
   const frozen=await state();
   await reflection();
@@ -255,7 +287,7 @@ try {
     await Promise.all([action(w,'review',review),action(w,'review',review)]);
     await action(w,'pause');assert.deepEqual(await action(w,'replace',replacement),replacements[0]);assert.deepEqual(await action(h,'adjust',request),adjusted[0]);await action(w,'resume');
   }
-  assert.equal((await state()).points,9);assert.equal((await pool.query('SELECT count(*) FROM awards')).rows[0].count,'6');
+  assert.equal((await state()).points,9);assert.equal((await pool.query('SELECT count(*) FROM awards')).rows[0].count,'14');
   const declined=await create();await action(w,'deliver',{mission:declined.id});await action(h,'refuse',{mission:declined.id});
   const waiting=await create();await action(w,'deliver',{mission:waiting.id});await action(h,'adjust',{mission:waiting.id,key:randomUUID(),reason:'softer',note:''});await action(h,'refuse',{mission:waiting.id});
   await action(w,'replace',{mission:waiting.id,key:randomUUID(),title:'Too late',text:'No replacement after decline'},409);
@@ -368,6 +400,19 @@ try {
   id=(await w('/sessions',{terms:'Fresh store',minutes:30})).session.id;
   assert.equal((await state()).rewards,undefined);assert.equal((await state()).rewardRequests,undefined);assert.equal((await state()).points,0);
   console.log('PASS rewards: roles, validation, snapshots, holds, archive, retries, five unique approvals and competing deductions');
+  await approve();
+  for(const ending of ['revision','stop','expiry'] as const){
+    const first=await create(),next=await create();await action(w,'sequence',{missions:[first.id,next.id],autoProgress:true});
+    await action(w,'deliver',{mission:first.id});await action(h,'ack',{mission:first.id});await action(h,'complete',{mission:first.id,key:randomUUID(),expectedVersion:0});
+    if(ending==='revision')await action(w,'revise',{terms:'Fresh terms'});
+    else if(ending==='stop')await action(h,'stop');
+    else await pool.query("UPDATE sessions SET data=jsonb_set(jsonb_set(data,'{remaining}','1'::jsonb),'{last}',to_jsonb($2::bigint)) WHERE id=$1",[id,Date.now()-1000]);
+    await action(w,'review',{mission:first.id,key:randomUUID(),submissionVersion:1,approve:true},409);
+    assert.notEqual((await state()).missions.find(m=>m.id===next.id)?.status,'pending',ending);
+    if(ending==='revision'){await approve();await action(h,'stop');}
+    if(ending!=='expiry'){id=(await w('/sessions',{terms:'Next terminal check',minutes:30})).session.id;await approve();}
+  }
+  console.log('PASS automatic sequence: opt-in, atomic delivery, redaction, acknowledgement, retry and no-skip guards');
 } finally {
   if(server)await new Promise<void>(resolve=>server!.close(()=>resolve()));
   await pool.end();await db.stop();await rm(directory,{recursive:true,force:true,maxRetries:10,retryDelay:100});
