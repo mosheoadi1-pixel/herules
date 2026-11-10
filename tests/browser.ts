@@ -562,7 +562,7 @@ try{
   await w.getByLabel('Category').selectOption('roleplay');assert.equal(await w.locator('.library article').count(),6);
   await w.getByLabel('Intensity').selectOption('3');assert.equal(await w.locator('.library article').count(),6);
   await w.getByLabel('Category').selectOption('');assert.equal(await w.locator('.library article').count(),43);
-  await w.getByLabel('Boundary / activity tag').selectOption('custom');assert.equal(await w.locator('.library article').count(),3);
+  await w.getByLabel('Boundary / activity tag').selectOption('conversation');assert.equal(await w.locator('.library article').count(),3);
   await w.getByLabel('Boundary / activity tag').selectOption('');
   await w.getByLabel('Intensity').selectOption('');await w.getByLabel('Category').selectOption('roleplay');
  await w.getByRole('button',{name:'Save favorite',exact:true}).first().click();await w.getByLabel('Favorites only (this device)',{exact:true}).check();assert.equal(await w.locator('.library article').count(),1);
