@@ -75,6 +75,14 @@ try {
   assert.deepEqual(messages[0],messages[1]);
   assert.equal((await state()).messages.length,1);assert.deepEqual((await state()).approvals,[]);
   await approve();
+  await action(h,'persona',{persona:'playful'},403);
+  await action(w,'persona',{persona:'unknown'},400);
+  await action(w,'persona',{persona:'playful'});
+  assert.equal((await h(`/sessions/${id}`)).session.persona,'playful');
+  await action(h,'followup',{text:'Share a cup of tea'},403);
+  await action(w,'followup',{text:'   '},400);
+  await action(w,'followup',{text:' Share a cup of tea '});
+  assert.deepEqual((await h(`/sessions/${id}`)).session.followups,['Share a cup of tea']);
   const reward=(await action(w,'reward',{key:randomUUID(),title:'Tea',description:'A shared cup',cost:0})).reward;
   assert.equal(reward.cost,0);
   // Style defaults/immutability, legacy fallback, and review CAS must survive both styles.

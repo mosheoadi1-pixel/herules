@@ -1,8 +1,8 @@
 import assert from 'node:assert/strict';
 import { library, suggest } from '../src/library.ts';
 assert.equal(library.length,42);
-assert.equal(new Set(library.map(i=>i.en)).size,42);
-assert.equal(new Set(library.map(i=>i.he)).size,42);
+assert.equal(new Set(library.map(i=>i.en)).size,43);
+assert.equal(new Set(library.map(i=>i.he)).size,43);
 for(const c of ['challenges','timed','rewards','consequences','roleplay','anticipation','random','secret']){
  assert.equal(library.filter(i=>i.category===c).length,['roleplay','anticipation'].includes(c)?6:5);
  for(let old=1;old<=20;old++)assert.ok(!library.some(i=>i.id===`${c}-${old}`),'Everyday catalog IDs must be removed');
@@ -13,4 +13,4 @@ for(const i of library){assert.ok(i.minutes>0&&i.intensity>=1&&i.intensity<=3&&i
 const recent=library.slice(0,10).map(i=>i.id);
 for(let i=0;i<100;i++)assert.ok(!recent.includes(suggest(library,recent)!.id));
 assert.equal(suggest(library.slice(0,10),recent),undefined);
-console.log('PASS built-in library: 42 ideas, 160 everyday IDs removed, 40 bold IDs retained, bilingual uniqueness and last-ten avoidance');
+console.log('PASS built-in library: 43 ideas, 160 everyday IDs removed, 40 bold IDs retained, bilingual uniqueness and last-ten avoidance');
