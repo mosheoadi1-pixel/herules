@@ -9,7 +9,7 @@ const hash = (v: string) => createHash('sha256').update(v).digest('hex');
 const text = z.string().trim().min(1).max(4000);
 const uuid = z.string().uuid();
 const completionStyle=z.enum(['simple','written']);
-const draftSchema=z.object({title:z.string().trim().min(1).max(160),text,points:z.number().int().min(0).max(100).default(0),secret:z.boolean().default(false),completionStyle:completionStyle.default('simple'),surprise:z.boolean().default(false),category:z.string().trim().min(1).max(80).optional()}).refine(v=>!v.surprise||!!v.category);
+const draftSchema=z.object({title:z.string().trim().min(1).max(160),text,points:z.number().int().min(0).max(100).default(0),secret:z.boolean().default(false),completionStyle:completionStyle.default('simple'),surprise:z.boolean().default(false),category:z.string().trim().max(80).optional()}).refine(v=>!v.surprise||!!v.category);
 const checkInSchema=z.object({minutes:z.number().int().min(1).max(1440),energy:z.enum(['low','medium','high']),mood:z.enum(['connection','playful','quiet'])});
 export type CheckIn=z.infer<typeof checkInSchema>;
 const reflectionSchema=z.object({appreciation:z.string().trim().max(1000).default(''),repeat:z.string().trim().max(1000).default('')}).refine(v=>!!(v.appreciation||v.repeat));
@@ -22,9 +22,9 @@ export type RewardRequest = Reward & {rewardId:string; status:'pending'|'approve
 export type Session = { id: string; status: string; terms: string; revision: number; revisions: { revision: number; terms: string }[]; approvals: string[]; pauses: string[]; remaining: number; last: number; started: boolean; points: number; missions: Mission[]; rewards?: Reward[]; rewardRequests?: RewardRequest[]; sequence?: string[]; persona?:'strict'|'playful'|'caring'; followups?:string[]; checkIns?: Record<string,CheckIn>; reflections?: Record<string,Reflection>; messages: {id:string; by:string; text:string; at:number}[]; history: { at:number; event:string; by:string; rewardRequestId?:string; outcome?:'approved'|'declined' }[]; inbox: {id:string; at:number; event:string; readBy:string[]}[] };
 const suspended = (s: Session) => s.approvals.length !== 2 || s.pauses.length > 0;
 const terminal = (s: Session) => ['stopped','expired'].includes(s.status);
-function notice(s: Session, event: string, by: string, reward?:{rewardRequestId:string;outcome?:'approved'|'declined';missionId?:string}) {
+function notice(s: Session, event: string, by: string, reward?:{rewardRequestId?:string;outcome?:'approved'|'declined';missionId?:string}) {
   const at = Date.now(); s.history.push({ at, event, by, ...reward });
-  s.inbox.push({ id: randomUUID(), at, event, readBy: [], ...reward });
+  s.inbox.push({ id: randomUUID(), at, event, readBy: [], ...(reward?.missionId?{missionId:reward.missionId}:{}) });
 }
 function advance(s: Session) {
   const now = Date.now();
@@ -38,8 +38,8 @@ function advance(s: Session) {
 function visible(s: Session, user: User) {
   if(user.role==='wife')return s;
   const hidden=new Set(s.missions.filter(m=>m.surprise&&!m.revealedAt).map(m=>m.id));
-  const missions=s.missions.filter(m => (!(m.secret||m.surprise) || !!m.deliveredAt)).map(m=>hidden.has(m.id)?{id:m.id,revision:m.revision,status:m.status,surprise:true,category:m.category,deliveredAt:m.deliveredAt}:m);
-  const allowed=(n:{missionId?:string})=>!n.missionId||!hidden.has(n.missionId);
+  const missions=s.missions.filter(m => (!(m.secret||m.surprise) || !!m.deliveredAt)).map(m=>{if(hidden.has(m.id))return {id:m.id,revision:m.revision,status:m.status,surprise:true,category:m.category,deliveredAt:m.deliveredAt};if(m.replacementId&&hidden.has(m.replacementId)){const {replacementId,...rest}=m;return rest;}return m;});
+  const allowed=(n:any)=>!n.missionId||!hidden.has(n.missionId);
   return { ...s, missions, history:s.history.filter(allowed),inbox:s.inbox.filter(allowed), ...(s.sequence?{sequence:s.sequence.filter(id=>!hidden.has(id)&&missions.some(m=>m.id===id))}:{}) };
 }
 export async function createApp(pool: Pool, origin: string) {
@@ -280,7 +280,7 @@ export async function createApp(pool: Pool, origin: string) {
           }
         }else fail(404,'Unknown action');
       }
-      if(op!=='read')notice(s,op,u.id,op==='reward-request'?{rewardRequestId:response.request.id}:op==='reward-decision'?{rewardRequestId:response.request.id,outcome:response.request.status}:(mission?.surprise?{missionId:mission.id}:op==='mission'&&response.mission?.surprise?{missionId:response.mission.id}:undefined));
+      if(op!=='read')notice(s,op,u.id,op==='reward-request'?{rewardRequestId:response.request.id}:op==='reward-decision'?{rewardRequestId:response.request.id,outcome:response.request.status}:(response.mission?.surprise?{missionId:response.mission.id}:mission?.surprise?{missionId:mission.id}:undefined));
       if(requestKey)await c.query('INSERT INTO request_keys VALUES($1,$2,$3,$4,$5)',[s.id,u.id,op,requestKey,JSON.stringify(response)]);
       s.last=Date.now();await save(c,s);return response;
     });
