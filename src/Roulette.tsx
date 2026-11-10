@@ -27,7 +27,7 @@ export function Roulette({ideas,lang,onChoose}:{ideas:Idea[];lang:'he'|'en';onCh
   <button ref={spinButton} type="button" className="gold" disabled={!ideas.length||spinning} onClick={spin}>{spinning?t('הגלגל מסתובב…','Spinning…'):t('סובבו את גלגל הרעיונות','Spin the idea wheel')}</button>
   <dialog ref={dialog} className="roulette-dialog" aria-labelledby="roulette-result-title" onCancel={e=>{e.preventDefault();close();}}>
    <h3 id="roulette-result-title">{t('הרעיון שהוגרל','Selected idea')}</h3><p className="preserve" dir="auto">{result&&(lang==='he'?result.he:result.en)}</p>
-   <div className="row"><button type="button" className="primary" onClick={()=>{if(result){const chosen=result;dialog.current?.close();setResult(null);onChoose(chosen);}}}>{t('בחירה ועריכה','Choose and edit')}</button><button type="button" onClick={()=>{close();spin();}}>{t('סיבוב נוסף','Spin again')}</button><button type="button" onClick={close}>{t('סגירה','Close')}</button></div>
+   <div className="row"><button type="button" className="primary" onClick={()=>{if(result){const chosen=result;dialog.current?.close();setResult(null);onChoose(chosen);}}}>{t('בחירה ועריכה','Choose and edit')}</button><button type="button" onClick={()=>{close();setTimeout(spin,0);}}>{t('סיבוב נוסף','Spin again')}</button><button type="button" onClick={close}>{t('סגירה','Close')}</button></div>
   </dialog>
  </div>;
 }

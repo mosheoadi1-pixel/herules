@@ -1,8 +1,7 @@
 import assert from 'node:assert/strict';
 import { newPartnerUpdates } from '../src/notifications.ts';
-import type { Session } from '../server/app.ts';
 
-const s={inbox:[{id:'one',at:1,event:'message',readBy:[]}],history:[{at:1,event:'message',by:'partner'}]} as Session;
+const s={inbox:[{id:'one',at:1,event:'message',readBy:[] as string[]}],history:[{at:1,event:'message',by:'partner'}]};
 const initial=newPartnerUpdates([s],'me',null);
 assert.equal(initial.hasUpdate,false);
 assert.equal(newPartnerUpdates([s],'me',initial.next).hasUpdate,false);

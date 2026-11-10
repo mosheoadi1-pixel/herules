@@ -80,7 +80,7 @@ try {
    assert.equal(await w.locator('.roulette-legend').count(),0);
   assert.equal(await w.evaluate(async()=> (await(await fetch('/api/state')).json()).sessions[0].missions.length),0);
     await result.getByRole('button',{name:'Spin again'}).click();
-    assert.ok(await result.isVisible());
+    await result.waitFor({state:'visible'});
     await w.keyboard.press('Escape');
     assert.equal(await w.getByRole('button',{name:'Spin the idea wheel'}).evaluate((el:HTMLElement)=>document.activeElement===el),true);
     await w.getByRole('button',{name:'Spin the idea wheel'}).click();
