@@ -14,7 +14,7 @@ challenges:[
 timed:[
  ['בחרי דקה אחת של פלרטוט בלחש','Choose one minute of whispered flirting, with either person free to stop at any time.',1,3,'flirtation'],
  ['הקדישו שתי דקות למבט ולחיוך ללא מגע,','Spend two minutes exchanging looks and smiles without touch, with no need to last the timer.',2,3,'anticipation'],
- ['קבעו חמש דקות של חיזור בסגנון שהיא בוחרת,'Set five minutes of courtship in her chosen style, then check together whether to continue.',5,3,'control'],
+ ['קבעו חמש דקות של חיזור בסגנון שהיא בוחרת','Set five minutes of courtship in her chosen style, then check together whether to continue.',5,3,'control'],
  ['הכינו בתוך עשר דקות פינת דייט באור רך ובמוזיקה ששניכם אוהבים.','Prepare a date corner in ten minutes with soft lighting and music you both enjoy.',10,3,'planning'],
  ['למשך שיר אחד היא בוחרת את קצב הריקוד.','For one song she chooses the dance pace, without leading beyond what feels comfortable to both.',4,3,'touch']
 ],
@@ -30,7 +30,7 @@ consequences:[
  ['תן לה לבחור שיר לריקוד סולו משעשע;.','If agreed in advance, let her choose a song for a playful solo dance; passing carries no penalty.',4,3,'performance'],
  ['בחרו מרצונכם משימת המשך: המציאו תואר מלכותי מחמיא','Freely choose a follow-up: invent a flattering royal title instead of any outcome that feels uncomfortable.',5,3,'control'],
  [' הכינו הזמנה טקסית לדייט.','As an optional outcome only, prepare a ceremonial invitation to the next date with a full right to decline.',10,3,'writing'],
- ['הציעי לו לחבר סלוגן נועז לערב שלכם,'Invite him to write a bold slogan for your evening only if you chose this word game beforehand.',5,3,'flirtation']
+ ['הציעי לו לחבר סלוגן נועז לערב שלכם','Invite him to write a bold slogan for your evening only if you chose this word game beforehand.',5,3,'flirtation']
 ],
 roleplay:[
  ['שחקו פגישה ראשונה בבר דמיוני: היא קובעת את הטון והוא מבקש רשות להצטרף לשיחה.','Play a first meeting at an imaginary bar: she sets the tone and he asks to join the conversation.',10,3,'flirtation'],
@@ -40,7 +40,7 @@ roleplay:[
  ['כתבו דו־שיח של שני זרים שמגלים כימיה','Write a dialogue between two strangers discovering chemistry; either may change or end the story.',10,3,'writing']
 ],
 anticipation:[
- ['שלחי רמז פלרטטני אחד על דייט עתידי,'Send one flirtatious hint about a future date without promising any unagreed activity.',3,3,'flirtation'],
+ ['שלחי רמז פלרטטני אחד על דייט עתידי','Send one flirtatious hint about a future date without promising any unagreed activity.',3,3,'flirtation'],
  ['בחרי שעת חשיפה להזמנה פרטית; עד אז שתפו רק צבע, שיר או אווירה.','Choose a reveal time for a private invitation; until then share only a color, song or mood.',10,3,'anticipation'],
  ['הציעי ערב הפתעה','Offer a surprise evening from three preapproved options, with a choice to change even at the last moment.',20,3,'planning'],
  ['כתבו כל אחד משפט שמתחיל באשמח אם תרצה או תרצי, והחליפו בזמן שבחרתם.','Each write a sentence beginning I would love it if you wanted to, and exchange them at an agreed time.',5,3,'writing'],
