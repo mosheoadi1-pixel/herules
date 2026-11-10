@@ -26,10 +26,10 @@ rewards:[
  ['הציעי חיבוק ממושך או זמן שקט יחד, ובקשו אישור לפני כל מגע.','Offer a lingering hug or quiet time together, asking permission before any touch.',5,3,'touch']
 ],
 consequences:[
- ['רק כתוצאה משחקית שנבחרה מראש, כתוב נאום חיזור דרמטי; לעולם לא כתגובה לסירוב.','Only as a preselected game outcome, write a dramatic courtship speech; never in response to refusal.',5,3,'performance'],
- ['אם בחרתם בכך מראש, תן לה לבחור שיר לריקוד סולו משעשע; מותר לוותר ללא קנס.','If agreed in advance, let her choose a song for a playful solo dance; passing carries no penalty.',4,3,'performance'],
+ ['רק כתוצאה משחקית שנבחרה מראש, כתוב נאום חיזור דרמטי.','Only as a preselected game outcome, write a dramatic courtship speech; never in response to refusal.',5,3,'performance'],
+ ['אם בחרתם בכך מראש, תן לה לבחור שיר לריקוד סולו משעשע;.','If agreed in advance, let her choose a song for a playful solo dance; passing carries no penalty.',4,3,'performance'],
  ['בחרו מרצונכם משימת המשך: המציאו תואר מלכותי מחמיא במקום כל תוצאה שלא נוחה לכם.','Freely choose a follow-up: invent a flattering royal title instead of any outcome that feels uncomfortable.',5,3,'control'],
- ['כתוצאה אופציונלית בלבד, הכינו הזמנה טקסית לדייט הבא עם זכות מלאה לסרב.','As an optional outcome only, prepare a ceremonial invitation to the next date with a full right to decline.',10,3,'writing'],
+ ['כתוצאה אופציונלית בלבד, הכינו הזמנה טקסית לדייט.','As an optional outcome only, prepare a ceremonial invitation to the next date with a full right to decline.',10,3,'writing'],
  ['הציעי לו לחבר סלוגן נועז לערב שלכם רק אם בחרתם במשחק המילים מראש.','Invite him to write a bold slogan for your evening only if you chose this word game beforehand.',5,3,'flirtation']
 ],
 roleplay:[
