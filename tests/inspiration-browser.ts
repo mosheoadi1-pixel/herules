@@ -93,8 +93,17 @@ try {
     assert.ok(await w.getByRole('dialog',{name:'הרעיון שהוגרל'}).isVisible());
     await w.keyboard.press('Escape');
    await w.getByRole('button',{name:'English',exact:true}).click();
-  await w.getByLabel('Search',{exact:true}).fill('no matching roulette idea 872634');
+   await w.getByLabel('Search',{exact:true}).fill('no matching roulette idea 872634');
    assert.ok(await w.getByRole('button',{name:'Spin the idea wheel',exact:true}).isEnabled());
+   await w.evaluate(()=>{Math.random=()=>0;});
+   await w.getByRole('button',{name:'Spin the idea wheel'}).click();
+   const firstDraw=await w.getByRole('dialog',{name:'Selected idea'}).locator('p').innerText();
+   await w.keyboard.press('Escape');
+   await w.evaluate(()=>{Math.random=()=>0.999999;});
+   await w.getByRole('button',{name:'Spin the idea wheel'}).click();
+   const lastDraw=await w.getByRole('dialog',{name:'Selected idea'}).locator('p').innerText();
+   assert.notEqual(firstDraw,lastDraw,'The entire catalog must remain eligible despite an empty search result');
+   await w.keyboard.press('Escape');
   await w.getByLabel('Search',{exact:true}).fill('');
  const consequence=await w.locator('.cards.library article').first().locator('p').first().innerText();
  await w.locator('.cards.library article').first().getByRole('button',{name:'Choose and edit',exact:true}).click();
