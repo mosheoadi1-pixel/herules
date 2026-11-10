@@ -218,6 +218,12 @@ try{
   console.log('PASS bounded refresh: held stale read, event burst and committed mutation coalesce into fresh reconciliation');
   await w.getByRole('navigation').getByRole('button',{name:'Missions',exact:true}).click();
   await w.getByText('New mission to review',{exact:true}).click();
+  const surpriseControl=w.getByLabel('Surprise invitation — content is revealed only by his choice',{exact:true});
+  await surpriseControl.check();
+  const category=w.getByLabel('Category to display',{exact:true});
+  assert.equal(await category.evaluate((el:HTMLInputElement)=>!!el.form&&el.form.closest('#mission-composer')!==null&&el.required&&!el.checkValidity()),true,'Surprise category must be required within the draft form');
+  await category.fill('Conversation');assert.equal(await category.evaluate((el:HTMLInputElement)=>el.checkValidity()),true);
+  await surpriseControl.uncheck();
  await w.getByLabel('Title',{exact:true}).fill('Private tea invitation');await w.getByLabel('Mission text and boundaries',{exact:true}).fill('Would you like to prepare optional mint tea?');
   await w.getByLabel('Secret until explicit sending or scheduled delivery',{exact:true}).check();
   await w.getByLabel('Completion style').selectOption('written');

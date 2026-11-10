@@ -24,6 +24,8 @@ Open **http://localhost:3000** in two separate browser profiles or devices. Sele
 
 Login cookies expire after seven days. Signing out, clearing cookies, or changing browsers is fine: choose the same role again. Anyone who can reach the app can enter either role; keep its address privately reachable.
 
+Surprise-invitation redaction applies only to responses for the husband role. It does not protect a surprise from anyone who can reach the app and enter the wife role, which can see the full draft and invitation.
+
 `.env.example` lists environment values, but files are **not automatically loaded**. `DATABASE_URL` is required. `APP_ORIGIN` is the canonical address; additional IP/domain addresses work automatically when the browser sends requests back to the same address serving the game.
 
 **Every application startup resets gameplay**, including server restarts and deployments. It clears gameplay (including adjustment requests and linked replacements), messages, points, approvals and login cookies, and creates the two paired identities. Imported ideas remain in the database, and the **193 tasks from `custom-tasks-template.csv`** are added if missing. The 42 built-in suggestions also remain available. Reset and seed run in one transaction before accepting requests; a seed failure rolls back the reset and prevents startup. Deploy the CSV with the application. Imported ideas persist when the server reconnects to the same persistent PostgreSQL database; moving to a different database requires copying the ideas or importing the CSV there. No active gameplay session is created automatically.

@@ -40,7 +40,7 @@ function visible(s: Session, user: User) {
   const hidden=new Set(s.missions.filter(m=>m.surprise&&!m.revealedAt).map(m=>m.id));
   const missions=s.missions.filter(m => (!(m.secret||m.surprise) || !!m.deliveredAt)).map(m=>{if(hidden.has(m.id))return {id:m.id,revision:m.revision,status:m.status,surprise:true,category:m.category,deliveredAt:m.deliveredAt};if(m.replacementId&&hidden.has(m.replacementId)){const {replacementId,...rest}=m;return rest;}return m;});
   const allowed=(n:any)=>!n.missionId||!hidden.has(n.missionId);
-  return { ...s, missions, history:s.history.filter(allowed),inbox:s.inbox.filter(allowed), ...(s.sequence?{sequence:s.sequence.filter(id=>!hidden.has(id)&&missions.some(m=>m.id===id))}:{}) };
+  return { ...s, missions, history:s.history.filter(allowed),inbox:s.inbox.filter(allowed), ...(s.sequence?{sequence:s.sequence.filter(id=>missions.some(m=>m.id===id))}:{}) };
 }
 export async function createApp(pool: Pool, origin: string) {
   const configured = new URL(origin);
@@ -248,7 +248,7 @@ export async function createApp(pool: Pool, origin: string) {
           else if(op==='queue'){if(!['draft','queued'].includes(m.status))fail(409,'Draft required');m.scheduledAt=z.number().int().min(Date.now()).max(Date.now()+31536000000).parse(b.scheduledAt);m.status='queued';}
           else if(op==='deliver'){if(!['draft','queued'].includes(m.status))fail(409,'Draft required');m.status='pending';m.deliveredAt=Date.now();}
           else if(op==='cancel'){if(['approved','refused'].includes(m.status))fail(409,'Mission already final');m.status='cancelled';}
-          else if(op==='reveal'){if(!m.surprise||!m.deliveredAt||m.status!=='pending')fail(409,'Pending surprise required');m.revealedAt??=Date.now();}
+          else if(op==='reveal'){if(!m.surprise||!m.deliveredAt||m.status!=='pending')fail(409,'Pending surprise required');if(m.revealedAt){await save(c,s);return {ok:true};}m.revealedAt=Date.now();}
           else if(op==='ack'){if(m.surprise&&!m.revealedAt)fail(409,'Reveal invitation first');if(!['pending','acknowledged'].includes(m.status))fail(409,'Pending mission required');m.status='acknowledged';m.acknowledgedAt??=Date.now();}
           else if(op==='refuse'){if(!['pending','acknowledged','revision','adjustment','refused'].includes(m.status))fail(409,'Mission cannot be refused here');m.status='refused';}
           else if(op==='adjust'){

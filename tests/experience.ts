@@ -6,6 +6,7 @@ import { join } from 'node:path';
 import pg from 'pg';
 import { startDatabase } from '../scripts/db/runtime.mjs';
 import { createApp, type Session } from '../server/app.ts';
+import { currentMission } from '../src/guidance.ts';
 
 const directory=await mkdtemp(join(tmpdir(),'her-rules-experience-'));
 const db=await startDatabase(directory,55440),pool=new pg.Pool({connectionString:db.url});
@@ -75,30 +76,40 @@ try {
   assert.deepEqual(messages[0],messages[1]);
   assert.equal((await state()).messages.length,1);assert.deepEqual((await state()).approvals,[]);
   await approve();
+  const earlier=(await action(w,'mission',{key:randomUUID(),title:'Earlier ordinary',text:'Ordinary text'})).mission;
+  await action(w,'deliver',{mission:earlier.id});
   const surprise=(await action(w,'mission',{key:randomUUID(),title:'Hidden title',text:'Hidden invitation text',points:9,secret:true,surprise:true,category:'Conversation',completionStyle:'written'})).mission;
-  await action(w,'sequence',{missions:[surprise.id]});
+  const hiddenDraft=(await action(w,'mission',{key:randomUUID(),title:'Private draft title',text:'Private draft body',secret:true})).mission;
+  await action(w,'sequence',{missions:[hiddenDraft.id,surprise.id,earlier.id]});
   assert.equal((await h(`/sessions/${id}`)).session.missions.some((m:any)=>m.id===surprise.id),false);
   assert.ok(!(JSON.stringify((await h(`/sessions/${id}`)).session).includes(surprise.id)));
   await action(w,'deliver',{mission:surprise.id});
-  for(const view of [(await h(`/sessions/${id}`)).session,(await h('/state')).sessions.find((s:Session)=>s.id===id)]){
+  const sessionResponse=await h(`/sessions/${id}`),stateResponse=await h('/state');
+  for(const response of [sessionResponse,stateResponse])for(const secret of ['Hidden title','Hidden invitation text','Private draft title','Private draft body'])assert.ok(!JSON.stringify(response).includes(secret),`Response leaked ${secret}`);
+  for(const view of [sessionResponse.session,stateResponse.sessions.find((s:Session)=>s.id===id)]){
     const placeholder=view.missions.find((m:any)=>m.id===surprise.id);
     assert.equal(placeholder.category,'Conversation');
     for(const key of ['title','text','points','completionStyle','completion','adjustment'])assert.equal(placeholder[key],undefined,key);
-    assert.ok(!view.sequence.includes(surprise.id));
+    assert.deepEqual(view.sequence,[surprise.id,earlier.id]);
+    assert.equal(currentMission(view,'husband')?.id,surprise.id);
     assert.ok(!JSON.stringify({history:view.history,inbox:view.inbox}).includes(surprise.id));
   }
   await action(h,'ack',{mission:surprise.id},409);
+  await action(h,'complete',{mission:surprise.id,key:randomUUID(),expectedVersion:0,text:'Bypass attempt'},409);
   await action(h,'adjust',{mission:surprise.id,key:randomUUID(),reason:'adjust'},409);
   await action(w,'reveal',{mission:surprise.id},403);
   await action(w,'pause');await action(h,'reveal',{mission:surprise.id},409);await action(w,'resume');
   await action(h,'reveal',{mission:surprise.id});
+  const once=await state();await action(h,'reveal',{mission:surprise.id});const twice=await state();
+  assert.deepEqual(twice.history,once.history,'Reveal retry must not add history');
+  assert.deepEqual(twice.inbox,once.inbox,'Reveal retry must not add inbox notices');
   const revealed=(await h(`/sessions/${id}`)).session.missions.find((m:any)=>m.id===surprise.id);
   assert.equal(revealed.title,'Hidden title');assert.equal(revealed.status,'pending');
   await action(h,'ack',{mission:surprise.id});
   const declinedSurprise=(await action(w,'mission',{key:randomUUID(),title:'Declined surprise',text:'Hidden',surprise:true,category:'Care'})).mission;
   await action(w,'deliver',{mission:declinedSurprise.id});await action(h,'refuse',{mission:declinedSurprise.id});
   assert.equal((await h(`/sessions/${id}`)).session.missions.find((m:any)=>m.id===declinedSurprise.id).title,undefined);
-  await pool.query("UPDATE sessions SET data=data-'sequence' WHERE id=$1",[id]);
+  await action(w,'sequence',{missions:[]});
   await action(h,'persona',{persona:'playful'},403);
   await action(w,'persona',{persona:'unknown'},400);
   await action(w,'persona',{persona:'playful'});
@@ -146,7 +157,7 @@ try {
   const rawAfter=(await pool.query('SELECT data FROM sessions WHERE id=$1',[id])).rows[0].data;
   assert.equal(rawAfter.last,rawBefore.last);assert.deepEqual(reflectState(rawAfter),reflectState(rawBefore));
   // Sequence edits must be wife-only, guarded, validated and presentation-only.
-  assert.equal((await state()).sequence,undefined);
+  assert.deepEqual((await state()).sequence,[]);
   const seqA=await create(),seqB=await create(true),seqC=await create();
   await action(h,'sequence',{missions:[seqA.id]},403);
   for(const missions of [[seqA.id,seqA.id],[seqA.id,seqB.id,seqC.id,randomUUID()],['bad'],null])await action(w,'sequence',{missions},400);
@@ -250,6 +261,8 @@ try {
   await action(w,'replace',{mission:waiting.id,key:randomUUID(),title:'Too late',text:'No replacement after decline'},409);
   console.log('PASS experience: adjustment from all three invitation states, roles/validation/holds, immutable originals, atomic single replacement, secret scope, fresh acknowledgement, optional notes, free refusal and single awards');
 
+  const staleSurprise=(await action(w,'mission',{key:randomUUID(),title:'Stale surprise',text:'Private stale details',surprise:true,category:'Care'})).mission;
+  await action(w,'deliver',{mission:staleSurprise.id});
   const stale=await create();await action(w,'deliver',{mission:stale.id});await action(h,'adjust',{mission:stale.id,key:randomUUID(),reason:'adjust'});
   await action(w,'revise',{terms:'Revised boundaries require independent approvals'});
   await action(w,'sequence',{missions:[]},409);
@@ -259,12 +272,15 @@ try {
   assert.deepEqual(gameplayState(await state()),gameplayState(reviewHold));
   await action(w,'replace',{mission:stale.id,key:randomUUID(),title:'Old revision',text:'Must not replace'},409);
   await approve();
+  await action(h,'reveal',{mission:staleSurprise.id},409);
   await action(w,'replace',{mission:stale.id,key:randomUUID(),title:'Old revision',text:'Still must not replace'},409);
   const race=await create();await action(w,'deliver',{mission:race.id});await action(h,'adjust',{mission:race.id,key:randomUUID(),reason:'adjust'});
   const raceBody={mission:race.id,title:'Only one',text:'One replacement only',points:0};
   const results=await Promise.all([1,2].map(()=>w(`/sessions/${id}/replace`,{...raceBody,key:randomUUID()},[200,409])));
   assert.deepEqual(results.map(v=>v._status).sort(),[200,409]);assert.equal((await state()).missions.filter(v=>v.replaces===race.id).length,1);
-  await action(h,'stop');
+  const terminalSurprise=(await action(w,'mission',{key:randomUUID(),title:'Terminal surprise',text:'Private terminal details',surprise:true,category:'Care'})).mission;
+  await action(w,'deliver',{mission:terminalSurprise.id});await action(h,'stop');
+  await action(h,'reveal',{mission:terminalSurprise.id},409);
   const stopped=await state();
   await reflection();
   for(const who of [w,h])await action(who,'checkin',checkin,409);
