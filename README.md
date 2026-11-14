@@ -56,7 +56,7 @@ challenges,שיחה משותפת,A conversation together,5,2,conversation|home
 
 Categories: `challenges`, `timed`, `rewards`, `consequences`, `roleplay`, `anticipation`, `random`, `secret`. Minutes must be an integer from 1 to 525600; intensity must be a positive integer, with values above 3 automatically converted to 3 (Bold) before storage and duplicate checking. Both language texts are required (maximum 4000 characters). Separate tags with `|`; tags may be empty. Quote fields containing commas, double quotes, or newlines; escape an embedded quote as `""`.
 
-The importer validates the entire file before inserting and rolls back on database errors. Identical normalized imported rows are skipped on reimport; editing any field creates a new idea. This does not deduplicate against built-in ideas. Imported rows are stored in `imported_ideas`, available through the role-authenticated API alongside the built-in library. Refresh the library after importing. Ideas persist across website restarts when the same database is used. There is no browser upload endpoint.
+The importer validates the entire file before inserting and rolls back on database errors. Identical normalized imported rows are skipped on reimport; editing any field creates a new idea. A row whose Hebrew or English text matches a built-in suggestion from `src/library.ts` (trimmed comparison) is also skipped, so imports and the seeded template never duplicate the built-in library. Imported rows are stored in `imported_ideas`, available through the role-authenticated API alongside the built-in library. Refresh the library after importing. Ideas persist across website restarts when the same database is used. There is no browser upload endpoint.
 
 ## Implemented
 

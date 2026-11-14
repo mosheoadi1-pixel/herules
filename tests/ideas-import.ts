@@ -6,6 +6,7 @@ import pg from 'pg';
 import { startDatabase } from '../scripts/db/runtime.mjs';
 import { createApp } from '../server/app.ts';
 import { importIdeas } from '../server/ideas-import.ts';
+import { library } from '../src/library.ts';
 
 const directory=await mkdtemp(join(tmpdir(),'her-rules-ideas-'));
 const db=await startDatabase(directory,55438),pool=new pg.Pool({connectionString:db.url});
@@ -27,6 +28,12 @@ try {
   assert.equal(await importIdeas(pool,header+row.replace(',5,2,',',5,9,')),1);
   assert.equal((await pool.query('SELECT intensity FROM imported_ideas WHERE intensity=3')).rowCount,1);
   assert.equal(await importIdeas(pool,header+row.replace(',5,2,',',5,4,')),0);
+  // Built-in deduplication: a row duplicating either language of a src/library.ts suggestion is never inserted.
+  const builtin=library[0]!;
+  const builtinRow=(he:string,en:string)=>header+`challenges,"${he.replace(/"/g,'""')}","${en.replace(/"/g,'""')}",5,2,builtin`;
+  assert.equal(await importIdeas(pool,builtinRow(builtin.he,builtin.en)),0);
+  assert.equal(await importIdeas(pool,builtinRow(builtin.he,'English wording that matches no built-in suggestion')),0);
+  assert.equal(await importIdeas(pool,builtinRow('נוסח עברי שאינו קיים בספרייה המובנית',builtin.en)),0);
   for(const bad of [row.replace('challenges','unknown'),row.replace(',5,2,',',0,2,'),...['0','-1','2.5','4.5','Infinity','invalid'].map(value=>row.replace(',5,2,',`,5,${value},`)),'challenges,"unclosed']) {
     await assert.rejects(importIdeas(pool,header+row.replace('שלום, עולם','רעיון חדש')+'\n'+bad));
   }
@@ -40,7 +47,7 @@ try {
   const response=await fetch('http://localhost:4192/api/ideas',{headers:{Cookie:guest.headers.get('set-cookie')!.split(';')[0]}});
   assert.equal(response.status,200);
   assert.deepEqual((await response.json()).ideas,(await pool.query('SELECT * FROM imported_ideas ORDER BY id')).rows);
-  console.log('PASS CSV import: Hebrew, quotes, multiline, tags, deduplication, atomic validation, authenticated library');
+  console.log('PASS CSV import: Hebrew, quotes, multiline, tags, deduplication, built-in deduplication, atomic validation, authenticated library');
 } finally {
   if(server){server.closeAllConnections();await new Promise<void>(r=>server!.close(()=>r()));}
   await pool.end();await db.stop();await rm(directory,{recursive:true,force:true});

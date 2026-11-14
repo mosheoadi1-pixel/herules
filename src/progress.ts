@@ -41,6 +41,16 @@ export function quietDays(session:{last:number}|undefined,now:number){
   return session?Math.max(0,Math.floor((now-session.last)/DAY)):0;
 }
 
+export function daysSinceLastEvent(session:{history:{at:number}[];inbox:{at:number}[]}|undefined,now:number){
+  const newest=Math.max(0,...(session?.history??[]).map(h=>h.at),...(session?.inbox??[]).map(n=>n.at));
+  return newest>0?Math.max(0,Math.floor((now-newest)/DAY)):0;
+}
+
+export function reconnectNudgeDue(session:{status:string;history:{at:number}[];inbox:{at:number}[]}|undefined,now:number,dismissedAt=0){
+  if(!session||['stopped','expired'].includes(session.status))return false;
+  return daysSinceLastEvent(session,now)>=3&&now-dismissedAt>=3*DAY;
+}
+
 export function weeklyRecap(missions:Mission[],now:number){
   const weekAgo=now-7*DAY;
   const week=missions.filter(m=>m.status==='approved'&&(m.approvedAt??0)>=weekAgo);

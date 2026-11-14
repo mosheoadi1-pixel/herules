@@ -2,7 +2,7 @@ import { Pool, type PoolClient } from 'pg';
 import { createHash } from 'node:crypto';
 import { readFile } from 'node:fs/promises';
 import { z } from 'zod';
-import { categories } from '../src/library.ts';
+import { categories, library } from '../src/library.ts';
 
 // Parse CSV rather than splitting lines: quoted text may contain commas and newlines.
 export function parseCsv(csv:string):string[][] {
@@ -25,6 +25,8 @@ export function parseCsv(csv:string):string[][] {
   return rows;
 }
 const ideaSchema=z.object({category:z.enum(categories),he:z.string().min(1).max(4000),en:z.string().min(1).max(4000),minutes:z.number().int().min(1).max(525600),intensity:z.number().int().min(1).transform(value=>Math.min(value,3)),tags:z.array(z.string().min(1).max(80)).max(50)});
+// Built-in library texts (trimmed): a row duplicating either language of a built-in suggestion is never stored.
+const builtinTexts=new Set(library.flatMap(idea=>[idea.he,idea.en].map(text=>text.trim())));
 
 export async function importIdeas(pool:Pool|PoolClient,csv:string):Promise<number> {
   const [header,...rows]=parseCsv(csv);
@@ -36,12 +38,14 @@ export async function importIdeas(pool:Pool|PoolClient,csv:string):Promise<numbe
     if(!parsed.success)throw new Error(`CSV record ${index+2}: ${parsed.error.message}`);
     return parsed.data;
   });
+  // Skip rows whose Hebrew or English text duplicates a built-in suggestion, exactly like identical reimported rows.
+  const insertable=ideas.filter(idea=>!builtinTexts.has(idea.he)&&!builtinTexts.has(idea.en));
   const owned=pool instanceof Pool;
   const client=owned?await pool.connect():pool;let inserted=0;
   try {
     if(owned)await client.query('BEGIN');
     await client.query(await readFile(new URL('../db/004-imported-ideas.sql',import.meta.url),'utf8'));
-    for(const idea of ideas){
+    for(const idea of insertable){
       const id='csv-'+createHash('sha256').update(JSON.stringify(idea)).digest('hex');
       const result=await client.query('INSERT INTO imported_ideas(id,category,he,en,minutes,intensity,tags) VALUES($1,$2,$3,$4,$5,$6,$7) ON CONFLICT(id) DO NOTHING',[id,idea.category,idea.he,idea.en,idea.minutes,idea.intensity,idea.tags]);
       inserted+=result.rowCount!;
