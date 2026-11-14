@@ -5,7 +5,7 @@ import { readFile } from 'node:fs/promises';
 import type { Pool, PoolClient } from 'pg';
 import { z } from 'zod';
 import { quickPresets } from '../src/quick.ts';
-import { WISH_COOLDOWN_MS } from '../src/progress.ts';
+import { WISH_COOLDOWN_MS, eveningClosed, eveningUsed } from '../src/progress.ts';
 const scrypt = promisify(scryptCallback);
 const hash = (v: string) => createHash('sha256').update(v).digest('hex');
 const text = z.string().trim().min(1).max(4000);
@@ -16,12 +16,16 @@ const checkInSchema=z.object({minutes:z.number().int().min(1).max(1440),energy:z
 export type CheckIn=z.infer<typeof checkInSchema>;
 const reflectionSchema=z.object({appreciation:z.string().trim().max(1000).default(''),repeat:z.string().trim().max(1000).default('')}).refine(v=>!!(v.appreciation||v.repeat));
 export type Reflection=z.infer<typeof reflectionSchema>;
+const nightStep=z.object({he:text,en:text,points:z.number().int().min(0).max(100),minutesFromNow:z.number().int().min(0).max(10080)});
+const nightSchema=z.object({mood:z.enum(['soft','playful','strict']),lang:z.enum(['he','en']).default('he'),steps:z.array(nightStep).min(1).max(3)});
+const eveningSchema=z.object({name:z.string().trim().min(1).max(80),mood:z.enum(['soft','playful','strict']),steps:z.array(nightStep).min(1).max(3)}).refine(v=>v.steps.every(st=>st.he.length<=160&&st.en.length<=160));
+const paceSchema=z.object({commandsPerEvening:z.union([z.literal(1),z.literal(2),z.literal(3)])});
 const fail = (status: number, message: string): never => { throw Object.assign(new Error(message), { status }); };
 export type User = { id: string; email: string|null; nickname: string|null; role: 'wife'|'husband'; pair_id: string|null };
-export type Mission = { id: string; revision: number; title: string; text: string; points: number; secret: boolean; surprise?:boolean; category?:string; revealedAt?:number; completionStyle?: 'simple'|'written'; status: string; scheduledAt?: number; completion?: string; submissionVersion?: number; deliveredAt?: number; acknowledgedAt?: number; adjustment?: {reason:'softer'|'adjust';note?:string;at:number}; replaces?: string; replacementId?: string; approvedAt?: number; rating?: 'love'|'like'|'skip'; ratedAt?: number };
+export type Mission = { id: string; revision: number; title: string; text: string; points: number; secret: boolean; surprise?:boolean; category?:string; revealedAt?:number; completionStyle?: 'simple'|'written'; status: string; scheduledAt?: number; completion?: string; submissionVersion?: number; deliveredAt?: number; acknowledgedAt?: number; adjustment?: {reason:'softer'|'adjust';note?:string;at:number}; replaces?: string; replacementId?: string; approvedAt?: number; rating?: 'love'|'like'|'skip'; ratedAt?: number; createdAt?: number };
 export type Reward = {id:string; title:string; description:string; cost:number};
 export type RewardRequest = Reward & {rewardId:string; status:'pending'|'approved'|'declined'};
-export type Session = { id: string; status: string; terms: string; revision: number; revisions: { revision: number; terms: string }[]; approvals: string[]; pauses: string[]; remaining: number; last: number; started: boolean; points: number; missions: Mission[]; rewards?: Reward[]; rewardRequests?: RewardRequest[]; sequence?: string[]; autoProgress?:boolean; persona?:'strict'|'playful'|'caring'; followups?:string[]; checkIns?: Record<string,CheckIn>; reflections?: Record<string,Reflection>; messages: {id:string; by:string; text:string; at:number}[]; history: { at:number; event:string; by:string; rewardRequestId?:string; outcome?:'approved'|'declined' }[]; inbox: {id:string; at:number; event:string; readBy:string[]}[]; herPoints?: number; herWishes?: {id:string;title:string;cost:number;createdAt?:number}[]; commands?: {id:string;title:string;text:string;points:number}[]; notes?: {id:string;text:string;at:number}[]; nights?: {id:string;mood:'soft'|'playful'|'strict';at:number;missionIds:string[]}[]; moodCounts?: Record<'soft'|'playful'|'strict',number>; lastCareAt?: number };
+export type Session = { id: string; status: string; terms: string; revision: number; revisions: { revision: number; terms: string }[]; approvals: string[]; pauses: string[]; remaining: number; last: number; started: boolean; points: number; missions: Mission[]; rewards?: Reward[]; rewardRequests?: RewardRequest[]; sequence?: string[]; autoProgress?:boolean; persona?:'strict'|'playful'|'caring'; followups?:string[]; checkIns?: Record<string,CheckIn>; reflections?: Record<string,Reflection>; messages: {id:string; by:string; text:string; at:number}[]; history: { at:number; event:string; by:string; rewardRequestId?:string; outcome?:'approved'|'declined' }[]; inbox: {id:string; at:number; event:string; readBy:string[]}[]; herPoints?: number; herWishes?: {id:string;title:string;cost:number;createdAt?:number}[]; commands?: {id:string;title:string;text:string;points:number}[]; notes?: {id:string;text:string;at:number}[]; nights?: {id:string;mood:'soft'|'playful'|'strict';at:number;missionIds:string[]}[]; moodCounts?: Record<'soft'|'playful'|'strict',number>; lastCareAt?: number; pace?: 1|2|3; eveningClosedAt?: number; savedEvenings?: {id:string;name:string;mood:'soft'|'playful'|'strict';steps:{he:string;en:string;points:number;minutesFromNow:number}[];createdAt:number}[] };
 const suspended = (s: Session) => s.approvals.length !== 2 || s.pauses.length > 0;
 const terminal = (s: Session) => ['stopped','expired'].includes(s.status);
 function notice(s: Session, event: string, by: string, reward?:{rewardRequestId?:string;outcome?:'approved'|'declined';missionId?:string}) {
@@ -42,7 +46,19 @@ function visible(s: Session, user: User) {
   const hidden=new Set(s.missions.filter(m=>m.surprise&&!m.revealedAt).map(m=>m.id));
   const missions=s.missions.filter(m => (!(m.secret||m.surprise) || !!m.deliveredAt)).map(m=>{if(hidden.has(m.id))return {id:m.id,revision:m.revision,status:m.status,surprise:true,category:m.category,deliveredAt:m.deliveredAt};if(m.replacementId&&hidden.has(m.replacementId)){const {replacementId,...rest}=m;return rest;}return m;});
   const allowed=(n:any)=>!n.missionId||!hidden.has(n.missionId);
-  return { ...s, commands:undefined, notes:undefined, missions, history:s.history.filter(allowed),inbox:s.inbox.filter(allowed), ...(s.sequence?{sequence:s.sequence.filter(id=>missions.some(m=>m.id===id))}:{}) };
+  return { ...s, commands:undefined, notes:undefined, savedEvenings:undefined, missions, history:s.history.filter(allowed),inbox:s.inbox.filter(allowed), ...(s.sequence?{sequence:s.sequence.filter(id=>missions.some(m=>m.id===id))}:{}) };
+}
+function runNight(s: Session, mood: 'soft'|'playful'|'strict', lang: 'he'|'en', steps: z.infer<typeof nightStep>[]) {
+  if(eveningClosed(s))fail(409,'Evening is closed');
+  if(steps.length>(s.pace??3))fail(400,'Too many steps for the current pace');
+  if(eveningUsed(s.missions)+steps.length>(s.pace??3))fail(409,'Evening limit reached for the current pace');
+  if(steps.some(st=>(lang==='he'?st.he:st.en).length>160))fail(400,'Step title too long');
+  const nights=s.nights??=[];if(nights.length>=50)fail(409,'Night list is full');
+  const at=Date.now(),missionIds:string[]=[];
+  for(const st of steps){const body=lang==='he'?st.he:st.en;const m:Mission={id:randomUUID(),revision:s.revision,title:body,text:body,points:st.points,secret:false,completionStyle:'simple',status:'queued',scheduledAt:at+st.minutesFromNow*60000,createdAt:at};s.missions.push(m);missionIds.push(m.id);}
+  const night={id:randomUUID(),mood,at,missionIds};nights.push(night);
+  const counts=s.moodCounts??={soft:0,playful:0,strict:0};counts[mood]++;
+  return night;
 }
 export async function createApp(pool: Pool, origin: string) {
   const configured = new URL(origin);
@@ -171,10 +187,10 @@ export async function createApp(pool: Pool, origin: string) {
         }
         return {ok:true};
       }
-      const keyedRequest=['complete','review','adjust','replace','reward','reward-request','reward-decision','quick','her-night'].includes(op);
+      const keyedRequest=['complete','review','adjust','replace','reward','reward-request','reward-decision','quick','her-night','evening-close','evening-run'].includes(op);
       let requestKey:string|undefined;
       if(keyedRequest){
-        if(u.role!==(['review','replace','reward','reward-decision','quick','her-night'].includes(op)?'wife':'husband'))fail(403,'Wrong role for action');
+        if(u.role!==(['review','replace','reward','reward-decision','quick','her-night','evening-close','evening-run'].includes(op)?'wife':'husband'))fail(403,'Wrong role for action');
         requestKey=uuid.parse(b.key);
         const previous=await c.query('SELECT result FROM request_keys WHERE session_id=$1 AND user_id=$2 AND kind=$3 AND key=$4',[s.id,u.id,op,requestKey]);
         // A committed retry is a read of the original result, even after return, pause or stop.
@@ -222,6 +238,16 @@ export async function createApp(pool: Pool, origin: string) {
         const list=s.notes??=[];if(list.length>=50)fail(409,'Note list is full');const note={id:randomUUID(),text:data.text,at:Date.now()};list.push(note);response={note};
       }
       else if(op==='note-delete'){wife();const id=uuid.parse(b.note);s.notes=(s.notes??[]).filter(n=>n.id!==id);}
+      else if(op==='pace'){wife();const data=paceSchema.parse(b);s.pace=data.commandsPerEvening;response={pace:s.pace};}
+      else if(op==='evening-close'){
+        wife();let closed=0;for(const m of s.missions)if(m.status==='queued'){m.status='cancelled';closed++;}
+        s.eveningClosedAt=Date.now();response={closed};
+      }
+      else if(op==='evening-save'){
+        wife();const data=eveningSchema.parse(b);const list=s.savedEvenings??=[];if(list.length>=20)fail(409,'Saved evenings list is full');
+        const evening={id:randomUUID(),...data,createdAt:Date.now()};list.push(evening);response={evening};
+      }
+      else if(op==='evening-delete'){wife();const id=uuid.parse(b.evening);s.savedEvenings=(s.savedEvenings??[]).filter(e=>e.id!==id);}
       else {
         gameplay();
         if(op==='extend'){wife();s.remaining+=z.number().int().min(1).max(525600).parse(b.minutes)*60000;}
@@ -251,28 +277,30 @@ export async function createApp(pool: Pool, origin: string) {
           const previous=await c.query('SELECT result FROM request_keys WHERE session_id=$1 AND user_id=$2 AND kind=$3 AND key=$4',[s.id,u.id,op,key]);
           if(previous.rowCount)return previous.rows[0].result;
           const data=draftSchema.parse(b);
-          const m:Mission={...data,id:randomUUID(),revision:s.revision,status:'draft'};s.missions.push(m);response={mission:m};
+          const m:Mission={...data,id:randomUUID(),revision:s.revision,status:'draft',createdAt:Date.now()};s.missions.push(m);response={mission:m};
           await c.query('INSERT INTO request_keys VALUES($1,$2,$3,$4,$5)',[s.id,u.id,op,key,JSON.stringify(response)]);
         }
         else if(op==='quick'){
           wife();const data=z.object({preset:z.string().max(40).optional(),lang:z.enum(['he','en']).default('he'),title:z.string().trim().min(1).max(160).optional(),text:text.optional(),points:z.number().int().min(0).max(100).optional(),scheduledAt:z.number().int().optional()}).parse(b);
+          if(eveningClosed(s))fail(409,'Evening is closed');
           const preset=data.preset?quickPresets.find(p=>p.id===data.preset)??fail(404,'Command unavailable'):undefined;
           const body=preset?(data.lang==='he'?preset.he:preset.en):data.text;
           const title=preset?body:data.title;
           if(!title||!body)throw Object.assign(new Error('Title and text are required'),{status:400});
           if(data.scheduledAt!==undefined&&(data.scheduledAt<Date.now()||data.scheduledAt>Date.now()+31536000000))throw Object.assign(new Error('Schedule must be within one year'),{status:400});
-          const m:Mission={id:randomUUID(),revision:s.revision,title,text:body,points:preset?preset.points:(data.points??0),secret:false,completionStyle:'simple',status:'pending',deliveredAt:Date.now()};
+          if(eveningUsed(s.missions)>=(s.pace??3))fail(409,'Evening limit reached for the current pace');
+          const m:Mission={id:randomUUID(),revision:s.revision,title,text:body,points:preset?preset.points:(data.points??0),secret:false,completionStyle:'simple',status:'pending',deliveredAt:Date.now(),createdAt:Date.now()};
           if(data.scheduledAt!==undefined){m.status='queued';m.scheduledAt=data.scheduledAt;delete m.deliveredAt;}
           s.missions.push(m);response={mission:m};
         }
         else if(op==='her-night'){
-          wife();const data=z.object({mood:z.enum(['soft','playful','strict']),lang:z.enum(['he','en']).default('he'),steps:z.array(z.object({he:text,en:text,points:z.number().int().min(0).max(100),minutesFromNow:z.number().int().min(0).max(10080)})).min(1).max(3)}).parse(b);
-          if(data.steps.some(st=>(data.lang==='he'?st.he:st.en).length>160))fail(400,'Step title too long');
-          const nights=s.nights??=[];if(nights.length>=50)fail(409,'Night list is full');
-          const at=Date.now(),missionIds:string[]=[];
-          for(const st of data.steps){const body=data.lang==='he'?st.he:st.en;const m:Mission={id:randomUUID(),revision:s.revision,title:body,text:body,points:st.points,secret:false,completionStyle:'simple',status:'queued',scheduledAt:at+st.minutesFromNow*60000};s.missions.push(m);missionIds.push(m.id);}
-          const night={id:randomUUID(),mood:data.mood,at,missionIds};nights.push(night);
-          const counts=s.moodCounts??={soft:0,playful:0,strict:0};counts[data.mood]++;response={night};
+          wife();const data=nightSchema.parse(b);
+          response={night:runNight(s,data.mood,data.lang,data.steps)};
+        }
+        else if(op==='evening-run'){
+          wife();const data=z.object({evening:uuid,lang:z.enum(['he','en']).default('he')}).parse(b);
+          const saved=s.savedEvenings?.find(e=>e.id===data.evening)??fail(404,'Evening unavailable');
+          response={night:runNight(s,saved.mood,data.lang,saved.steps)};
         }
         else if(op==='herwish'){
           wife();const data=z.object({title:z.string().trim().min(1).max(160),cost:z.number().int().min(0).max(100000)}).parse(b);

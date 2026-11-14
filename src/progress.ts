@@ -2,6 +2,7 @@ import type { Mission } from '../server/app';
 
 const DAY=86400000;
 export const WISH_COOLDOWN_MS=DAY;
+export const EVENING_WINDOW_MS=DAY/2;
 const dayKey=(at:number)=>new Date(at).toDateString();
 export type Mood='soft'|'playful'|'strict';
 export type Rating='love'|'like'|'skip';
@@ -59,6 +60,14 @@ export function weeklyRecap(missions:Mission[],now:number){
   let topRating:Rating|null=null;
   for(const rating of ratings)if(counts[rating]>0&&(topRating===null||counts[rating]>counts[topRating]))topRating=rating;
   return {approvedThisWeek:week.length,topRating,herPointsThisWeek:week.reduce((sum,m)=>sum+m.points,0)};
+}
+
+export function eveningClosed(session:{eveningClosedAt?:number},now=Date.now()){
+  return session.eveningClosedAt!==undefined&&now-session.eveningClosedAt<EVENING_WINDOW_MS;
+}
+
+export function eveningUsed(missions:Mission[],now=Date.now()){
+  return missions.filter(m=>now-(m.createdAt??0)<EVENING_WINDOW_MS&&!['cancelled','refused'].includes(m.status)).length;
 }
 
 export function favouriteMood(moodCounts?:Partial<Record<Mood,number>>){

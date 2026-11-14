@@ -32,6 +32,8 @@ try {
   const op=(who:typeof w,name:string,body:Record<string,unknown>={},status=200)=>who(`/sessions/${id}/${name}`,body,status);
   const state=async():Promise<Session>=>(await w(`/sessions/${id}`)).session;
   async function ageWishes(){const row=(await pool.query('SELECT data FROM sessions WHERE id=$1',[id])).rows[0].data as Session;for(const wish of row.herWishes!)wish.createdAt=0;await pool.query('UPDATE sessions SET data=$2 WHERE id=$1',[id,JSON.stringify(row)]);}
+  const edit=async(change:(row:Session)=>void)=>{const row=(await pool.query('SELECT data FROM sessions WHERE id=$1',[id])).rows[0].data as Session;change(row);await pool.query('UPDATE sessions SET data=$2 WHERE id=$1',[id,JSON.stringify(row)]);};
+  const freshEvening=()=>edit(row=>{for(const m of row.missions)m.createdAt=0;delete row.eveningClosedAt;});
 
   // Gameplay is locked until both players approve the same revision.
   await op(w,'quick',{preset:quickPresets[0].id,key:randomUUID()},409);
@@ -114,6 +116,7 @@ try {
 
   // Her night: wife only, keyed retries return the original night, invalid steps are rejected, steps are queued or delivered by their minute.
   const nightStep={he:'שלב ראשון',en:'First step',points:2,minutesFromNow:0};
+  await freshEvening();
   const nightPayload={key:randomUUID(),mood:'playful',lang:'en',steps:[nightStep,{he:'שלב שני',en:'Second step',points:3,minutesFromNow:60}]};
   await op(h,'her-night',nightPayload,403);
   await op(w,'her-night',{...nightPayload,steps:[]},400);
@@ -196,12 +199,108 @@ try {
   assert.equal(favouriteMood({soft:0,playful:0,strict:0}),null);assert.equal(favouriteMood(undefined),null);
   assert.equal(WISH_COOLDOWN_MS,86400000);
 
-  // Terminal sessions still reject new play, including quick commands, ratings and nights.
+  // Pace: wife only, values 1-3, enforced per night and per evening for quick commands; cancelled commands free a slot.
+  await op(h,'pace',{commandsPerEvening:2},403);
+  for(const commandsPerEvening of [0,4,'x'])await op(w,'pace',{commandsPerEvening},400);
+  await op(w,'pace',{commandsPerEvening:2});
+  s=await state();
+  assert.equal(s.pace,2);
+  assert.equal((await h(`/sessions/${id}`)).session.pace,2);
+  await freshEvening();
+  const paceOne=await op(w,'quick',{preset:preset.id,key:randomUUID(),lang:'en'});
+  assert.ok(paceOne.mission.createdAt>0);
+  await op(w,'quick',{preset:preset.id,key:randomUUID(),lang:'en'});
+  assert.equal((await op(w,'quick',{preset:preset.id,key:randomUUID(),lang:'en'},409)).error,'Evening limit reached for the current pace');
+  await op(w,'cancel',{mission:paceOne.mission.id});
+  await op(w,'quick',{preset:preset.id,key:randomUUID(),lang:'en'});
+  await op(w,'quick',{preset:preset.id,key:randomUUID(),lang:'en'},409);
+  assert.equal((await op(w,'her-night',{key:randomUUID(),mood:'soft',lang:'en',steps:[nightStep,nightStep,nightStep]},400)).error,'Too many steps for the current pace');
+  await op(w,'pace',{commandsPerEvening:3});
+  await freshEvening();
+  await op(w,'her-night',{key:randomUUID(),mood:'soft',lang:'en',steps:[nightStep,nightStep,nightStep]});
+  assert.equal((await op(w,'quick',{preset:preset.id,key:randomUUID(),lang:'en'},409)).error,'Evening limit reached for the current pace');
+  assert.equal((await op(w,'her-night',{key:randomUUID(),mood:'soft',lang:'en',steps:[nightStep]},409)).error,'Evening limit reached for the current pace');
+  await freshEvening();
+  await op(w,'pace',{commandsPerEvening:1});
+  await op(w,'quick',{preset:preset.id,key:randomUUID(),lang:'en'});
+  assert.equal((await op(w,'her-night',{key:randomUUID(),mood:'soft',lang:'en',steps:[nightStep]},409)).error,'Evening limit reached for the current pace');
+  assert.equal((await op(w,'her-night',{key:randomUUID(),mood:'soft',lang:'en',steps:[nightStep,nightStep]},400)).error,'Too many steps for the current pace');
+  await freshEvening();
+  await op(w,'pace',{commandsPerEvening:3});
+
+  // Done for tonight: wife only, keyed, cancels queued commands, blocks new ones until the evening reopens after 12 hours.
+  await freshEvening();
+  await op(w,'quick',{preset:preset.id,key:randomUUID(),lang:'en',scheduledAt:Date.now()+3600000});
+  await op(w,'her-night',{key:randomUUID(),mood:'soft',lang:'en',steps:[{...nightStep,minutesFromNow:120}]});
+  s=await state();
+  const queuedIds=s.missions.filter(m=>m.status==='queued').map(m=>m.id);
+  assert.ok(queuedIds.length>=3);
+  const closeKey=randomUUID();
+  await op(h,'evening-close',{key:randomUUID()},403);
+  const closed=await op(w,'evening-close',{key:closeKey});
+  assert.deepEqual(closed,{closed:queuedIds.length});
+  assert.deepEqual(await op(w,'evening-close',{key:closeKey}),closed);
+  s=await state();
+  assert.ok(queuedIds.every(missionId=>s.missions.find(m=>m.id===missionId)!.status==='cancelled'));
+  assert.ok(s.eveningClosedAt!>0);
+  assert.ok(s.history.some(item=>item.event==='evening-close'));
+  assert.equal((await op(w,'quick',{preset:preset.id,key:randomUUID(),lang:'en'},409)).error,'Evening is closed');
+  assert.equal((await op(w,'her-night',{key:randomUUID(),mood:'soft',lang:'en',steps:[nightStep]},409)).error,'Evening is closed');
+  await edit(row=>{for(const m of row.missions)m.createdAt=0;row.eveningClosedAt=Date.now()-11*3600000;});
+  await op(w,'quick',{preset:preset.id,key:randomUUID(),lang:'en'},409);
+  await edit(row=>{row.eveningClosedAt=Date.now()-13*3600000;});
+  assert.equal((await op(w,'quick',{preset:preset.id,key:randomUUID(),lang:'en'})).mission.status,'pending');
+
+  // Saved evenings: wife only, validated, capped at 20, hidden from him, run through the same night rules.
+  await op(h,'evening-save',{name:'Slow Sunday',mood:'soft',steps:[nightStep]},403);
+  await op(w,'evening-save',{name:'   ',mood:'soft',steps:[nightStep]},400);
+  await op(w,'evening-save',{name:'x'.repeat(81),mood:'soft',steps:[nightStep]},400);
+  await op(w,'evening-save',{name:'Angry',mood:'angry',steps:[nightStep]},400);
+  await op(w,'evening-save',{name:'Empty',mood:'soft',steps:[]},400);
+  await op(w,'evening-save',{name:'Long',mood:'soft',steps:[nightStep,nightStep,nightStep,nightStep]},400);
+  await op(w,'evening-save',{name:'Long step',mood:'soft',steps:[{...nightStep,en:'x'.repeat(161)}]},400);
+  const twoStep=(await op(w,'evening-save',{name:'Two steps',mood:'playful',steps:[nightStep,{...nightStep,minutesFromNow:60}]})).evening;
+  const slow=(await op(w,'evening-save',{name:'Slow Sunday',mood:'soft',steps:[nightStep]})).evening;
+  for(let i=2;i<20;i++)await op(w,'evening-save',{name:`Evening ${i}`,mood:'strict',steps:[nightStep]});
+  s=await state();
+  assert.equal(s.savedEvenings!.length,20);
+  assert.equal((await h(`/sessions/${id}`)).session.savedEvenings,undefined);
+  assert.equal((await op(w,'evening-save',{name:'Overflow',mood:'soft',steps:[nightStep]},409)).error,'Saved evenings list is full');
+  await op(h,'evening-run',{key:randomUUID(),evening:slow.id},403);
+  await op(w,'evening-run',{key:randomUUID(),evening:randomUUID()},404);
+  const runKey=randomUUID();
+  const ran=await op(w,'evening-run',{key:runKey,evening:slow.id,lang:'en'});
+  assert.deepEqual(await op(w,'evening-run',{key:runKey,evening:slow.id,lang:'en'}),ran);
+  s=await state();
+  const storedRun=s.nights!.find(n=>n.id===ran.night.id)!;
+  assert.equal(s.nights!.filter(n=>n.id===ran.night.id).length,1);
+  assert.equal(storedRun.mood,'soft');
+  assert.equal(s.missions.find(m=>m.id===storedRun.missionIds[0])!.text,'First step');
+  await op(w,'pace',{commandsPerEvening:1});
+  assert.equal((await op(w,'evening-run',{key:randomUUID(),evening:twoStep.id,lang:'en'},400)).error,'Too many steps for the current pace');
+  await freshEvening();
+  await op(w,'quick',{preset:preset.id,key:randomUUID(),lang:'en'});
+  assert.equal((await op(w,'evening-run',{key:randomUUID(),evening:slow.id,lang:'en'},409)).error,'Evening limit reached for the current pace');
+  await freshEvening();
+  await op(w,'pace',{commandsPerEvening:3});
+  await op(w,'evening-close',{key:randomUUID()});
+  assert.equal((await op(w,'evening-run',{key:randomUUID(),evening:slow.id,lang:'en'},409)).error,'Evening is closed');
+  await edit(row=>{row.eveningClosedAt=Date.now()-13*3600000;});
+  await op(h,'evening-delete',{evening:slow.id},403);
+  await op(w,'evening-delete',{evening:slow.id});
+  s=await state();
+  assert.ok(!s.savedEvenings!.some(e=>e.id===slow.id));
+  assert.ok(s.savedEvenings!.some(e=>e.id===twoStep.id));
+  assert.equal((await op(w,'evening-run',{key:randomUUID(),evening:slow.id,lang:'en'},404)).error,'Evening unavailable');
+
+  // Terminal sessions still reject new play, including quick commands, ratings, nights and evenings.
   await op(w,'stop',{});
   await op(w,'quick',{preset:preset.id,key:randomUUID()},409);
   await op(w,'rate',{mission:quick.id,rating:'skip'},409);
   await op(w,'her-night',{...nightPayload,key:randomUUID()},409);
-  console.log('PASS play flow: approvals, quick commands, keyed retries, scheduling, review points, wishes with cooldown, private commands, aftercare, her night, quick ratings, private notes, progress helpers, terminal guard');
+  await op(w,'evening-close',{key:randomUUID()},409);
+  await op(w,'evening-save',{name:'Late',mood:'soft',steps:[nightStep]},409);
+  console.log('PASS play flow: approvals, quick commands, keyed retries, scheduling, review points, wishes with cooldown, private commands, aftercare, her night, quick ratings, private notes, progress helpers, pacing, done for tonight, saved evenings, terminal guard');
 } finally {
   if(server)await new Promise<void>(resolve=>server!.close(()=>resolve()));
   await pool.end();await db.stop();await rm(directory,{recursive:true,force:true,maxRetries:10,retryDelay:100});
