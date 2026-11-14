@@ -5,6 +5,8 @@ import { library as builtInLibrary, categories, ideasForDestination, suggest, ty
 import { currentMission } from './guidance';
 import { newPartnerUpdates } from './notifications';
 import { Roulette } from './Roulette';
+import { quickPresets, setupTags, wishSuggestions } from './quick';
+import { progressStats, careDue } from './progress';
 import './style.css';
 type State={user:User;sessions:Session[];serverNow:number};
 const stored=(key:string,fallback:any)=>{try{return JSON.parse(localStorage.getItem(key)||'null')??fallback;}catch{return fallback;}};
@@ -22,6 +24,7 @@ Object.assign(labels,{pegging:['פגינג','Pegging'],joi:['הוראות אונ
 Object.assign(labels,{adjustment:['ממתינה להתאמה','Awaiting adjustment'],adjust:['התבקשה התאמת הזמנה','Invitation adjustment requested'],replace:['נוצרה טיוטה חלופית','Replacement drafted']});
 Object.assign(labels,{checkin:['עודכן צ׳ק־אין','Check-in updated'],low:['נמוכה','Low'],medium:['בינונית','Medium'],high:['גבוהה','High'],connection:['חיבור','Connection'],playful:['משחקיות','Playful'],quiet:['שקט','Quiet']});
 Object.assign(labels,{sequence:['עודכן סדר ההזמנות','Invitation sequence updated']});
+Object.assign(labels,{quick:['נשלחה פקודה מהירה','Quick command sent'],herwish:['נוספה משאלה','Wish added'],'herwish-redeem':['מומשה משאלה','Wish redeemed'],'command-save':['נשמרה פקודה','Command saved'],'command-delete':['נמחקה פקודה','Command deleted'],aftercare:['נשלח טיפול אחרי','Aftercare sent']});
 Object.assign(labels,{complete:['נשלח ביצוע לבדיקה','Completion submitted for review'],reflection:['עודכן שיתוף סיום','Closing reflection updated']});
 Object.assign(labels,{reward:['נוצר פרס','Reward created'],'reward-request':['נשלחה בקשת פרס','Reward requested'],'reward-decision':['הוכרעה בקשת פרס','Reward request decided']});
 function Button({children,...props}:React.ButtonHTMLAttributes<HTMLButtonElement>){const busy=useContext(BusyContext);return <button {...props} disabled={busy||props.disabled}>{children}</button>;}
@@ -39,6 +42,7 @@ function App(){
  const [now,setNow]=useState(Date.now()),[received,setReceived]=useState(Date.now());
  const [category,setCategory]=useState(''),[intensity,setIntensity]=useState(''),[tag,setTag]=useState(''),[query,setQuery]=useState(''),[onlyFavorites,setOnlyFavorites]=useState(false),[away,setAway]=useState(false);
  const [drawnFollowup,setDrawnFollowup]=useState('');
+ const [noPrep,setNoPrep]=useState(false),[quickAt,setQuickAt]=useState('');
  const [favorites,setFavorites]=useState<string[]>(()=>stored('hr-favorites',[])),[recent,setRecent]=useState<string[]>([]);
   const [draft,setDraft]=useState<{title:string;text:string;points:number;secret:boolean;completionStyle?:string;surprise?:boolean;category?:string}>({title:'',text:'',points:5,secret:false,completionStyle:'simple'}),[editing,setEditing]=useState('');
   const [rewardDraft,setRewardDraft]=useState({title:'',description:'',cost:''});
@@ -78,13 +82,16 @@ function App(){
   const ownReflection=u?s?.reflections?.[u.id]:undefined;
   const [reflection,setReflection]=useState({appreciation:'',repeat:''});
   useEffect(()=>{setReflection(ownReflection??{appreciation:'',repeat:''});},[s?.id,u?.id,ownReflection?.appreciation,ownReflection?.repeat]);
-   const action=async(op:string,body:any={})=>{const keyed=['mission','message','complete','review','adjust','replace','reward','reward-request','reward-decision'].includes(op);const {key:ignored,...payload}=body;const slot=`${op}:${body.mission||body.reward||body.request||''}`;const result=await api(`/sessions/${s!.id}/${op}`,keyed?{...payload,key:retryKey(slot,payload)}:body);if(keyed)delete pendingKeys.current[slot];return result;};
+   const action=async(op:string,body:any={})=>{const keyed=['mission','message','complete','review','adjust','replace','reward','reward-request','reward-decision','quick'].includes(op);const {key:ignored,...payload}=body;const slot=`${op}:${body.mission||body.reward||body.request||''}`;const result=await api(`/sessions/${s!.id}/${op}`,keyed?{...payload,key:retryKey(slot,payload)}:body);if(keyed)delete pendingKeys.current[slot];return result;};
  const form=(event:React.FormEvent<HTMLFormElement>)=>{event.preventDefault();return Object.fromEntries(new FormData(event.currentTarget));};
  const destination=tab==='rewards'?'rewards':tab==='punishments'?'consequences':'library';
  const destinationIdeas=ideasForDestination(library,destination,away);
- const filtered=destinationIdeas.filter(i=>(destination!=='library'||!category||i.category===category)&&(!intensity||i.intensity===Number(intensity))&&(!tag||i.tags.includes(tag))&&(!onlyFavorites||favorites.includes(i.id))&&`${i.he} ${i.en}`.toLowerCase().includes(query.toLowerCase()));
+ const filtered=destinationIdeas.filter(i=>(destination!=='library'||!category||i.category===category)&&(!intensity||i.intensity===Number(intensity))&&(!tag||i.tags.includes(tag))&&(!onlyFavorites||favorites.includes(i.id))&&(!noPrep||!i.tags.some(tag=>setupTags.has(tag)))&&`${i.he} ${i.en}`.toLowerCase().includes(query.toLowerCase()));
  function useIdea(i:Idea){const text=lang==='he'?i.he:i.en;if(i.category==='rewards'){setRewardDraft({title:text.slice(0,160),description:text,cost:''});document.getElementById('reward-title')?.focus();}else{setDraft({title:text.slice(0,150),text,points:5,secret:i.category==='secret',completionStyle:'simple'});setEditing('');setComposerOpen(true);setTab('missions');setTimeout(()=>document.querySelector<HTMLInputElement>('#mission-composer input')?.focus(),0);}setRecent(v=>[...v.filter(id=>id!==i.id),i.id].slice(-10));}
  const remaining=s?Math.max(0,s.remaining-(play?now-received:0)):0;
+ const progress=progressStats(s?.missions??[],now),needsCare=careDue(s?.missions??[],s?.lastCareAt);
+ const awaitingReview=(s?.missions??[]).filter(m=>m.status==='submitted'),pendingRewards=(s?.rewardRequests??[]).filter(r=>r.status==='pending');
+ const sendQuick=(body:Record<string,unknown>)=>{const at=quickAt?new Date(quickAt).getTime():NaN;void run(()=>action('quick',{...body,lang,...(Number.isFinite(at)?{scheduledAt:at}:{})}));};
  const date=(at:number)=>new Date(at).toLocaleString(lang==='he'?'he-IL':'en-GB');
  const displayName=(id:string)=>id==='server'?t('השרת','Server'):id===u?.id?t('אני','Me'):t('השותף/ה','Partner');
  const missionForm=(m:Mission)=><form onSubmit={e=>{const b=form(e);void run(()=>action('complete',{mission:m.id,text:b.completion,expectedVersion:m.submissionVersion??0}));}}>{m.completionStyle!=='simple'&&<label>{t('דיווח ביצוע כתוב','Written completion')}<textarea name="completion" required maxLength={4000} defaultValue={m.completion||''}/></label>}<Button disabled={!play}>{m.completionStyle==='simple'?t('סיימתי','Done'):t('שליחת ביצוע','Submit completion')}</Button></form>;
@@ -121,7 +128,50 @@ function App(){
  {sessions.length>0&&<label className="session-select">{t('מפגש נבחר / ארכיון','Selected session / archive')}<select value={s?.id} onChange={e=>{setSelected(e.target.value);setEditing('');}}>{sessions.map(session=><option key={session.id} value={session.id}>{label(session.status)} · {date(session.history[0].at)}</option>)}</select></label>}
  {s&&<><section className="panel session"><div className="row between"><div><p className="eyebrow">YOUR SHARED SESSION</p><h2>{label(s.status)}</h2><p>{t('יתרת זמן שרת','Server time remaining')}: <strong>{Math.ceil(remaining/60000)} {t('דקות','minutes')}</strong> · {s.points} {t('נקודות','points')}</p></div><div className="safety"><button disabled={ended} onClick={()=>void runSafety(s.pauses.includes(u.id)?'resume':'pause')}>{s.pauses.includes(u.id)?t('שחרור ההשהיה שלי','Release my pause'):t('השהיה אישית','Pause my play')}</button><button className="danger" disabled={ended} onClick={()=>{if(confirm(t('לעצור את המפגש לצמיתות? לא ניתן לחדש אותו.','Stop this session permanently? It cannot be resumed.')))void runSafety('stop');}}>{t('עצירה לצמיתות','Stop permanently')}</button></div></div>{held&&!ended&&<p className="notice">{s.approvals.length!==2?t('ממתינים לאישור שני המשתתפים לתנאים הנוכחיים. השעון והמשימות מושהים.','Awaiting both approvals of current terms. Clock and missions are suspended.'):t('קיימת השהיה אישית. רק מי שהשהה יכול לשחרר אותה; השעון מוקפא.','A personal pause is active. Only its owner can release it; the clock is frozen.')} {s.pauses.length>0&&`${s.pauses.length} ${t('השהיות פעילות','active pauses')}`}</p>}</section>
  <section className="panel next-step" aria-label={t('הצעד הבא','Next step')}><h2>{t('הצעד הבא שלנו','Our next step')}</h2><p>{nextStep}</p>{ended&&<div className="row"><Button onClick={()=>document.getElementById('reflection-appreciation')?.focus()}>{t('לשיתוף על המפגש','Reflect on this session')}</Button><Button onClick={()=>document.getElementById('new-session-terms')?.focus()}>{t('להתחלת מפגש נוסף','Start another session')}</Button></div>}{!ended&&s.approvals.length!==2&&<Button className="primary" onClick={()=>{setTab('agreement');setTimeout(()=>{const heading=document.querySelector<HTMLElement>('nav + section h2');heading?.setAttribute('tabindex','-1');heading?.focus();},0);}}>{t('לעיון בהסכמה','Review agreement')}</Button>}{current&&tab!=='missions'&&<Button onClick={()=>{setTab('missions');setTimeout(()=>document.getElementById(`mission-${current.id}`)?.focus(),0);}}>{t('להזמנה הנוכחית','View current invitation')}</Button>}</section>
-  <nav ref={navRef} aria-label={t('אזורי המפגש','Session areas')}>{[['missions','משימות','Missions'],['rewards','פרסים','Rewards'],['agreement','הסכמות','Agreement'],...(wife?[['library','ספריית השראה','Idea library'],['punishments','השראת עונשים','Punishments inspiration']]:[]),['messages','שיחה','Messages'],['inbox','תיבת עדכונים','Inbox'],['history','היסטוריה','History']].map(([id,he,en])=><button key={id} aria-current={tab===id?'page':undefined} className={tab===id?'active':''} onClick={()=>{setTab(id);setIntensity('');setTag('');setQuery('');setOnlyFavorites(false);}}>{t(he,en)}{id==='inbox'&&` (${s.inbox.filter(n=>!n.readBy.includes(u.id)).length})`}</button>)}</nav>
+  <nav ref={navRef} aria-label={t('אזורי המפגש','Session areas')}>{[['missions','משימות','Missions'],['dashboard','לוח מעקב','Dashboard'],['rewards','פרסים','Rewards'],['agreement','הסכמות','Agreement'],...(wife?[['library','ספריית השראה','Idea library'],['punishments','השראת עונשים','Punishments inspiration']]:[]),['messages','שיחה','Messages'],['inbox','תיבת עדכונים','Inbox'],['history','היסטוריה','History']].map(([id,he,en])=><button key={id} aria-current={tab===id?'page':undefined} className={tab===id?'active':''} onClick={()=>{setTab(id);setIntensity('');setTag('');setQuery('');setOnlyFavorites(false);setNoPrep(false);}}>{t(he,en)}{id==='inbox'&&` (${s.inbox.filter(n=>!n.readBy.includes(u.id)).length})`}</button>)}</nav>
+  {tab==='dashboard'&&<>
+    <section className="panel stats" aria-label={t('התקדמות המשחק','Game progress')}><h2>{t('איך המשחק מתקדם','How the game is going')}</h2>
+      <div className="stat-grid">
+        <div><strong>{progress.thisWeek}</strong><span>{t('משימות שאושרו השבוע','Tasks approved this week')}</span></div>
+        <div><strong>{progress.streak}</strong><span>{t('ימים רצופים עם משימה שאושרה','Day streak with an approved task')}</span></div>
+        <div><strong>{progress.total}</strong><span>{t('משימות שאושרו בסך הכול','Tasks approved in total')}</span></div>
+        <div><strong>{progress.ackRate===null?'—':`${progress.ackRate}%`}</strong><span>{t('הזמנות שאושרו בקבלה מפורשת','Invitations explicitly acknowledged')}</span></div>
+      </div>
+    </section>
+    {wife?<>
+      <section className="panel"><h2>{t('שולחן הבדיקה שלך','Your review desk')}</h2>
+        {!awaitingReview.length&&!pendingRewards.length&&<p className="empty">{t('אין פריטים שממתינים לך כרגע.','Nothing is waiting for you right now.')}</p>}
+        {awaitingReview.map(m=><article key={m.id}><h3>{m.title}</h3><p className="preserve">{m.completion}</p><div className="row"><Button className="primary" disabled={!play} onClick={()=>void run(()=>action('review',{mission:m.id,approve:true,submissionVersion:m.submissionVersion??0}))}>{t('אישור בלחיצה אחת','Approve in one tap')}</Button><Button disabled={!play} onClick={()=>void run(()=>action('review',{mission:m.id,approve:false,submissionVersion:m.submissionVersion??0}))}>{t('החזרה לתיקון','Return for revision')}</Button></div></article>)}
+        {pendingRewards.map(r=><article key={r.id}><h3>{r.title}</h3><p>{r.cost} {t('נקודות','points')}</p><div className="row"><Button className="primary" disabled={!play} onClick={()=>void run(()=>action('reward-decision',{request:r.id,approve:true}))}>{t('אישור פרס','Approve reward')}</Button><Button disabled={!play} onClick={()=>void run(()=>action('reward-decision',{request:r.id,approve:false}))}>{t('דחיית פרס','Decline reward')}</Button></div></article>)}
+      </section>
+      <section className="panel"><h2>{t('פקודות מהירות','Quick commands')}</h2><p>{t('לחיצה אחת שולחת הזמנה מוכנה לבן הזוג. אפשר לתזמן אותה מראש בשדה למטה.','One tap sends a ready-made invitation to your partner. You can schedule it ahead with the field below.')}</p>
+        <label>{t('תזמון (לא חובה)','Schedule (optional)')}<input type="datetime-local" value={quickAt} onChange={e=>setQuickAt(e.target.value)}/></label>
+        <div className="quick-grid">{quickPresets.map(p=><button key={p.id} disabled={!play} onClick={()=>sendQuick({preset:p.id})}>{lang==='he'?p.he:p.en}</button>)}</div>
+        <h3>{t('הפקודות השמורות שלי','My saved commands')}</h3>
+        {!s?.commands?.length&&<p className="empty">{t('עדיין אין פקודות שמורות.','No saved commands yet.')}</p>}
+        {(s?.commands??[]).map(c=><article key={c.id}><h4>{c.title}</h4><p className="preserve">{c.text}</p><div className="row"><Button disabled={!play} onClick={()=>sendQuick({title:c.title,text:c.text,points:c.points})}>{t('שליחה','Send')}</Button><Button disabled={!play} onClick={()=>void run(()=>action('command-delete',{command:c.id}))}>{t('מחיקה','Delete')}</Button></div></article>)}
+        <form onSubmit={e=>{const el=e.currentTarget,b=form(e);void run(async()=>{await action('command-save',{title:b.title,text:b.text,points:Number(b.points)});el.reset();});}}>
+          <label>{t('כותרת','Title')}<input name="title" required maxLength={160}/></label>
+          <label>{t('הוראה מלאה','Full instruction')}<textarea name="text" required maxLength={4000}/></label>
+          <label>{t('נקודות לאישור ביצוע','Points on approval')}<input name="points" type="number" min={0} max={100} defaultValue={2} required/></label>
+          <Button disabled={!play}>{t('שמירת פקודה','Save command')}</Button>
+        </form>
+      </section>
+      <section className="panel"><h2>{t('הנקודות שלך','Your points')}</h2><p className="big-number"><strong>{s?.herPoints??0}</strong> {t('נקודות לעצמך','points for yourself')}</p><p className="small">{t('כל משימה שאושרה מוסיפה לך נקודות באותו ערך. מממשים אותן על מה שרוצים.','Every approved task adds the same points to you. Spend them on what you want.')}</p>
+        {!s?.herWishes?.length&&<p className="empty">{t('עדיין אין משאלות.','No wishes yet.')}</p>}
+        {(s?.herWishes??[]).map(w=><article key={w.id}><h4>{w.title}</h4><p>{w.cost} {t('נקודות','points')}</p><Button className="primary" disabled={!play||(s?.herPoints??0)<w.cost} onClick={()=>void run(()=>action('herwish-redeem',{wish:w.id}))}>{t('מימוש המשאלה','Redeem wish')}</Button></article>)}
+        <h3>{t('הוספת משאלה','Add a wish')}</h3>
+        <div className="quick-grid">{wishSuggestions.map(w=><button key={w.he} disabled={!play} onClick={()=>void run(()=>action('herwish',{title:lang==='he'?w.he:w.en,cost:w.cost}))}>{lang==='he'?w.he:w.en} · {w.cost}</button>)}</div>
+        <form onSubmit={e=>{const el=e.currentTarget,b=form(e);void run(async()=>{await action('herwish',{title:b.title,cost:Number(b.cost)});el.reset();});}}>
+          <label>{t('משאלה','Wish')}<input name="title" required maxLength={160}/></label>
+          <label>{t('עלות בנקודות','Cost in points')}<input name="cost" type="number" min={0} max={100000} defaultValue={30} required/></label>
+          <Button disabled={!play}>{t('הוספת משאלה','Add wish')}</Button>
+        </form>
+      </section>
+    </>:<section className="panel"><h2>{t('טיפול אחריה','Looking after her')}</h2>
+      {needsCare?<><p>{t('אחרי משימה שאושרה, דאג/י לה: מים, שמיכה, חיבוק או שיחה רכה. זה לא תלוי במשחק.','After an approved task, look after her: water, a blanket, a hug, or a gentle talk. This does not depend on the game.')}</p><Button className="primary" onClick={()=>void run(()=>action('aftercare',{}))}>{t('סימנתי: טיפלתי בה','Done: I looked after her')}</Button></>:<p className="empty">{t('אין כרגע משימה שממתינה לטיפול אחריה.','No task is waiting for aftercare right now.')}</p>}
+    </section>}
+  </>}
   {tab==='rewards'&&<section className="panel"><h2>{t('חנות הפרסים','Reward shop')}</h2><p>{s.points} {t('נקודות זמינות','points available')}</p>
     <p>{t('משימות ייחודיות שאושרו','Unique approved missions')}: {Math.min(5,new Set(s.missions.filter(m=>m.status==='approved').map(m=>m.id)).size)}/5</p>
     {new Set(s.missions.filter(m=>m.status==='approved').map(m=>m.id)).size>=5&&<div className="notice"><p>{t('אבן דרך הושגה! אפשר לבחור ליצור הזמנת בונוס רגילה; דבר לא נשלח אוטומטית.','Milestone reached! You may choose to draft a normal bonus invitation; nothing is sent automatically.')}</p>{wife&&<Button disabled={!play} onClick={()=>{setTab('missions');setComposerOpen(true);}}>{t('יצירת טיוטת בונוס','Draft a bonus invitation')}</Button>}</div>}
@@ -171,7 +221,7 @@ function App(){
    <label>{t('עוצמה','Intensity')}<select value={intensity} onChange={e=>setIntensity(e.target.value)}><option value="">{t('הכל','All')}</option><option value="1">{t('עדינה','Gentle')}</option><option value="2">{t('מעורבות','Engaged')}</option><option value="3">{t('נועזת','Bold')}</option></select></label>
    <label>{t('תג גבול / פעילות','Boundary / activity tag')}<select value={tag} onChange={e=>setTag(e.target.value)}><option value="">{t('הכל','All')}</option>{[...new Set(destinationIdeas.flatMap(i=>i.tags))].map(tag=><option key={tag} value={tag}>{label(tag)}</option>)}</select></label>
   </div>
-  <div className="row"><label className="check"><input type="checkbox" checked={away} onChange={e=>setAway(e.target.checked)}/>{t('מחוץ לבית','Away from home')}</label><label className="check"><input type="checkbox" checked={onlyFavorites} onChange={e=>setOnlyFavorites(e.target.checked)}/>{t('מועדפים בלבד (במכשיר זה)','Favorites only (this device)')}</label><button className="gold" disabled={!filtered.length} onClick={()=>{const idea=suggest(filtered,recent);if(idea)useIdea(idea);else setError(t('אין הצעות חדשות במסנן הנוכחי; הרחיבו את הבחירה.','No fresh suggestions in these filters; broaden the selection.'));}}>⚄ {t('הצעה אקראית לבדיקה','Roll a suggestion to review')}</button><span>{filtered.length} {t('הצעות','ideas')}</span></div>
+  <div className="row"><label className="check"><input type="checkbox" checked={noPrep} onChange={e=>setNoPrep(e.target.checked)}/>{t('ללא הכנה מראש','Nothing to prepare')}</label><label className="check"><input type="checkbox" checked={away} onChange={e=>setAway(e.target.checked)}/>{t('מחוץ לבית','Away from home')}</label><label className="check"><input type="checkbox" checked={onlyFavorites} onChange={e=>setOnlyFavorites(e.target.checked)}/>{t('מועדפים בלבד (במכשיר זה)','Favorites only (this device)')}</label><button className="gold" disabled={!filtered.length} onClick={()=>{const idea=suggest(filtered,recent);if(idea)useIdea(idea);else setError(t('אין הצעות חדשות במסנן הנוכחי; הרחיבו את הבחירה.','No fresh suggestions in these filters; broaden the selection.'));}}>⚄ {t('הצעה אקראית לבדיקה','Roll a suggestion to review')}</button><span>{filtered.length} {t('הצעות','ideas')}</span></div>
   {!filtered.length&&<p className="empty" role="status">{away?t('אין רעיונות שנבדקו למחוץ לבית התואמים למסננים הנוכחיים. אפשר לשנות מסננים או לכבות את האפשרות.','No reviewed away-from-home ideas match the current filters. Change the filters or turn off Away from home.'):t('אין רעיונות התואמים למסננים. נסו לשנות את החיפוש או המסננים.','No ideas match these filters. Try changing the search or filters.')}</p>}
   {tab==='punishments'&&<Roulette key={s.id} ideas={library.filter(i=>i.category==='consequences')} lang={lang} onChoose={useIdea}/>}
   </section><div className="cards library">{filtered.map(i=><article className="panel" key={i.id}>

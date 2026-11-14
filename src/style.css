@@ -149,3 +149,10 @@ nav button.active,nav button[aria-current="page"] { background:#892d4e; }
 button.primary { background:#a92c50; border-color:#e47e9b; }
 button.gold { background:#f1c6a7; color:#27111d; }
 @media(max-width:600px) { .hero:not(.compact) { min-height:250px; padding:26px 22px; background-position:62% center; } }
+.stat-grid { display:grid; grid-template-columns:repeat(auto-fit,minmax(150px,1fr)); gap:14px; }
+.stat-grid > div { padding:16px; border:1px solid var(--line); border-radius:16px; background:#1d1019; }
+.stat-grid strong { display:block; font-size:30px; line-height:1.2; color:var(--gold); }
+.stat-grid span { color:var(--muted); font-size:14px; }
+.quick-grid { display:grid; grid-template-columns:repeat(auto-fit,minmax(200px,1fr)); gap:10px; margin-block:14px; }
+.quick-grid button { text-align:start; }
+.big-number strong { font-size:34px; color:var(--gold); }
