@@ -218,9 +218,9 @@ main.role-husband nav button.active, main.role-husband nav button[aria-current="
 main.role-husband .stat-grid strong { color: #d3dae6; }
 main.role-husband .points-bar::-webkit-progress-value, main.role-husband .points-bar::-moz-progress-bar { background: linear-gradient(90deg, #8d7bb8, #d3dae6); }
 
-main.persona-strict { --line: #86414a; --gold: #e9a989; }
-main.persona-playful { --line: #754761; --gold: #f1bad8; }
-main.persona-caring { --line: #786459; --gold: #f1d4a3; }
+main.role-wife.persona-strict { --line: #86414a; --gold: #e9a989; }
+main.role-wife.persona-playful { --line: #754761; --gold: #f1bad8; }
+main.role-wife.persona-caring { --line: #786459; --gold: #f1d4a3; }
 
 /* High contrast: stronger borders and brighter text, on both roles. */
 main.hc { --muted: #ffffff; --line: #ffd6e0; --gold: #ffe6b3; }
@@ -257,6 +257,6 @@ main.hc :focus-visible { outline: 4px solid #ffe6b3; outline-offset: 3px; }
   .quick-bar { position: fixed; inset-inline: 0; bottom: 0; z-index: 30; display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; padding: 10px 12px max(10px, env(safe-area-inset-bottom)); background: #170d14f2; border-top: 1px solid var(--line); backdrop-filter: blur(6px); }
   .quick-bar p { grid-column: 1 / -1; margin: 0; font-size: 13px; color: var(--muted); line-height: 1.4; }
   .quick-bar button { min-height: 44px; padding: 8px 6px; font-size: 13px; line-height: 1.3; text-align: center; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
-  main.has-quick-bar { padding-bottom: 160px; }
+  main.has-quick-bar { padding-bottom: 200px; }
   .sheet { position: fixed; inset: auto 0 0 0; margin: 0 auto; width: 100%; max-width: none; max-height: 80vh; border-radius: 20px 20px 0 0; }
 }

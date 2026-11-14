@@ -287,7 +287,8 @@ export async function createApp(pool: Pool, origin: string) {
           const body=preset?(data.lang==='he'?preset.he:preset.en):data.text;
           const title=preset?body:data.title;
           if(!title||!body)throw Object.assign(new Error('Title and text are required'),{status:400});
-          if(data.scheduledAt!==undefined&&(data.scheduledAt<Date.now()||data.scheduledAt>Date.now()+31536000000))throw Object.assign(new Error('Schedule must be within one year'),{status:400});
+          if(data.scheduledAt!==undefined&&data.scheduledAt<Date.now())throw Object.assign(new Error('Schedule must be in the future'),{status:400});
+          if(data.scheduledAt!==undefined&&data.scheduledAt>Date.now()+31536000000)throw Object.assign(new Error('Schedule must be within one year'),{status:400});
           if(eveningUsed(s.missions)>=(s.pace??3))fail(409,'Evening limit reached for the current pace');
           const m:Mission={id:randomUUID(),revision:s.revision,title,text:body,points:preset?preset.points:(data.points??0),secret:false,completionStyle:'simple',status:'pending',deliveredAt:Date.now(),createdAt:Date.now()};
           if(data.scheduledAt!==undefined){m.status='queued';m.scheduledAt=data.scheduledAt;delete m.deliveredAt;}
@@ -358,7 +359,7 @@ export async function createApp(pool: Pool, origin: string) {
           }
         }else fail(404,'Unknown action');
       }
-      if(op!=='read'&&!op.startsWith('note-'))notice(s,op,u.id,op==='reward-request'?{rewardRequestId:response.request.id}:op==='reward-decision'?{rewardRequestId:response.request.id,outcome:response.request.status}:(response.mission?.surprise?{missionId:response.mission.id}:mission?.surprise?{missionId:mission.id}:undefined));
+      if(op!=='read'&&!op.startsWith('note-')&&!['evening-save','evening-delete','pace'].includes(op))notice(s,op,u.id,op==='reward-request'?{rewardRequestId:response.request.id}:op==='reward-decision'?{rewardRequestId:response.request.id,outcome:response.request.status}:(response.mission?.surprise?{missionId:response.mission.id}:mission?.surprise?{missionId:mission.id}:undefined));
       if(requestKey)await c.query('INSERT INTO request_keys VALUES($1,$2,$3,$4,$5)',[s.id,u.id,op,requestKey,JSON.stringify(response)]);
       s.last=Date.now();await save(c,s);return response;
     });

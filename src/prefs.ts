@@ -9,7 +9,7 @@ export function quickUsage():Record<string,number>{
 
 export function recordQuickUse(id:string){
   const usage=quickUsage();
-  usage[id]=(usage[id]??0)+1;
+  usage[id]=(typeof usage[id]==='number'?usage[id]:0)+1;
   try{localStorage.setItem(usageKey,JSON.stringify(usage));}catch{/* Ranking is optional when browser storage is unavailable. */}
 }
 

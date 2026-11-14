@@ -22,21 +22,23 @@ try {
     const entry=await fetch(origin+'/api/guest',{method:'POST',headers:{Origin:origin,'Content-Type':'application/json'},body:JSON.stringify({role,adult:true})});
     assert.equal(entry.status,200);
     const cookie=entry.headers.get('set-cookie')!.split(';')[0];
-    return async(path:string,body?:unknown,status:number|number[]=200)=>{
+    return async(path:string,body?:unknown,status:number|number[]=200,error?:string)=>{
       const response=await fetch(origin+'/api'+path,{method:body===undefined?'GET':'POST',headers:{Origin:origin,'Content-Type':'application/json',Cookie:cookie},body:body===undefined?undefined:JSON.stringify(body)});
-      const data=await response.json();assert.ok((Array.isArray(status)?status:[status]).includes(response.status),`${path}: expected ${status}, got ${response.status}: ${JSON.stringify(data)}`);return data;
+      const data=await response.json();assert.ok((Array.isArray(status)?status:[status]).includes(response.status),`${path}: expected ${status}, got ${response.status}: ${JSON.stringify(data)}`);
+      if(error!==undefined)assert.equal(data.error,error,`${path}: expected error '${error}', got ${JSON.stringify(data)}`);
+      return data;
     };
   }
   const w=await account('wife'),h=await account('husband');
   const id=(await w('/sessions',{terms:'Simple invitations, free refusal, pauses always available',minutes:120})).session.id;
-  const op=(who:typeof w,name:string,body:Record<string,unknown>={},status=200)=>who(`/sessions/${id}/${name}`,body,status);
+  const op=(who:typeof w,name:string,body:Record<string,unknown>={},status=200,error?:string)=>who(`/sessions/${id}/${name}`,body,status,error);
   const state=async():Promise<Session>=>(await w(`/sessions/${id}`)).session;
   async function ageWishes(){const row=(await pool.query('SELECT data FROM sessions WHERE id=$1',[id])).rows[0].data as Session;for(const wish of row.herWishes!)wish.createdAt=0;await pool.query('UPDATE sessions SET data=$2 WHERE id=$1',[id,JSON.stringify(row)]);}
   const edit=async(change:(row:Session)=>void)=>{const row=(await pool.query('SELECT data FROM sessions WHERE id=$1',[id])).rows[0].data as Session;change(row);await pool.query('UPDATE sessions SET data=$2 WHERE id=$1',[id,JSON.stringify(row)]);};
   const freshEvening=()=>edit(row=>{for(const m of row.missions)m.createdAt=0;delete row.eveningClosedAt;});
 
   // Gameplay is locked until both players approve the same revision.
-  await op(w,'quick',{preset:quickPresets[0].id,key:randomUUID()},409);
+  await op(w,'quick',{preset:quickPresets[0].id,key:randomUUID()},409,'Mutual approval and no pauses required');
   let s=await state();
   for(const who of [w,h])await op(who,'approve',{revision:s.revision});
   s=await state();
@@ -48,7 +50,7 @@ try {
   await op(w,'quick',{preset:'unknown',key:randomUUID()},404);
   await op(w,'quick',{preset:preset.id},400);
   await op(w,'quick',{key:randomUUID()},400);
-  await op(w,'quick',{preset:preset.id,key:randomUUID(),scheduledAt:Date.now()-60000},400);
+  assert.equal((await op(w,'quick',{preset:preset.id,key:randomUUID(),scheduledAt:Date.now()-60000},400)).error,'Schedule must be in the future');
   await op(w,'quick',{preset:preset.id,key:randomUUID(),scheduledAt:Date.now()+366*86400000},400);
   const key=randomUUID();
   const first=await op(w,'quick',{preset:preset.id,key,lang:'en'});
@@ -143,7 +145,7 @@ try {
 
   // Quick rating: wife only, approved work only, allowed while paused, stored with a time.
   await op(h,'rate',{mission:quick.id,rating:'love'},403);
-  await op(w,'rate',{mission:later.mission.id,rating:'love'},409);
+  await op(w,'rate',{mission:later.mission.id,rating:'love'},409,'Approved mission required');
   await op(w,'rate',{mission:quick.id,rating:'meh'},400);
   await op(w,'pause',{});
   await op(w,'rate',{mission:quick.id,rating:'love'});
@@ -213,7 +215,7 @@ try {
   assert.equal((await op(w,'quick',{preset:preset.id,key:randomUUID(),lang:'en'},409)).error,'Evening limit reached for the current pace');
   await op(w,'cancel',{mission:paceOne.mission.id});
   await op(w,'quick',{preset:preset.id,key:randomUUID(),lang:'en'});
-  await op(w,'quick',{preset:preset.id,key:randomUUID(),lang:'en'},409);
+  await op(w,'quick',{preset:preset.id,key:randomUUID(),lang:'en'},409,'Evening limit reached for the current pace');
   assert.equal((await op(w,'her-night',{key:randomUUID(),mood:'soft',lang:'en',steps:[nightStep,nightStep,nightStep]},400)).error,'Too many steps for the current pace');
   await op(w,'pace',{commandsPerEvening:3});
   await freshEvening();
@@ -247,7 +249,7 @@ try {
   assert.equal((await op(w,'quick',{preset:preset.id,key:randomUUID(),lang:'en'},409)).error,'Evening is closed');
   assert.equal((await op(w,'her-night',{key:randomUUID(),mood:'soft',lang:'en',steps:[nightStep]},409)).error,'Evening is closed');
   await edit(row=>{for(const m of row.missions)m.createdAt=0;row.eveningClosedAt=Date.now()-11*3600000;});
-  await op(w,'quick',{preset:preset.id,key:randomUUID(),lang:'en'},409);
+  await op(w,'quick',{preset:preset.id,key:randomUUID(),lang:'en'},409,'Evening is closed');
   await edit(row=>{row.eveningClosedAt=Date.now()-13*3600000;});
   assert.equal((await op(w,'quick',{preset:preset.id,key:randomUUID(),lang:'en'})).mission.status,'pending');
 
@@ -293,14 +295,35 @@ try {
   assert.ok(s.savedEvenings!.some(e=>e.id===twoStep.id));
   assert.equal((await op(w,'evening-run',{key:randomUUID(),evening:slow.id,lang:'en'},404)).error,'Evening unavailable');
 
+  // Night cap: the list holds 50 nights; the 50th is accepted, and the 51st is refused by the list check (evening open, pace and steps fine).
+  await freshEvening();
+  await op(w,'pace',{commandsPerEvening:3});
+  await edit(row=>{row.nights=Array.from({length:49},(_,i)=>({id:randomUUID(),mood:'soft' as const,at:Date.now()-i,missionIds:[]}));});
+  await op(w,'her-night',{key:randomUUID(),mood:'strict',lang:'en',steps:[nightStep]});
+  s=await state();
+  assert.equal(s.nights!.length,50);
+  await freshEvening();
+  await op(w,'her-night',{key:randomUUID(),mood:'strict',lang:'en',steps:[nightStep]},409,'Night list is full');
+  await op(w,'evening-run',{key:randomUUID(),evening:twoStep.id,lang:'en'},409,'Night list is full');
+  s=await state();
+  assert.equal(s.nights!.length,50);
+
+  // Saved-evening edits and pace changes stay private: none of them reach his history or inbox, while shared evening runs do.
+  const hisView=(await h(`/sessions/${id}`)).session as Session;
+  const privateEvents=['evening-save','evening-delete','pace'];
+  assert.deepEqual(hisView.history.filter(item=>privateEvents.includes(item.event)),[]);
+  assert.deepEqual(hisView.inbox.filter(item=>privateEvents.includes(item.event)),[]);
+  assert.ok(hisView.history.some(item=>item.event==='evening-run'));
+  assert.ok(hisView.inbox.some(item=>item.event==='evening-run'));
+
   // Terminal sessions still reject new play, including quick commands, ratings, nights and evenings.
   await op(w,'stop',{});
-  await op(w,'quick',{preset:preset.id,key:randomUUID()},409);
-  await op(w,'rate',{mission:quick.id,rating:'skip'},409);
-  await op(w,'her-night',{...nightPayload,key:randomUUID()},409);
-  await op(w,'evening-close',{key:randomUUID()},409);
-  await op(w,'evening-save',{name:'Late',mood:'soft',steps:[nightStep]},409);
-  console.log('PASS play flow: approvals, quick commands, keyed retries, scheduling, review points, wishes with cooldown, private commands, aftercare, her night, quick ratings, private notes, progress helpers, pacing, done for tonight, saved evenings, terminal guard');
+  await op(w,'quick',{preset:preset.id,key:randomUUID()},409,'Session is terminal');
+  await op(w,'rate',{mission:quick.id,rating:'skip'},409,'Session is terminal');
+  await op(w,'her-night',{...nightPayload,key:randomUUID()},409,'Session is terminal');
+  await op(w,'evening-close',{key:randomUUID()},409,'Session is terminal');
+  await op(w,'evening-save',{name:'Late',mood:'soft',steps:[nightStep]},409,'Session is terminal');
+  console.log('PASS play flow: approvals, quick commands, keyed retries, scheduling, review points, wishes with cooldown, private commands, aftercare, her night, quick ratings, private notes, progress helpers, pacing, done for tonight, saved evenings, night cap, terminal guard');
 } finally {
   if(server)await new Promise<void>(resolve=>server!.close(()=>resolve()));
   await pool.end();await db.stop();await rm(directory,{recursive:true,force:true,maxRetries:10,retryDelay:100});
