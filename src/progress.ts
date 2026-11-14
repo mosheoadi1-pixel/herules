@@ -29,7 +29,7 @@ export function progressStats(missions:Mission[],now:number){
 }
 
 export function careDue(missions:Mission[],lastCareAt=0){
-  const last=Math.max(0,...missions.filter(m=>m.status==='approved').map(m=>m.approvedAt??0));
+  const last=missions.filter(m=>m.status==='approved').reduce((max,m)=>Math.max(max,m.approvedAt??0),0);
   return last>0&&lastCareAt<last;
 }
 
@@ -42,7 +42,7 @@ export function quietDays(session:{last:number}|undefined,now:number){
 }
 
 export function daysSinceLastEvent(session:{history:{at:number}[];inbox:{at:number}[]}|undefined,now:number){
-  const newest=Math.max(0,...(session?.history??[]).map(h=>h.at),...(session?.inbox??[]).map(n=>n.at));
+  const newest=[...(session?.history??[]).map(h=>h.at),...(session?.inbox??[]).map(n=>n.at)].reduce((max,at)=>Math.max(max,at),0);
   return newest>0?Math.max(0,Math.floor((now-newest)/DAY)):0;
 }
 
