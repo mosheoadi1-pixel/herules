@@ -5,6 +5,7 @@ import { readFile } from 'node:fs/promises';
 import type { Pool, PoolClient } from 'pg';
 import { z } from 'zod';
 import { quickPresets } from '../src/quick.ts';
+import { WISH_COOLDOWN_MS } from '../src/progress.ts';
 const scrypt = promisify(scryptCallback);
 const hash = (v: string) => createHash('sha256').update(v).digest('hex');
 const text = z.string().trim().min(1).max(4000);
@@ -17,10 +18,10 @@ const reflectionSchema=z.object({appreciation:z.string().trim().max(1000).defaul
 export type Reflection=z.infer<typeof reflectionSchema>;
 const fail = (status: number, message: string): never => { throw Object.assign(new Error(message), { status }); };
 export type User = { id: string; email: string|null; nickname: string|null; role: 'wife'|'husband'; pair_id: string|null };
-export type Mission = { id: string; revision: number; title: string; text: string; points: number; secret: boolean; surprise?:boolean; category?:string; revealedAt?:number; completionStyle?: 'simple'|'written'; status: string; scheduledAt?: number; completion?: string; submissionVersion?: number; deliveredAt?: number; acknowledgedAt?: number; adjustment?: {reason:'softer'|'adjust';note?:string;at:number}; replaces?: string; replacementId?: string; approvedAt?: number };
+export type Mission = { id: string; revision: number; title: string; text: string; points: number; secret: boolean; surprise?:boolean; category?:string; revealedAt?:number; completionStyle?: 'simple'|'written'; status: string; scheduledAt?: number; completion?: string; submissionVersion?: number; deliveredAt?: number; acknowledgedAt?: number; adjustment?: {reason:'softer'|'adjust';note?:string;at:number}; replaces?: string; replacementId?: string; approvedAt?: number; rating?: 'love'|'like'|'skip'; ratedAt?: number };
 export type Reward = {id:string; title:string; description:string; cost:number};
 export type RewardRequest = Reward & {rewardId:string; status:'pending'|'approved'|'declined'};
-export type Session = { id: string; status: string; terms: string; revision: number; revisions: { revision: number; terms: string }[]; approvals: string[]; pauses: string[]; remaining: number; last: number; started: boolean; points: number; missions: Mission[]; rewards?: Reward[]; rewardRequests?: RewardRequest[]; sequence?: string[]; autoProgress?:boolean; persona?:'strict'|'playful'|'caring'; followups?:string[]; checkIns?: Record<string,CheckIn>; reflections?: Record<string,Reflection>; messages: {id:string; by:string; text:string; at:number}[]; history: { at:number; event:string; by:string; rewardRequestId?:string; outcome?:'approved'|'declined' }[]; inbox: {id:string; at:number; event:string; readBy:string[]}[]; herPoints?: number; herWishes?: {id:string;title:string;cost:number}[]; commands?: {id:string;title:string;text:string;points:number}[]; lastCareAt?: number };
+export type Session = { id: string; status: string; terms: string; revision: number; revisions: { revision: number; terms: string }[]; approvals: string[]; pauses: string[]; remaining: number; last: number; started: boolean; points: number; missions: Mission[]; rewards?: Reward[]; rewardRequests?: RewardRequest[]; sequence?: string[]; autoProgress?:boolean; persona?:'strict'|'playful'|'caring'; followups?:string[]; checkIns?: Record<string,CheckIn>; reflections?: Record<string,Reflection>; messages: {id:string; by:string; text:string; at:number}[]; history: { at:number; event:string; by:string; rewardRequestId?:string; outcome?:'approved'|'declined' }[]; inbox: {id:string; at:number; event:string; readBy:string[]}[]; herPoints?: number; herWishes?: {id:string;title:string;cost:number;createdAt?:number}[]; commands?: {id:string;title:string;text:string;points:number}[]; notes?: {id:string;text:string;at:number}[]; nights?: {id:string;mood:'soft'|'playful'|'strict';at:number;missionIds:string[]}[]; moodCounts?: Record<'soft'|'playful'|'strict',number>; lastCareAt?: number };
 const suspended = (s: Session) => s.approvals.length !== 2 || s.pauses.length > 0;
 const terminal = (s: Session) => ['stopped','expired'].includes(s.status);
 function notice(s: Session, event: string, by: string, reward?:{rewardRequestId?:string;outcome?:'approved'|'declined';missionId?:string}) {
@@ -41,7 +42,7 @@ function visible(s: Session, user: User) {
   const hidden=new Set(s.missions.filter(m=>m.surprise&&!m.revealedAt).map(m=>m.id));
   const missions=s.missions.filter(m => (!(m.secret||m.surprise) || !!m.deliveredAt)).map(m=>{if(hidden.has(m.id))return {id:m.id,revision:m.revision,status:m.status,surprise:true,category:m.category,deliveredAt:m.deliveredAt};if(m.replacementId&&hidden.has(m.replacementId)){const {replacementId,...rest}=m;return rest;}return m;});
   const allowed=(n:any)=>!n.missionId||!hidden.has(n.missionId);
-  return { ...s, commands:undefined, missions, history:s.history.filter(allowed),inbox:s.inbox.filter(allowed), ...(s.sequence?{sequence:s.sequence.filter(id=>missions.some(m=>m.id===id))}:{}) };
+  return { ...s, commands:undefined, notes:undefined, missions, history:s.history.filter(allowed),inbox:s.inbox.filter(allowed), ...(s.sequence?{sequence:s.sequence.filter(id=>missions.some(m=>m.id===id))}:{}) };
 }
 export async function createApp(pool: Pool, origin: string) {
   const configured = new URL(origin);
@@ -170,10 +171,10 @@ export async function createApp(pool: Pool, origin: string) {
         }
         return {ok:true};
       }
-      const keyedRequest=['complete','review','adjust','replace','reward','reward-request','reward-decision','quick'].includes(op);
+      const keyedRequest=['complete','review','adjust','replace','reward','reward-request','reward-decision','quick','her-night'].includes(op);
       let requestKey:string|undefined;
       if(keyedRequest){
-        if(u.role!==(['review','replace','reward','reward-decision','quick'].includes(op)?'wife':'husband'))fail(403,'Wrong role for action');
+        if(u.role!==(['review','replace','reward','reward-decision','quick','her-night'].includes(op)?'wife':'husband'))fail(403,'Wrong role for action');
         requestKey=uuid.parse(b.key);
         const previous=await c.query('SELECT result FROM request_keys WHERE session_id=$1 AND user_id=$2 AND kind=$3 AND key=$4',[s.id,u.id,op,requestKey]);
         // A committed retry is a read of the original result, even after return, pause or stop.
@@ -185,7 +186,7 @@ export async function createApp(pool: Pool, origin: string) {
       const husband=()=>{if(u.role!=='husband')fail(403,'Husband role required');};
       const gameplay=()=>{if(suspended(s))fail(409,'Mutual approval and no pauses required');};
       let mission:Mission|undefined;
-      if(['edit','queue','deliver','cancel','ack','refuse','complete','review','adjust','replace','reveal'].includes(op)){mission=s.missions.find(m=>m.id===uuid.parse(b.mission));if(!mission)fail(404,'Mission unavailable');}
+      if(['edit','queue','deliver','cancel','ack','refuse','complete','review','adjust','replace','reveal','rate'].includes(op)){mission=s.missions.find(m=>m.id===uuid.parse(b.mission));if(!mission)fail(404,'Mission unavailable');}
       let response:any={ok:true};
       if(op==='stop'){s.status='stopped';for(const m of s.missions)if(!['approved','refused','cancelled'].includes(m.status))m.status='cancelled';}
       else if(op==='pause'){if(!s.pauses.includes(u.id))s.pauses.push(u.id);}
@@ -211,6 +212,16 @@ export async function createApp(pool: Pool, origin: string) {
         const message={id:randomUUID(),by:u.id,text:text.parse(b.text),at:Date.now()};s.messages.push(message);response={message};
         await c.query('INSERT INTO request_keys VALUES($1,$2,$3,$4,$5)',[s.id,u.id,op,key,JSON.stringify(response)]);
       }
+      else if(op==='rate'&&mission){
+        wife();const data=z.object({rating:z.enum(['love','like','skip'])}).parse(b);
+        if(mission.status!=='approved')fail(409,'Approved mission required');
+        mission.rating=data.rating;mission.ratedAt=Date.now();response={mission};
+      }
+      else if(op==='note-save'){
+        wife();const data=z.object({text:z.string().trim().min(1).max(1000)}).parse(b);
+        const list=s.notes??=[];if(list.length>=50)fail(409,'Note list is full');const note={id:randomUUID(),text:data.text,at:Date.now()};list.push(note);response={note};
+      }
+      else if(op==='note-delete'){wife();const id=uuid.parse(b.note);s.notes=(s.notes??[]).filter(n=>n.id!==id);}
       else {
         gameplay();
         if(op==='extend'){wife();s.remaining+=z.number().int().min(1).max(525600).parse(b.minutes)*60000;}
@@ -254,12 +265,22 @@ export async function createApp(pool: Pool, origin: string) {
           if(data.scheduledAt!==undefined){m.status='queued';m.scheduledAt=data.scheduledAt;delete m.deliveredAt;}
           s.missions.push(m);response={mission:m};
         }
+        else if(op==='her-night'){
+          wife();const data=z.object({mood:z.enum(['soft','playful','strict']),lang:z.enum(['he','en']).default('he'),steps:z.array(z.object({he:text,en:text,points:z.number().int().min(0).max(100),minutesFromNow:z.number().int().min(0).max(10080)})).min(1).max(3)}).parse(b);
+          if(data.steps.some(st=>(data.lang==='he'?st.he:st.en).length>160))fail(400,'Step title too long');
+          const nights=s.nights??=[];if(nights.length>=50)fail(409,'Night list is full');
+          const at=Date.now(),missionIds:string[]=[];
+          for(const st of data.steps){const body=data.lang==='he'?st.he:st.en;const m:Mission={id:randomUUID(),revision:s.revision,title:body,text:body,points:st.points,secret:false,completionStyle:'simple',status:'queued',scheduledAt:at+st.minutesFromNow*60000};s.missions.push(m);missionIds.push(m.id);}
+          const night={id:randomUUID(),mood:data.mood,at,missionIds};nights.push(night);
+          const counts=s.moodCounts??={soft:0,playful:0,strict:0};counts[data.mood]++;response={night};
+        }
         else if(op==='herwish'){
           wife();const data=z.object({title:z.string().trim().min(1).max(160),cost:z.number().int().min(0).max(100000)}).parse(b);
-          const list=s.herWishes??=[];if(list.length>=20)fail(409,'Wish list is full');list.push({id:randomUUID(),...data});
+          const list=s.herWishes??=[];if(list.length>=20)fail(409,'Wish list is full');list.push({id:randomUUID(),...data,createdAt:Date.now()});
         }
         else if(op==='herwish-redeem'){
           wife();const id=uuid.parse(b.wish);const wish=s.herWishes?.find(w=>w.id===id)??fail(404,'Wish unavailable');
+          if(Date.now()-(wish.createdAt??0)<WISH_COOLDOWN_MS)fail(409,'Wish is still cooling down');
           if((s.herPoints??0)<wish.cost)fail(409,'Not enough points');s.herPoints=(s.herPoints??0)-wish.cost;s.herWishes=s.herWishes!.filter(w=>w.id!==id);
         }
         else if(op==='command-save'){
@@ -309,7 +330,7 @@ export async function createApp(pool: Pool, origin: string) {
           }
         }else fail(404,'Unknown action');
       }
-      if(op!=='read')notice(s,op,u.id,op==='reward-request'?{rewardRequestId:response.request.id}:op==='reward-decision'?{rewardRequestId:response.request.id,outcome:response.request.status}:(response.mission?.surprise?{missionId:response.mission.id}:mission?.surprise?{missionId:mission.id}:undefined));
+      if(op!=='read'&&!op.startsWith('note-'))notice(s,op,u.id,op==='reward-request'?{rewardRequestId:response.request.id}:op==='reward-decision'?{rewardRequestId:response.request.id,outcome:response.request.status}:(response.mission?.surprise?{missionId:response.mission.id}:mission?.surprise?{missionId:mission.id}:undefined));
       if(requestKey)await c.query('INSERT INTO request_keys VALUES($1,$2,$3,$4,$5)',[s.id,u.id,op,requestKey,JSON.stringify(response)]);
       s.last=Date.now();await save(c,s);return response;
     });

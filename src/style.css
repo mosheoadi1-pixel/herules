@@ -156,3 +156,32 @@ button.gold { background:#f1c6a7; color:#27111d; }
 .quick-grid { display:grid; grid-template-columns:repeat(auto-fit,minmax(200px,1fr)); gap:10px; margin-block:14px; }
 .quick-grid button { text-align:start; }
 .big-number strong { font-size:34px; color:var(--gold); }
+
+/* Calm pass: fewer competing surfaces, consistent radii, collapsible secondary panels. */
+main { padding-block: 18px 56px; }
+.panel, .stat-grid > div, .quick-grid button { box-shadow: none; }
+.panel { border-radius: 18px; background: #1f121b; padding: clamp(20px, 3vw, 30px); margin-bottom: 18px; }
+.panel h2 { font-size: clamp(22px, 2.6vw, 26px); margin-top: 0; }
+.panel h3 { font-size: 18px; margin-top: 22px; }
+.auth { background: #1f121b; }
+details.panel > summary { display: flex; justify-content: space-between; align-items: center; gap: 12px; list-style: none; }
+details.panel > summary::-webkit-details-marker { display: none; }
+details.panel > summary h2 { margin: 0; }
+details.panel > summary::after { content: "+"; flex: 0 0 auto; width: 34px; height: 34px; border-radius: 50%; border: 1px solid var(--line); display: grid; place-items: center; color: var(--gold); font-size: 20px; line-height: 1; }
+details.panel[open] > summary::after { content: "−"; }
+details.panel[open] > summary { margin-bottom: 14px; }
+details.subtle { margin-block: 14px; }
+details.subtle > summary { color: var(--gold); font-weight: 600; cursor: pointer; }
+details.subtle[open] > summary { margin-bottom: 12px; }
+nav { background: transparent; border: 0; padding: 4px 0; gap: 6px; }
+nav button { border-radius: 999px; min-height: 40px; padding: 8px 16px; }
+nav button[aria-current="page"], nav button.active { box-shadow: none; }
+.account { background: transparent; border: 0; padding: 0; display: flex; flex-wrap: wrap; align-items: center; gap: 6px 14px; color: var(--muted); font-size: 14px; }
+.account .badge { font-size: 13px; }
+.next-step { border-radius: 18px; }
+.session { border-radius: 18px; }
+.safety { border-radius: 14px; }
+.guided-cards { gap: 14px; }
+.other-invitation { border-radius: 14px; }
+.current-invitation > .panel { border-radius: 18px; }
+footer { margin-top: 36px; font-size: 14px; }

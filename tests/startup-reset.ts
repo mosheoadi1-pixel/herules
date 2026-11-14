@@ -1,11 +1,11 @@
 import assert from 'node:assert/strict';
-import { mkdtemp, rm } from 'node:fs/promises';
+import { mkdtemp, readFile, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import pg from 'pg';
 import { startDatabase } from '../scripts/db/runtime.mjs';
 import { createApp } from '../server/app.ts';
-import { importIdeas } from '../server/ideas-import.ts';
+import { importIdeas, parseCsv } from '../server/ideas-import.ts';
 
 const directory=await mkdtemp(join(tmpdir(),'her-rules-reset-'));
 const db=await startDatabase(directory,55439),pool=new pg.Pool({connectionString:db.url});
@@ -16,7 +16,9 @@ try {
   assert.equal((await pool.query('SELECT count(*) FROM users')).rows[0].count,'2');
   assert.equal((await pool.query('SELECT count(*) FROM pairs')).rows[0].count,'1');
   assert.ok(Number((await pool.query('SELECT count(*) FROM imported_ideas')).rows[0].count)>100,'Custom CSV must be seeded');
-  assert.equal((await pool.query('SELECT count(*) FROM imported_ideas WHERE he=$1 AND en=$2',['אתה בוחר שיר, והיא בוחרת איך אתה רוקד אותו.','You choose a song, and she chooses how you dance to it.'])).rows[0].count,'1','Last seed record must retain both authored fields');
+  const seedRecords=parseCsv(await readFile(new URL('../custom-tasks-template.csv',import.meta.url),'utf8')).length-1;
+  assert.equal((await pool.query('SELECT count(*) FROM imported_ideas')).rows[0].count,String(seedRecords),'Every CSV record must be seeded');
+  assert.equal((await pool.query("SELECT count(*) FROM imported_ideas WHERE he='' OR en=''")).rows[0].count,'0','Seed records must retain both authored fields');
   assert.equal(await importIdeas(pool,'category,he,en,minutes,intensity,tags\nchallenges,רעיון ייחודי,Unique imported idea,5,1,test'),1);
   const ideas=(await pool.query('SELECT * FROM imported_ideas ORDER BY id')).rows;
   const pair=(await pool.query('SELECT pair_id FROM private_game')).rows[0].pair_id;

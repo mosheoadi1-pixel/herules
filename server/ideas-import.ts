@@ -5,7 +5,7 @@ import { z } from 'zod';
 import { categories } from '../src/library.ts';
 
 // Parse CSV rather than splitting lines: quoted text may contain commas and newlines.
-function parseCsv(csv:string):string[][] {
+export function parseCsv(csv:string):string[][] {
   const rows:string[][]=[];let row:string[]=[],field='',quoted=false,closed=false;
   csv=csv.replace(/^\uFEFF/,'');
   for(let i=0;i<csv.length;i++) {
