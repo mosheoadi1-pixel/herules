@@ -42,7 +42,7 @@ roleplay:[
 anticipation:[
  ['שלחי רמז פלרטטני אחד על דייט עתידי','Send one flirtatious hint about a future date without promising any unagreed activity.',3,3,'flirtation'],
  ['בחרי שעת חשיפה להזמנה פרטית; עד אז שתפו רק צבע, שיר או אווירה.','Choose a reveal time for a private invitation; until then share only a color, song or mood.',10,3,'anticipation'],
- ['הציעי ערב הפתעה','Offer a surprise evening from three preapproved options, with a choice to change even at the last moment.',20,3,'planning'],
+ ['הציעי ערב הפתעה מתוך שלוש אפשרויות שסיכמתם מראש, עם אפשרות לשנות גם ברגע האחרון','Offer a surprise evening from three preapproved options, with a choice to change even at the last moment.',20,3,'planning'],
  ['כתבו כל אחד משפט שמתחיל באשמח אם תרצה או תרצי, והחליפו בזמן שבחרתם.','Each write a sentence beginning I would love it if you wanted to, and exchange them at an agreed time.',5,3,'writing'],
  ['שלחי הזמנה להתלבש לדייט בסגנון נבחר.','Send an invitation to dress for a themed date, leaving each person free to choose comfortable clothes.',15,3,'flirtation']
 ],
@@ -63,8 +63,8 @@ secret:[
 // User-supplied CSV wording, trimmed only; missing duration/intensity default to 10 minutes/Bold.
 const supplied:Idea[]=[
  {id:'custom-roleplay-1',category:'roleplay',he:'בחרי כינוי משחק מוסכם ומעכשיו הוא חייב לקרוא לך רק בשם זה.',en:'Choose an agreed scene nickname, and from now on he must address you only by that name.',minutes:10,intensity:3,tags:['control']},
- {id:'custom-anticipation-1',category:'anticipation',he:'דחיה מתוקה: הביאי אותו לקצה מספר פעמים ללא סיום. ואז הרשי לו לסיים לבד בזמן שאת מפקחת, אבל הרסי את זה. ונעלי אותו במכשיר צאסטיטי.',en:'Bring me to the edge 5 times in a row without orgasm. Then allow him to finish alone with a ruined orgasm, and lock him in a chastity belt.',minutes:10,intensity:3,tags:['anticipation']}, 
- {id:'custom-anticipation-2',category:'anticipation',he:'הוא נוגע בעצמו בהתאם להוראות המדויקות שלך',en:'Bring me to the edge 5 times in a row without orgasm. Then allow him to finish alone with a ruined orgasm, and lock him in a chastity belt.',minutes:10,intensity:3,tags:['anticipation']}
+ {id:'custom-anticipation-1',category:'anticipation',he:'דחיה מתוקה: הביאי אותו לקצה מספר פעמים ללא סיום. ואז הרשי לו לסיים לבד בזמן שאת מפקחת, אבל הרסי את זה. ונעלי אותו במכשיר צאסטיטי.',en:'Sweet denial: bring him to the edge several times without finishing. Then allow him to finish alone while you supervise, but ruin it. And lock him in a chastity device.',minutes:10,intensity:3,tags:['anticipation']}, 
+ {id:'custom-anticipation-2',category:'anticipation',he:'הוא נוגע בעצמו בהתאם להוראות המדויקות שלך',en:'He touches himself following your exact instructions.',minutes:10,intensity:3,tags:['anticipation']}
 ];
 export const library:Idea[]=[...supplied,...categories.flatMap(category=>bold[category].map(([he,en,minutes,intensity,tag],i)=>({id:`${category}-${i+21}`,category,he,en,minutes,intensity,tags:[tag]})))];
 // Only reviewed built-in texts belong here; tags and imported IDs are not evidence of suitability.
