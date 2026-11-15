@@ -28,7 +28,7 @@ export type Reward = {id:string; title:string; description:string; cost:number};
 export type RewardRequest = Reward & {rewardId:string; status:'pending'|'approved'|'declined'};
 export type Proposal = { id: string; by: string; title: string; text: string; points: number; category?: string; at: number; status: 'pending'|'adopted'|'declined'; missionId?: string };
 export type Session = { id: string; status: string; terms: string; revision: number; revisions: { revision: number; terms: string }[]; approvals: string[]; pauses: string[]; remaining: number; last: number; started: boolean; points: number; missions: Mission[]; rewards?: Reward[]; rewardRequests?: RewardRequest[]; sequence?: string[]; autoProgress?:boolean; persona?:'strict'|'playful'|'caring'; followups?:string[]; checkIns?: Record<string,CheckIn>; reflections?: Record<string,Reflection>; messages: {id:string; by:string; text:string; at:number}[]; history: { at:number; event:string; by:string; rewardRequestId?:string; outcome?:'approved'|'declined' }[]; inbox: {id:string; at:number; event:string; readBy:string[]}[]; herPoints?: number; proposals?: Proposal[]; herWishes?: {id:string;title:string;cost:number;createdAt?:number}[]; commands?: {id:string;title:string;text:string;points:number}[]; notes?: {id:string;text:string;at:number}[]; nights?: {id:string;mood:'soft'|'playful'|'strict';at:number;missionIds:string[]}[]; moodCounts?: Record<'soft'|'playful'|'strict',number>; lastCareAt?: number; pace?: 1|2|3; eveningClosedAt?: number; savedEvenings?: {id:string;name:string;mood:'soft'|'playful'|'strict';steps:{he:string;en:string;points:number;minutesFromNow:number}[];createdAt:number}[]; chapterState?: { decree?: { mood: string; season?: string }; at?: number; cliffhanger?: { he: string; en: string } }; adoration?: { sippedFor?: string; grantedFor?: string; grantedAt?: number; sealedAt?: number; waiting?: number; ready?: number; last?: { id: string; kind: string; text: string; media?: string | null; at: number } } };
-const suspended = (s: Session) => s.approvals.length !== 2 || s.pauses.length > 0;
+const suspended = (s: Session) => s.pauses.length > 0;
 const terminal = (s: Session) => ['stopped','expired'].includes(s.status);
 function notice(s: Session, event: string, by: string, reward?:{rewardRequestId?:string;outcome?:'approved'|'declined';missionId?:string}) {
   const at = Date.now(); s.history.push({ at, event, by, ...reward });
@@ -192,8 +192,8 @@ export async function createApp(pool: Pool, origin: string) {
   app.get('/api/sessions/:id',async(req,res)=>{const u=await auth(req); const session=await transaction(async c=>{const s=await locked(c,req.params.id as string,u);await save(c,s);const view:any=visible(s,u);const queue=await adorationQueue(c,u,s.id);if(queue)view.adoration={...(view.adoration??{}),...queue};return view;});res.json({session,serverNow:Date.now()});});
   app.post('/api/sessions',async(req,res)=>{
     const u=await auth(req);if(!u.pair_id) fail(409,'Pair first');
-    const b=z.object({terms:text,minutes:z.number().int().min(1).max(525600)}).parse(req.body);
-    const s:Session={id:randomUUID(),status:'active',terms:b.terms,revision:1,revisions:[{revision:1,terms:b.terms}],approvals:[],pauses:[],remaining:b.minutes*60000,last:Date.now(),started:false,points:0,missions:[],messages:[],history:[],inbox:[]};notice(s,'session-created',u.id);
+    const b=z.object({terms:z.string().trim().max(4000).default(''),minutes:z.number().int().min(1).max(525600)}).parse(req.body);
+    const s:Session={id:randomUUID(),status:'active',terms:b.terms,revision:1,revisions:b.terms?[{revision:1,terms:b.terms}]:[],approvals:[],pauses:[],remaining:b.minutes*60000,last:Date.now(),started:true,points:0,missions:[],messages:[],history:[],inbox:[]};notice(s,'session-created',u.id);
     await transaction(async c=>{await c.query('SELECT id FROM pairs WHERE id=$1 FOR UPDATE',[u.pair_id]);const old=(await c.query("SELECT id FROM sessions WHERE pair_id=$1 AND status NOT IN ('stopped','expired')",[u.pair_id])).rows;for(const {id} of old){const previous=await locked(c,id,u);await save(c,previous);if(!terminal(previous))fail(409,'A session is already active');}await c.query('INSERT INTO sessions VALUES($1,$2,$3,$4)',[s.id,u.pair_id,s.status,JSON.stringify(s)]);});
     emit(u.pair_id!);res.json({session:visible(s,u)});
   });
@@ -222,22 +222,14 @@ export async function createApp(pool: Pool, origin: string) {
       if(terminal(s)&&op!=='read'){await save(c,s);return {terminal:true};}
       const wife=()=>{if(u.role!=='wife')fail(403,'Wife role required');};
       const husband=()=>{if(u.role!=='husband')fail(403,'Husband role required');};
-      const gameplay=()=>{if(suspended(s))fail(409,'Mutual approval and no pauses required');};
+      const gameplay=()=>{if(suspended(s))fail(409,'Pause is active');};
       let mission:Mission|undefined;
       if(['edit','queue','deliver','cancel','ack','refuse','complete','review','adjust','replace','reveal','rate'].includes(op)){mission=s.missions.find(m=>m.id===uuid.parse(b.mission));if(!mission)fail(404,'Mission unavailable');}
       let response:any={ok:true};
       if(op==='stop'){s.status='stopped';for(const m of s.missions)if(!['approved','refused','cancelled'].includes(m.status))m.status='cancelled';}
       else if(op==='pause'){if(!s.pauses.includes(u.id))s.pauses.push(u.id);}
       else if(op==='resume'){s.pauses=s.pauses.filter(id=>id!==u.id);}
-      else if(op==='approve'){
-        if(z.number().int().parse(b.revision)!==s.revision)fail(409,'Agreement changed; review current revision');
-        await c.query('INSERT INTO approvals VALUES($1,$2,$3) ON CONFLICT DO NOTHING',[s.id,s.revision,u.id]);
-        if(!s.approvals.includes(u.id))s.approvals.push(u.id);if(s.approvals.length===2)s.started=true;
-      }
-      else if(op==='revise'){
-        s.terms=text.parse(b.terms);s.revision++;s.revisions.push({revision:s.revision,terms:s.terms});s.approvals=[];
-        for(const m of s.missions)if(!['approved','refused','cancelled'].includes(m.status))m.status='cancelled';
-      }
+      else if(op==='approve'||op==='revise'){/* Agreement flow removed; keep no-op for compatibility. */}
       else if(op==='aftercare'){husband();s.lastCareAt=Date.now();}
       else if(op==='read'){const ids=z.array(uuid).max(500).parse(b.ids);for(const n of s.inbox)if(ids.includes(n.id)&&!n.readBy.includes(u.id))n.readBy.push(u.id);}
       else if(op==='checkin'){
