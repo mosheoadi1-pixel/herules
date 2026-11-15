@@ -27,7 +27,7 @@ try{
  server=app.listen(4191);
  const cookie='hr_session='+token;
  const before=await fetch('http://localhost:4191/api/state',{headers:{Cookie:cookie}});assert.equal(before.status,200);
- const state=await before.json();assert.equal(state.user.id,husband);assert.equal(state.user.pair_id,pair);assert.equal(state.sessions[0].id,session);assert.equal(state.sessions[0].points,7);assert.deepEqual(state.sessions[0].messages,history.messages);assert.equal(state.sessions[0].terms,history.terms);
+ const state=await before.json();assert.equal(state.user.id,husband);assert.equal(state.user.pair_id,pair);const kept=state.sessions.find((entry:any)=>entry.id===session);assert.ok(kept,'the stopped session is retained');assert.equal(kept.points,7);assert.deepEqual(kept.messages,history.messages);assert.equal(kept.terms,history.terms);assert.ok(state.sessions.some((opened:any)=>opened.status==='active'),'a state load with nothing active opens an unlimited ongoing session');
  const login=await fetch('http://localhost:4191/api/login',{method:'POST',headers:{Origin:'http://localhost:4191','Content-Type':'application/json'},body:JSON.stringify({email:'wife@upgrade.test',password})});assert.equal(login.status,200);
  const oldWife=await fetch('http://localhost:4191/api/state',{headers:{Cookie:login.headers.get('set-cookie')!.split(';')[0]}});assert.equal((await oldWife.json()).user.id,wife);
   const occupied=await fetch('http://localhost:4191/api/guest',{method:'POST',headers:{Origin:'http://localhost:4191','Content-Type':'application/json'},body:JSON.stringify({nickname:'Existing guest',role:'husband',adult:true})});assert.equal(occupied.status,200);

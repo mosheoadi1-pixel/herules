@@ -195,6 +195,8 @@ nav button[aria-current="page"], nav button.active { box-shadow: none; }
 .account { background: transparent; border: 0; padding: 0; display: flex; flex-wrap: wrap; align-items: center; gap: 6px 14px; color: var(--muted); font-size: 14px; }
 .account .badge { font-size: 13px; }
 .next-step { border-radius: 18px; }
+.next-step > .row.between h2 { margin-block: 0; }
+.next-step > .row.between > button { padding-block: 6px; font-size: 13px; }
 .session { border-radius: 18px; }
 .safety { border-radius: 14px; }
 .guided-cards { gap: 14px; }

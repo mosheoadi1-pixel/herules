@@ -27,7 +27,7 @@ export type Mission = { id: string; revision: number; title: string; text: strin
 export type Reward = {id:string; title:string; description:string; cost:number};
 export type RewardRequest = Reward & {rewardId:string; status:'pending'|'approved'|'declined'};
 export type Proposal = { id: string; by: string; title: string; text: string; points: number; category?: string; at: number; status: 'pending'|'adopted'|'declined'; missionId?: string };
-export type Session = { id: string; status: string; terms: string; revision: number; revisions: { revision: number; terms: string }[]; approvals: string[]; pauses: string[]; remaining: number; last: number; started: boolean; points: number; missions: Mission[]; rewards?: Reward[]; rewardRequests?: RewardRequest[]; sequence?: string[]; autoProgress?:boolean; persona?:'strict'|'playful'|'caring'; followups?:string[]; checkIns?: Record<string,CheckIn>; reflections?: Record<string,Reflection>; messages: {id:string; by:string; text:string; at:number}[]; history: { at:number; event:string; by:string; rewardRequestId?:string; outcome?:'approved'|'declined' }[]; inbox: {id:string; at:number; event:string; readBy:string[]}[]; herPoints?: number; proposals?: Proposal[]; herWishes?: {id:string;title:string;cost:number;createdAt?:number}[]; commands?: {id:string;title:string;text:string;points:number}[]; notes?: {id:string;text:string;at:number}[]; nights?: {id:string;mood:'soft'|'playful'|'strict';at:number;missionIds:string[]}[]; moodCounts?: Record<'soft'|'playful'|'strict',number>; lastCareAt?: number; pace?: 1|2|3; eveningClosedAt?: number; savedEvenings?: {id:string;name:string;mood:'soft'|'playful'|'strict';steps:{he:string;en:string;points:number;minutesFromNow:number}[];createdAt:number}[]; chapterState?: { decree?: { mood: string; season?: string }; at?: number; cliffhanger?: { he: string; en: string } }; adoration?: { sippedFor?: string; grantedFor?: string; grantedAt?: number; sealedAt?: number; waiting?: number; ready?: number; last?: { id: string; kind: string; text: string; media?: string | null; at: number } } };
+export type Session = { id: string; status: string; terms: string; revision: number; revisions: { revision: number; terms: string }[]; approvals: string[]; pauses: string[]; remaining: number; unlimited?: boolean; last: number; started: boolean; points: number; missions: Mission[]; rewards?: Reward[]; rewardRequests?: RewardRequest[]; sequence?: string[]; autoProgress?:boolean; persona?:'strict'|'playful'|'caring'; followups?:string[]; checkIns?: Record<string,CheckIn>; reflections?: Record<string,Reflection>; messages: {id:string; by:string; text:string; at:number}[]; history: { at:number; event:string; by:string; rewardRequestId?:string; outcome?:'approved'|'declined' }[]; inbox: {id:string; at:number; event:string; readBy:string[]}[]; herPoints?: number; proposals?: Proposal[]; herWishes?: {id:string;title:string;cost:number;createdAt?:number}[]; commands?: {id:string;title:string;text:string;points:number}[]; notes?: {id:string;text:string;at:number}[]; nights?: {id:string;mood:'soft'|'playful'|'strict';at:number;missionIds:string[]}[]; moodCounts?: Record<'soft'|'playful'|'strict',number>; lastCareAt?: number; pace?: 1|2|3; eveningClosedAt?: number; savedEvenings?: {id:string;name:string;mood:'soft'|'playful'|'strict';steps:{he:string;en:string;points:number;minutesFromNow:number}[];createdAt:number}[]; chapterState?: { decree?: { mood: string; season?: string }; at?: number; cliffhanger?: { he: string; en: string } }; adoration?: { sippedFor?: string; grantedFor?: string; grantedAt?: number; sealedAt?: number; waiting?: number; ready?: number; last?: { id: string; kind: string; text: string; media?: string | null; at: number } } };
 const suspended = (s: Session) => s.pauses.length > 0;
 const terminal = (s: Session) => ['stopped','expired'].includes(s.status);
 function notice(s: Session, event: string, by: string, reward?:{rewardRequestId?:string;outcome?:'approved'|'declined';missionId?:string}) {
@@ -37,11 +37,28 @@ function notice(s: Session, event: string, by: string, reward?:{rewardRequestId?
 function advance(s: Session) {
   const now = Date.now();
   if (!terminal(s) && s.started && !suspended(s)) {
-    s.remaining = Math.max(0, s.remaining - (now - s.last));
-    if (!s.remaining) { s.status = 'expired'; notice(s, 'expired', 'server'); }
-    else for (const m of s.missions) if (m.status === 'queued' && m.scheduledAt! <= now) { m.status = 'pending'; m.deliveredAt = now; notice(s, 'mission-delivered', 'server',m.surprise?{missionId:m.id}:undefined); }
+    // Unlimited sessions never count down and never expire; scheduled deliveries still run on time.
+    if (!s.unlimited) {
+      s.remaining = Math.max(0, s.remaining - (now - s.last));
+      if (!s.remaining) { s.status = 'expired'; notice(s, 'expired', 'server'); }
+    }
+    for (const m of s.missions) if (m.status === 'queued' && m.scheduledAt! <= now) { m.status = 'pending'; m.deliveredAt = now; notice(s, 'mission-delivered', 'server',m.surprise?{missionId:m.id}:undefined); }
   }
   s.last = now;
+}
+// A session without minutes is the pair's ongoing game: it never counts down and never expires.
+function newSession(terms: string, minutes?: number): Session {
+  return {id:randomUUID(),status:'active',terms,revision:1,revisions:terms?[{revision:1,terms}]:[],approvals:[],pauses:[],remaining:minutes===undefined?0:minutes*60000,last:Date.now(),started:true,points:0,missions:[],messages:[],history:[],inbox:[],...(minutes===undefined?{unlimited:true}:{})};
+}
+// Entering the game is its own session: whenever a pair loads state with nothing active, an unlimited session opens.
+async function ensureSession(c: PoolClient, u: User): Promise<Session | undefined> {
+  const pair=u.pair_id; if (!pair) return undefined;
+  await c.query('SELECT id FROM pairs WHERE id=$1 FOR UPDATE',[pair]);
+  const active=(await c.query("SELECT id FROM sessions WHERE pair_id=$1 AND status NOT IN ('stopped','expired')",[pair])).rows;
+  if (active.length) return undefined;
+  const s=newSession('');notice(s,'session-created',u.id);
+  await c.query('INSERT INTO sessions VALUES($1,$2,$3,$4)',[s.id,pair,s.status,JSON.stringify(s)]);
+  return s;
 }
 function visible(s: Session, user: User) {
   if(user.role==='wife')return s;
@@ -175,7 +192,8 @@ export async function createApp(pool: Pool, origin: string) {
   }
   app.get('/api/state',async(req,res)=>{
     const u=await auth(req);
-    const sessions=await transaction(async c=>{
+    const {sessions,ensured}=await transaction(async c=>{
+      const ensured=await ensureSession(c,u);
       const ids=(await c.query('SELECT id FROM sessions WHERE pair_id=$1 ORDER BY id',[u.pair_id])).rows;
       const values=[];
       for(const {id} of ids){
@@ -185,15 +203,16 @@ export async function createApp(pool: Pool, origin: string) {
         if(queue)view.adoration={...(view.adoration??{}),...queue};
         values.push(view);
       }
-      return values;
+      return {sessions:values,ensured};
     });
+    if(ensured&&u.pair_id)emit(u.pair_id);
     res.json({user:u,sessions,serverNow:Date.now()});
   });
   app.get('/api/sessions/:id',async(req,res)=>{const u=await auth(req); const session=await transaction(async c=>{const s=await locked(c,req.params.id as string,u);await save(c,s);const view:any=visible(s,u);const queue=await adorationQueue(c,u,s.id);if(queue)view.adoration={...(view.adoration??{}),...queue};return view;});res.json({session,serverNow:Date.now()});});
   app.post('/api/sessions',async(req,res)=>{
     const u=await auth(req);if(!u.pair_id) fail(409,'Pair first');
-    const b=z.object({terms:z.string().trim().max(4000).default(''),minutes:z.number().int().min(1).max(525600)}).parse(req.body);
-    const s:Session={id:randomUUID(),status:'active',terms:b.terms,revision:1,revisions:b.terms?[{revision:1,terms:b.terms}]:[],approvals:[],pauses:[],remaining:b.minutes*60000,last:Date.now(),started:true,points:0,missions:[],messages:[],history:[],inbox:[]};notice(s,'session-created',u.id);
+    const b=z.object({terms:z.string().trim().max(4000).default(''),minutes:z.number().int().min(1).max(525600).optional()}).parse(req.body);
+    const s=newSession(b.terms,b.minutes);notice(s,'session-created',u.id);
     await transaction(async c=>{await c.query('SELECT id FROM pairs WHERE id=$1 FOR UPDATE',[u.pair_id]);const old=(await c.query("SELECT id FROM sessions WHERE pair_id=$1 AND status NOT IN ('stopped','expired')",[u.pair_id])).rows;for(const {id} of old){const previous=await locked(c,id,u);await save(c,previous);if(!terminal(previous))fail(409,'A session is already active');}await c.query('INSERT INTO sessions VALUES($1,$2,$3,$4)',[s.id,u.pair_id,s.status,JSON.stringify(s)]);});
     emit(u.pair_id!);res.json({session:visible(s,u)});
   });

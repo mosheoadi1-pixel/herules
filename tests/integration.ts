@@ -62,7 +62,8 @@ try {
   const wifeState=await guestCall(0,'/state'),husbandState=await guestCall(1,'/state');
   assert.ok(wifeState.user.pair_id);assert.equal(wifeState.user.pair_id,husbandState.user.pair_id,'Both roles automatically share one game');
   await guestCall(0,'/invite',{},404);await guestCall(0,'/redeem',{token:'a'.repeat(64)},404);
-  const guestSession=(await guestCall(0,'/sessions',{terms:'Guest independent consent',minutes:10})).session;
+  // Entry itself opens the ongoing session: loading state with nothing active yields one unlimited session.
+  const guestSession=(await guestCall(0,'/state')).sessions[0];
   await guestCall(0,`/sessions/${guestSession.id}/approve`,{revision:1});await guestCall(0,`/sessions/${guestSession.id}/approve`,{revision:1});
   assert.equal((await guestCall(1,`/sessions/${guestSession.id}`)).session.approvals.length,1);
   await guestCall(1,`/sessions/${guestSession.id}/mission`,{key:randomUUID(),title:'Forbidden',text:'Forbidden'},409);
