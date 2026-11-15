@@ -67,7 +67,7 @@ export function eveningClosed(session:{eveningClosedAt?:number},now=Date.now()){
 }
 
 export function eveningUsed(missions:Mission[],now=Date.now()){
-  return missions.filter(m=>now-(m.createdAt??0)<EVENING_WINDOW_MS&&!['cancelled','refused'].includes(m.status)).length;
+  return missions.filter(m=>!m.chapter&&now-(m.createdAt??0)<EVENING_WINDOW_MS&&!['cancelled','refused'].includes(m.status)).length;
 }
 
 export function favouriteMood(moodCounts?:Partial<Record<Mood,number>>){

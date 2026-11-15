@@ -13,6 +13,12 @@ import { ForYou } from './ForYou';
 import { Garden } from './Garden';
 import { Proposals } from './Proposals';
 
+// One-word decree labels and season-pack names for her Chamberlain panel
+const moodNameHe: Record<string,string> = { worship:'סגידה', tease:'הקנטה', discipline:'אימון', service:'שירות', rest:'מנוחה' };
+const moodNameEn: Record<string,string> = { worship:'Worship', tease:'Teasing', discipline:'Training', service:'Service', rest:'Rest' };
+const packNameHe: Record<string,string> = { contract:'החוזה', tease:'הקנטה', rest:'מנוחה' };
+const packNameEn: Record<string,string> = { contract:'The Contract', tease:'The Tease', rest:'Rest' };
+
 type DashboardTabProps = {
   s: Session; u: User; wife: boolean; ended: boolean; held: boolean; play: boolean; now: number; lang: 'he' | 'en';
   t: Translate; date: (at: number) => string; label: (key: string) => string;
@@ -76,25 +82,27 @@ export function DashboardTab({ s, u, wife, ended, held, play, now, lang, t, date
    </section>;
    const quickBar=<div className="quick-bar" role="group" aria-label={t('פקודות מהירות לשליחה','Quick commands to send')}>{quickBlock&&<p role="status">{quickBlock}</p>}{barPresets.map(p=><button key={p.id} disabled={!!quickBlock} onClick={()=>askPreset(p)}>{lang==='he'?p.he:p.en}</button>)}</div>;
    const keyHint=keysHintSeen?null:<div className="keys-hint notice"><p>{t('קיצורים: 1–3 לבחירת מצב רוח · N להקלדת משפט · Esc לסגירת חלון.','Shortcuts: 1–3 choose a mood · N to say it · Esc closes a window.')}</p><Button className="quiet" onClick={()=>{save('hr-keys-hint',true);setKeysHintSeen(true);}}>{t('הבנתי','Got it')}</Button></div>;
+  const cliffhanger=s.chapterState?.cliffhanger;
   return <>
     {wife&&s&&!ended&&s.pace===undefined&&onboardingPanel}
     {wife&&s&&quickBar}
-    {wife&&<section className="panel hub" aria-label={t('האדורציה שלה','Her Adoration')}}><p className="eyebrow">{t('האדורציה שלה','Her Adoration')}</p><h2>{t('קבלת ההערצה','Receiving Adoration')}</h2><p>{t('טביעה אחת מגיעה לך. גלה אותה, לוגמי את תחושותיו, הענקי לה, או חתמי את הפרק. / One devotion is due you. Reveal it, sip his longing, grant the earned moment, or seal the chapter.')}</p><div className="adoration-actions" role="group"><Button className="primary" onClick={()=>void run(()=>action('tribute-reveal'))}>{t('פותח/ה','Reveal')}</Button><Button className="secondary" onClick={()=>void run(()=>action('sip'))}>{t('לוגמת','Sip')}</Button><Button className="secondary" onClick={()=>void run(()=>action('grant'))}>{t('מעניקה','Grant')}</Button><Button className="secondary" onClick={()=>void run(()=>action('seal'))}>{t('חותמת','Seal')}</Button></div></section>
+    {wife&&<section className="panel hub" aria-label={t('האדורציה שלה','Her Adoration')}}><p className="eyebrow">{t('האדורציה שלה','Her Adoration')}</p><h2>{t('קבלת ההערצה','Receiving Adoration')}</h2><p>{t('מחווה אחת מגיעה לך. גלי אותה, לגמי את תחושותיו, העניקי לה, או חתמי את הפרק.','One devotion is due you. Reveal it, sip his longing, grant the earned moment, or seal the chapter.')}</p><div className="adoration-actions" role="group"><Button className="primary" onClick={()=>void run(()=>action('tribute-reveal'))}>{t('פותחת','Reveal')}</Button><Button className="secondary" onClick={()=>void run(()=>action('sip'))}>{t('לוגמת','Sip')}</Button><Button className="secondary" onClick={()=>void run(()=>action('grant'))}>{t('מעניקה','Grant')}</Button><Button className="secondary" onClick={()=>void run(()=>action('seal'))}>{t('חותמת','Seal')}</Button></div></section>
 
-    {wife&&<section className="panel chamberlain" aria-label={t('המטבח','The Chamberlin')}><p className="eyebrow">{t('המטבח של הקיסר','The Emperor\'s Chamber')}</h2><h3>{t('תחילת פרק חדש','Start a New Chapter')}</h3><p>{t('בחרי מצב רוח ומארז סיפור. הקיסר ירכיב פרק בן מספר משימות שיגיעו בהדרגה. / Choose a mood and story pack. The Chamberlain will compose a multi-mission arc that unfolds gradually.')}</p><div className="chamberlain-controls" role="group">
+    {!wife&&<section className="panel hub" aria-label={t('המחווה היומית','The Daily Tribute')}><p className="eyebrow">{t('המחווה היומית','The Daily Tribute')}</p><h2>{t('תן לה הערצה','Give Her Devotion')}</h2><p>{t('מילה אחת או יותר שמגיעה אליה. היא מחליטה מתי לגלות, ללגום, להעניק או לחתום.','One or more words that reach her. She decides when to reveal, sip, grant, or seal.')}</p><form onSubmit={e=>{const el=e.currentTarget,b=form(e);if(!String(b.text||'').trim())return;void run(async()=>{await action('tribute-queue',{kind:'note',text:String(b.text).trim()});el.reset();});}}><label>{t('המחווה שלך','Your tribute')}<input name="text" required maxLength={4000}/></label><Button disabled={!play}>{t('שליחת מחווה','Send devotion')}</Button></form></section>}
+    {wife&&<section className="panel chamberlain" aria-label={t('המשרת האישי','The Chamberlain')}><p className="eyebrow">{t('המשרת האישי','The Chamberlain')}</p><h3>{t('תחילת פרק חדש','Start a New Chapter')}</h3><p>{t('בחרי מילה אחת. המשרת האישי ירכיב פרק בן מספר משימות שיופיע בתור שלך מיד.','Choose one word. The Chamberlain composes a multi-mission chapter that lands in your queue immediately.')}</p><div className="chamberlain-controls" role="group">
   {/* Mood buttons - decree types */}
   {[ 'worship', 'tease', 'discipline', 'service', 'rest' ].map(mood=>(
     <Button key={mood} onClick={()=>void run(()=>action('chamberlain-decree',{mood}))}>
-      {t(mood,'Worship')}
+      {t(moodNameHe[mood]||mood,moodNameEn[mood]||mood)}
     </Button>
   ))}
   {/* Season pack selector */}
   {[ 'contract', 'tease', 'rest' ].map(pack=>(
     <Button key={pack} onClick={()=>void run(()=>action('chamberlain-decree',{mood:'worship',season:pack}))}>
-      {t(pack,'The Contract')}
+      {t(packNameHe[pack]||pack,packNameEn[pack]||pack)}
     </Button>
   ))}
-</div><p className="small dim">{t('לאחר האישור, המשימות יתווספו למפגש ויתחילו במסדרון בבוקר.','After approval, missions will be added to the session and begin at morning mode.')}</p></section>}
+</div><p className="small dim">{t('הפרק בתור שלך עכשיו. אפשר למסור אותו מיד או לתת לו לחכות לבוקר.','The chapter is in your queue now. Deliver it right away or let it wait for morning.')}</p>{cliffhanger&&<p className="small dim">{t('המכתב למחר','The letter for tomorrow')}: {t(cliffhanger.he,cliffhanger.en)}</p>}</section>}
     {nudgeDue&&!held&&<section className="panel"><p>{t('עבר זמן מאז שהייתם כאן יחד. אפשר לחזור בצעד קטן: הודעה אחת או צ׳ק־אין קצר.','It has been a while since you were together here. You can ease back in with one small step: a message or a short check-in.')}</p><Button onClick={dismissNudge}>{t('לא עכשיו','Not now')}</Button></section>}
     {wife&&<ForYou deck={deck} lang={lang} t={t} play={play} useIdea={useIdea} onSkip={skipDeck}/>}
     <Garden total={gardenTotal} t={t}/>
@@ -109,7 +117,7 @@ export function DashboardTab({ s, u, wife, ended, held, play, now, lang, t, date
         {recentApproved.map(m=><article key={m.id}><h4>{m.title}</h4><div className="row">{(['love','like','skip'] as const).map(rating=><Button key={rating} aria-pressed={m.rating===rating} className={m.rating===rating?'primary':undefined} onClick={()=>void run(()=>action('rate',{mission:m.id,rating}))}>{ratingLabel(rating)}</Button>)}</div>{m.rating&&<p className="small">{t('הדירוג שנשמר','Saved rating')}: {ratingLabel(m.rating)}</p>}</article>)}</details>
       </section>
       <CommandPanel s={s} play={play} t={t} lang={lang} quickAt={quickAt} setQuickAt={setQuickAt} quickBlock={quickBlock} askPreset={askPreset} askQuick={askQuick} run={run} action={action} sayOpen={sayOpen} setSayOpen={setSayOpen} sayText={sayText} setSayText={setSayText} sayDraft={sayDraft} setSayDraft={setSayDraft} sayReady={sayReady}/>
-      <section className="panel"><h2>{t('הנקודות שלך','Your points')}</h2><p className="big-number"><strong>{s?.herPoints??0}</strong> {t('נקודות לעצמך','points for yourself')}</p><p className="small">{t('כל משימה שאושרה מוסיפה לך נקודות באותו ערך. מממשים אותן על מה שרוצים.','Every approved task adds the same points to you. Spend them on what you want.')}</p>
+      <section className="panel"><h2>{t('הזוהר שלך','Your Glow')}</h2><p className="big-number"><strong>{s?.herPoints??0}</strong> {t('זוהר','Glow')}</p><p className="small">{t('כל הערצה שאת מקבלת מוסיפה זוהר. הזוהר מגיע מהחסד שלך, לא מעבודה שלך.','Every devotion you receive adds Glow. Glow comes from your grace, not from your labor.')}</p>
         {cheapestWish&&<div>
           <progress className="points-bar" max={Math.max(cheapestWish.cost,1)} value={Math.min(s?.herPoints??0,Math.max(cheapestWish.cost,1))} aria-label={t('התקדמות למשאלה הזולה ביותר','Progress toward the cheapest wish')}/>
           <p className="small">{(s?.herPoints??0)>=cheapestWish.cost?t('יש מספיק נקודות למשאלה הזולה.','There are enough points for the cheapest wish.'):t(`עוד ${cheapestWish.cost-(s?.herPoints??0)} נקודות למשאלה הזולה.`,`${cheapestWish.cost-(s?.herPoints??0)} more points to the cheapest wish.`)}</p>

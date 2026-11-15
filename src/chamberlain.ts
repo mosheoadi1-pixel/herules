@@ -1,6 +1,5 @@
+import { randomUUID } from 'node:crypto';
 import type { Mission, Session } from './server/app';
-import type { Translate } from './app-shared';
-import { z } from 'zod';
 
 // Season pack specification
 interface MissionSpec {
@@ -23,13 +22,22 @@ interface SeasonPack {
   missions: MissionSpec[];
 }
 
-// Map decree words to season pack IDs
+// Map decree moods to season pack IDs
 const decreeToPack: Record<string, string> = {
   worship: 'contract',
   tease: 'tease',
-  discipline: 'training',
-  service: 'service',
+  discipline: 'contract',
+  service: 'contract',
   rest: 'rest',
+};
+
+// One-word decrees she can speak, as [he, en] tuples
+export const moodLabels: Record<string, [string, string]> = {
+  worship: ['סגידה', 'Worship'],
+  tease: ['הקנטה', 'Teasing'],
+  discipline: ['אימון', 'Training'],
+  service: ['שירות', 'Service'],
+  rest: ['מנוחה', 'Rest'],
 };
 
 // Built-in season packs (minimum viable set)
@@ -72,33 +80,38 @@ const builtInPacks: SeasonPack[] = [
     decreeWord: 'rest',
     missions: [
       { titleHe: 'הציווי', titleEn: 'The Decree', textHe: 'לנוח היום', textEn: 'Rest today', points: 5, category: 'rest' },
-      { titleHe: 'המסאז', titleEn: 'The Massage', textHe: 'למסאז' לה', textEn: 'Her massage', points: 10, category: 'massage' },
+      { titleHe: 'המסאז', titleEn: 'The Massage', textHe: 'למסאז׳ לה', textEn: 'Her massage', points: 10, category: 'massage' },
       { titleHe: 'ההבטחה', titleEn: 'The Promise', textHe: 'לילה שקט', textEn: 'Quiet night', points: 10, category: 'rest' },
     ],
   },
 ];
 
-// Chamberlin composition: given a decree word, produce a MissionSpec[] chapter
+// The next 8am in her local time (today if still before it, otherwise tomorrow),
+// in epoch milliseconds. Composed chapters surface in the mission queue at morning mode.
+export function nextMorning(from: number = Date.now()): number {
+  const d = new Date(from);
+  const eightToday = new Date(d.getFullYear(), d.getMonth(), d.getDate(), 8, 0, 0, 0).getTime();
+  return eightToday > from ? eightToday : eightToday + 86400000;
+}
+
+// Chamberlain composition: given her decree, produce a MissionSpec[] chapter
 export function chamberlainCompose(
   decree: { mood: string; season?: string },
-  moodNames: Record<string, [string, string]>,
-  session: Session,
-  t: Translate
+  session: Session
 ): MissionSpec[] {
-  // Determine which season pack to use based on decree mood
-  const packId = decreeToPack[decree.mood] || 'rest';
-  const pack = builtInPacks.find(p => p.id === packId) || builtInPacks[builtInPacks.length - 1];
+  const requested = decree.season && builtInPacks.some(p => p.id === decree.season)
+    ? decree.season
+    : undefined;
+  const packId = requested || decreeToPack[decree.mood] || 'contract';
+  const pack = builtInPacks.find(p => p.id === packId) ?? builtInPacks[0];
 
-  // Build missions from the pack, adapting text to session context
-  const missions: MissionSpec[] = [];
-  const persona = session.data?.persona || 'playful';
-  const isStrict = persona === 'strict';
+  const isStrict = session.persona === 'strict';
+  // When she picks a story pack, its own word names the chapter.
+  const labelMood = requested ? pack.decreeWord : decree.mood;
 
-  for (const spec of pack.missions) {
-    // Adapt mission text based on persona and mood
-    const adapted = adaptMissionText(spec.textHe, spec.textEn, persona, isStrict, decree.mood, t);
-
-    missions.push({
+  return pack.missions.map(spec => {
+    const adapted = adaptMissionText(spec.textHe, spec.textEn, isStrict, labelMood);
+    return {
       titleHe: spec.titleHe,
       titleEn: spec.titleEn,
       textHe: adapted.textHe,
@@ -108,121 +121,62 @@ export function chamberlainCompose(
       surprise: spec.surprise,
       completionStyle: spec.completionStyle,
       category: spec.category || decree.mood,
-    });
-  }
-
-  return missions;
+    };
+  });
 }
 
-// Adapt mission text based on persona, mood, and translation function
+// Adapt mission text to her persona and the mood she spoke.
+// A strict persona adds severity; every decree prefixes its own mood word.
 function adaptMissionText(
   he: string,
   en: string,
-  persona: string,
   isStrict: boolean,
-  mood: string,
-  t: Translate
+  mood: string
 ): { textHe: string; textEn: string } {
-  // Use the translate function for consistent i18n
-  const moodHe = moodNames[decreeToPack[mood as keyof Record<string, string>] as keyof ReturnType<typeof moodNames>]?.[0] || mood;
-  const moodEn = moodNames[decreeToPack[mood as keyof Record<string, string>] as keyof ReturnType<typeof moodNames>]?.[1] || mood;
-
-  // Build context-aware text using translate for key phrases
-  const keyPhrasesHe = {
-    worship: t('סגידה','Worship'),
-    tease: t('הקנטה','Teasing'),
-    discipline: t('אימון','Training'),
-    service: t('שירות','Service'),
-    rest: t('מנוחה','Rest'),
-  };
-
-  const keyPhrasesEn = {
-    worship: t('Worship','Worship'),
-    tease: t('Teasing','Teasing'),
-    discipline: t('Training','Training'),
-    service: t('Service','Service'),
-    rest: t('Rest','Rest'),
-  };
-
-  const hePrefix = isStrict || mood === 'discipline' ? 'בחומרה ' : (keyPhrasesHe[mood as keyof typeof keyPhrasesHe] || '');
-  const enPrefix = keyPhrasesEn[mood as keyof typeof keyPhrasesEn] || '';
-
-  return {
-    textHe: `${hePrefix}${he}`,
-    textEn: `${enPrefix}${en}`,
-  };
+  const label = moodLabels[mood] ?? [mood, mood];
+  const hePrefix = isStrict ? 'בחומרה · ' : `${label[0]} · `;
+  const enPrefix = isStrict ? 'Strictly · ' : `${label[1]} · `;
+  return { textHe: `${hePrefix}${he}`, textEn: `${enPrefix}${en}` };
 }
 
-// Persist the composed chapter into the session
-// This is called from the server ops after chamberlainCompose
-// Merges the new missions into the session's existing missions array
-// Ensures each mission has the required Mission type fields (status, etc.)
-export async function chamberlainPersistComposition(
-  c: any, // pg PoolClient from the transaction
-  sessionId: string,
+// Persist a composed chapter into the session aggregate.
+// Missions start as `queued` so they are already in her queue and the existing
+// advance() logic promotes them to `pending` at morning mode.
+// Returns the new mission ids plus the cliffhanger line for the next morning.
+export function chamberlainPersistComposition(
+  session: Session,
   missions: MissionSpec[],
-  morning?: number // 8am tomorrow in epoch milliseconds
-): Promise<{ missionIds: string[]; cliffhanger: { he: string; en: string } }> {
-  // Read current session data
-  const sQuery = await c.query('SELECT data FROM sessions WHERE id=$1', [sessionId]);
-  if (sQuery.rowCount === 0) throw new Error('Session not found');
-  const currentData = sQuery.rows[0].data;
-  const currentMissions = (currentData?.missions as Mission[]) || [];
-
-  // Generate mission IDs and initialize each mission with required fields
+  morning: number = nextMorning()
+): { missionIds: string[]; cliffhanger: { he: string; en: string } } {
   const missionIds: string[] = [];
-  const morningEpoch = morning ?? Math.floor(Date.now() / 86400000) * 86400000 + 8 * 3600000 // 8am tomorrow
-  const initializedMissions: Mission[] = missions.map(m => ({
-    id: randomUUID(),
-    revision: 0,
-    title: m.titleHe,
-    text: m.textHe,
-    points: m.points,
-    secret: m.secret ?? false,
-    surprise: m.surprise ?? false,
-    completionStyle: m.completionStyle ?? 'simple',
-    category: m.category || 'unknown',
-    status: 'queued', // New missions start as queued (playable immediately)
-    scheduledAt: morningEpoch,
-    completion: undefined,
-    submissionVersion: undefined,
-    deliveredAt: undefined,
-    acknowledgedAt: undefined,
-    adjustment: undefined,
-    replaces: undefined,
-    replacementId: undefined,
-    approvedAt: undefined,
-    rating: undefined,
-    ratedAt: undefined,
-    createdAt: Date.now(),
-  } as Mission));
 
-  // Merge new missions with existing ones (new missions come first)
-  const allMissions = [...initializedMissions, ...currentMissions];
-
-  // Update session data with merged missions
-  await c.query(
-    `UPDATE sessions SET data=$1 WHERE id=$2`,
-    [JSON.stringify({ ...currentData, missions: allMissions }), sessionId]
-
-  // Update session data with merged missions
-  await c.query(
-    `UPDATE sessions SET data=$1 WHERE id=$2`,
-    [JSON.stringify({ ...currentData, missions: allMissions }), sessionId]
-  );
+  for (const spec of missions) {
+    const id = randomUUID();
+    missionIds.push(id);
+    const mission: Mission = {
+      id,
+      revision: session.revision,
+      title: spec.titleHe,
+      text: spec.textHe,
+      points: spec.points,
+      secret: spec.secret ?? false,
+      surprise: spec.surprise ?? false,
+      chapter: true,
+      completionStyle: spec.completionStyle ?? 'simple',
+      category: spec.category || 'ceremony',
+      status: 'queued',
+      scheduledAt: morning,
+      createdAt: Date.now(),
+    };
+    session.missions.push(mission);
+  }
 
   // The cliffhanger is a single line she'll receive tomorrow at her adoration hour
-  const cliffhanger = {
-    he: 'מחר תבין למה ביקשתי את זה',
-    en: 'Tomorrow you will understand why I asked',
+  return {
+    missionIds,
+    cliffhanger: {
+      he: 'מחר תבין למה ביקשתי את זה',
+      en: 'Tomorrow you will understand why I asked',
+    },
   };
-
-  return { missionIds, cliffhanger };
-}
-
-// Helper: random UUID (matches the app's randomUUID pattern)
-function randomUUID(): string {
-  return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/c =>
-    (Math.random() > 0.5 ? Math.random() : Math.random() * 0x3) % 8 + 'x'
-  ).replace(/y/g, (c) => (Math.random() > 0.5 ? Math.random() : Math.random() * 0x3) % 4 + 'x')
 }
