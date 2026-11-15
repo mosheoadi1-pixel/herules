@@ -329,7 +329,8 @@ export async function createApp(pool: Pool, origin: string) {
       else if(op==='chamberlain-compose'){
         if(u.role!=='wife')fail(403,'Wife role required');
         const decree=s.chapterState?.decree;
-        if(!decree)fail(404,'No decree found for this session');
+        // Return the rejection so TypeScript keeps the decree narrowed below.
+        if(!decree)return fail(404,'No decree found for this session');
         const composition=chamberlainCompose(decree,s);
         const composed=chamberlainPersistComposition(s,composition);
         s.chapterState={decree,at:Date.now(),cliffhanger:composed.cliffhanger};

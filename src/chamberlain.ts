@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto';
-import type { Mission, Session } from './server/app';
+import type { Mission, Session } from '../server/app';
 
 // Season pack specification
 interface MissionSpec {
