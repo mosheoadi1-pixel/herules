@@ -6,6 +6,7 @@ import type { Pool, PoolClient } from 'pg';
 import { z } from 'zod';
 import { quickPresets } from '../src/quick.ts';
 import { WISH_COOLDOWN_MS, eveningClosed, eveningUsed } from '../src/progress.ts';
+import { chamberlainCompose, chamberlainPersistComposition } from '../src/chamberlain.ts';
 const scrypt = promisify(scryptCallback);
 const hash = (v: string) => createHash('sha256').update(v).digest('hex');
 const text = z.string().trim().min(1).max(4000);
@@ -394,6 +395,35 @@ export async function createApp(pool: Pool, origin: string) {
     else if(op==='tribute-reveal'){
       const u=await auth(req),b=req.body;
       if(u.role!=='wife')fail(403,'Wife role required');const tid=z.string().uuid().parse(b.tributeId);const tQuery=await c.query('SELECT * FROM tributes WHERE id=$1 AND receiver_id=$2',[tid,u.id]);if(tQuery.rowCount===0)fail(404,'Tribute not found or not for this user');const row=tQuery.rows[0];if(row.delivered_at)fail(409,'Already delivered');await c.query('UPDATE tributes SET delivered_at=now() WHERE id=$1',[tid]);return {ok:true,tribute:row};
+    }
+    else if(op==='chamberlain-decree'){
+      const u=await auth(req),b=req.body;
+      if(u.role!=='wife')fail(403,'Wife role required');
+      const sid=z.string().uuid().parse(b.sessionId);
+      const sQuery=await c.query('SELECT * FROM sessions WHERE id=$1',[sid]);if(sQuery.rowCount===0)fail(404,'Session not found');
+      const sRow=sQuery.rows[0];const chapterState=sRow.data?.chapterState||{};
+      const decree=z.object({mood:z.enum(['worship','tease','discipline','service','rest']),season:z.string().trim().max(80).optional()}).parse(b);
+      // Store her decree in session data for the Chamberlain to read
+      await c.query(`UPDATE sessions SET data=$1 WHERE id=$2`,JSON.stringify({...chapterState,decree,at:Date.now}),sid);
+      // Acknowledge decree - the Chamberlain will compose immediately
+      return {ok:true,decreeId:randomUUID()};
+    }
+    else if(op==='chamberlain-compose'){
+      const u=await auth(req),b=req.body;
+      if(u.role!=='husband')fail(403,'Husband role required');
+      const tid=z.string().uuid().parse(b.decreeId);
+      // Read her decree from session data
+      const sQuery=await c.query('SELECT * FROM sessions WHERE id=$1',[b.sessionId]);if(sQuery.rowCount===0)fail(404,'Session not found');
+      const sRow=sQuery.rows[0];const chapterState=sRow.data?.chapterState||{};
+      if(!chapterState.decree)fail(404,'No decree found for this session');
+      const decree=chapterState.decree;
+      // Chamberlain composition engine: compose chapter from decree word
+      // Returns mission specs that the dashboard will translate using its t()
+      const composition=chamberlainCompose(decree,moodNames,sRow);
+      // Persist the composed chapter into the session's missions
+      const result=await chamberlainPersistComposition(sRow.id,composition);
+      // Acknowledge completion
+      return {ok:true,composition,missionIds:result.missionIds,cliffhanger:result.cliffhanger};
     }
     s.last=Date.now();await save(c,s);return response;
     });
