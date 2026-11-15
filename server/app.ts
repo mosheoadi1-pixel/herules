@@ -462,10 +462,10 @@ export async function createApp(pool: Pool, origin: string) {
         }
         else if(op==='wish-request'){
           wife();const id=uuid.parse(b.wish);const wish=s.wishes?.find(w=>w.id===id)??fail(404,'Wish unavailable');
-          if(wish.cost===undefined)fail(409,'Wish is not priced yet');
           if(s.wishRequests?.some(r=>r.wish===id&&r.status==='pending'))fail(409,'Wish already requested');
           const list=s.wishRequests??=[];if(list.length>=200)fail(409,'Wish request list is full');
-          const request:WishRequest={id:randomUUID(),wish:id,title:wish.title,cost:wish.cost,book:wish.book,status:'pending',at:Date.now()};list.push(request);response={request};
+          const cost=wish.cost;if(cost===undefined)fail(409,'Wish is not priced yet');
+          const request:WishRequest={id:randomUUID(),wish:id,title:wish.title,cost,book:wish.book,status:'pending',at:Date.now()};list.push(request);response={request};
         }
         else if(op==='wish-decision'){
           husband();const requestId=uuid.parse(b.request);const request=s.wishRequests?.find(r=>r.id===requestId)??fail(404,'Wish request unavailable');
