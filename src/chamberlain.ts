@@ -156,6 +156,7 @@ function adaptMissionText(
 // Persist the composed chapter into the session
 // This is called from the server ops after chamberlainCompose
 // Merges the new missions into the session's existing missions array
+// Ensures each mission has the required Mission type fields (status, etc.)
 export async function chamberlainPersistComposition(
   c: any, // pg PoolClient from the transaction
   sessionId: string,
@@ -167,11 +168,40 @@ export async function chamberlainPersistComposition(
   const currentData = sQuery.rows[0].data;
   const currentMissions = (currentData?.missions as Mission[]) || [];
 
-  // Generate mission IDs for the new missions
-  const missionIds: string[] = missions.map(() => randomUUID());
+  // Generate mission IDs and initialize each mission with required fields
+  const missionIds: string[] = [];
+  const initializedMissions: Mission[] = missions.map(m => ({
+    id: randomUUID(),
+    revision: 0,
+    title: m.titleHe,
+    text: m.textHe,
+    points: m.points,
+    secret: m.secret ?? false,
+    surprise: m.surprise ?? false,
+    completionStyle: m.completionStyle ?? 'simple',
+    category: m.category || 'unknown',
+    status: 'draft', // New missions start as draft
+    scheduledAt: undefined,
+    completion: undefined,
+    submissionVersion: undefined,
+    deliveredAt: undefined,
+    acknowledgedAt: undefined,
+    adjustment: undefined,
+    replaces: undefined,
+    replacementId: undefined,
+    approvedAt: undefined,
+    rating: undefined,
+    ratedAt: undefined,
+    createdAt: Date.now(),
+  } as Mission));
 
   // Merge new missions with existing ones (new missions come first)
-  const allMissions = [...missions.map(m => ({ id: randomUUID(), ...m }) as Mission), ...currentMissions];
+  const allMissions = [...initializedMissions, ...currentMissions];
+
+  // Update session data with merged missions
+  await c.query(
+    `UPDATE sessions SET data=$1 WHERE id=$2`,
+    [JSON.stringify({ ...currentData, missions: allMissions }), sessionId]
 
   // Update session data with merged missions
   await c.query(
