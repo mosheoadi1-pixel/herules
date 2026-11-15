@@ -158,6 +158,8 @@ export function chamberlainPersistComposition(
       revision: session.revision,
       title: spec.titleHe,
       text: spec.textHe,
+      titleEn: spec.titleEn,
+      textEn: spec.textEn,
       points: spec.points,
       secret: spec.secret ?? false,
       surprise: spec.surprise ?? false,

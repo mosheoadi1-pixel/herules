@@ -1,3 +1,4 @@
+import { useState } from 'react';
 import type { Dispatch, SetStateAction } from 'react';
 import type { Mission, Session, User } from '../../server/app';
 import { progressStats, weeklyRecap, milestones, favouriteMood, WISH_COOLDOWN_MS, type Mood, type Rating } from '../progress';
@@ -67,7 +68,7 @@ export function DashboardTab({ s, u, wife, ended, held, play, now, lang, t, date
      </section>
      <section className="panel evening-end"><h2>{t('סוף הערב','The end of the evening')}</h2>
        {closedNow?<p className="notice" role="status" aria-live="polite">{reopenHours<=1?t('הערב נסגר. ייפתח מחדש אוטומטית בעוד פחות משעה.','The evening is closed. It reopens automatically in less than an hour.'):t(`הערב נסגר. ייפתח מחדש אוטומטית ${reopenHours===2?'בעוד שעתיים':`בעוד ${reopenHours} שעות`}.`,`The evening is closed. It reopens automatically in ${reopenHours} hours.`)}</p>
-       :<><p>{t('כשהערב נגמר, אפשר לסגור אותו. ההזמנות המתוזמנות יבוטלו, ולא ניתן יהיה לשלוח עד שייפתח מחדש.','When the evening is over, you can close it. Scheduled invitations are cancelled, and nothing can be sent until it reopens.')}</p><Button disabled={!s||ended} onClick={askClose}>{t('סיום הערב','Done for tonight')}</Button></>}
+       :<><p>{t('כשהערב נגמר, אפשר לסגור אותו. הזמנות חד-פעמיות מתוזמנות יבוטלו; פרקים ימשיכו להימסר בבוקר. לא ניתן יהיה לשלוח דבר חדש עד שייפתח מחדש.','When the evening is over, you can close it. Scheduled one-off invitations are cancelled; chapters still arrive in the morning. Nothing new can be sent until it reopens.')}</p><Button disabled={!s||ended} onClick={askClose}>{t('סיום הערב','Done for tonight')}</Button></>}
      </section>
    </>;
    const onboardingPanel=<section className="panel onboard" aria-labelledby="onboard-title"><h2 id="onboard-title">{t('איך תרצי להתחיל?','How would you like to start?')}</h2>
@@ -82,27 +83,57 @@ export function DashboardTab({ s, u, wife, ended, held, play, now, lang, t, date
    </section>;
    const quickBar=<div className="quick-bar" role="group" aria-label={t('פקודות מהירות לשליחה','Quick commands to send')}>{quickBlock&&<p role="status">{quickBlock}</p>}{barPresets.map(p=><button key={p.id} disabled={!!quickBlock} onClick={()=>askPreset(p)}>{lang==='he'?p.he:p.en}</button>)}</div>;
    const keyHint=keysHintSeen?null:<div className="keys-hint notice"><p>{t('קיצורים: 1–3 לבחירת מצב רוח · N להקלדת משפט · Esc לסגירת חלון.','Shortcuts: 1–3 choose a mood · N to say it · Esc closes a window.')}</p><Button className="quiet" onClick={()=>{save('hr-keys-hint',true);setKeysHintSeen(true);}}>{t('הבנתי','Got it')}</Button></div>;
+  const [tributeSent,setTributeSent]=useState(false);
   const cliffhanger=s.chapterState?.cliffhanger;
+  const revealed=s.adoration?.last;
+  const waiting=s.adoration?.waiting;
+  const ready=s.adoration?.ready;
+  const canGrant=!!s.adoration?.sippedFor&&s.adoration.grantedFor!==s.adoration.sippedFor;
+  const chapterOpen=s.missions.filter(m=>m.chapter&&!['approved','refused','cancelled'].includes(m.status)).length;
   return <>
     {wife&&s&&!ended&&s.pace===undefined&&onboardingPanel}
     {wife&&s&&quickBar}
-    {wife&&<section className="panel hub" aria-label={t('האדורציה שלה','Her Adoration')}><p className="eyebrow">{t('האדורציה שלה','Her Adoration')}</p><h2>{t('קבלת ההערצה','Receiving Adoration')}</h2><p>{t('מחווה אחת מגיעה לך. גלי אותה, לגמי את תחושותיו, העניקי לה, או חתמי את הפרק.','One devotion is due you. Reveal it, sip his longing, grant the earned moment, or seal the chapter.')}</p><div className="adoration-actions" role="group"><Button className="primary" onClick={()=>void run(()=>action('tribute-reveal'))}>{t('פותחת','Reveal')}</Button><Button className="secondary" onClick={()=>void run(()=>action('sip'))}>{t('לוגמת','Sip')}</Button><Button className="secondary" onClick={()=>void run(()=>action('grant'))}>{t('מעניקה','Grant')}</Button><Button className="secondary" onClick={()=>void run(()=>action('seal'))}>{t('חותמת','Seal')}</Button></div></section>}
+    {wife&&<section className="panel hub adoration" aria-label={t('האדורציה שלה','Her Adoration')}>
+      <p className="eyebrow">{t('האדורציה שלה','Her Adoration')}</p>
+      <h2>{t('קבלת ההערצה','Receiving Adoration')}</h2>
+      <p>{t('מחווה אחת מגיעה לך. גלי אותה, לגמי את תחושותיו, העניקי לה, או חתמי את הפרק.','One devotion is due you. Reveal it, sip his longing, grant the earned moment, or seal the chapter.')}</p>
+      {typeof waiting==='number'&&waiting>0&&<p className="small" role="status">{waiting===1?t('מחווה אחת ממתינה לגילוי שלך.','One devotion is waiting for your reveal.'):t(`${waiting} מחוות ממתינות לגילוי שלך.`,`${waiting} devotions are waiting for your reveal.`)}</p>}
+      {revealed
+        ? <blockquote className="adoration-words preserve"><p className="eyebrow">{t('המילים שלו','His words')}</p>{revealed.text}</blockquote>
+        : <p className="small">{t('עוד לא גילית מחווה. פתיחה מביאה לך את מה שהוא כתב.','You have not revealed a devotion yet. Reveal brings you what he wrote.')}</p>}
+      <div className="adoration-actions" role="group" aria-label={t('פעולות ההערצה','Adoration actions')}>
+        <Button className="primary" disabled={!play||waiting===0} onClick={()=>void run(()=>action('tribute-reveal'))}>{t('פותחת','Reveal')}</Button>
+        <Button disabled={!play||ready===0} onClick={()=>void run(()=>action('sip'))}>{t('לוגמת','Sip')}</Button>
+        <Button disabled={!play||!canGrant} onClick={()=>void run(()=>action('grant'))}>{t('מעניקה','Grant')}</Button>
+        <Button disabled={!play} onClick={()=>void run(()=>action('seal'))}>{t('חותמת','Seal')}</Button>
+      </div>
+      {s.adoration?.sealedAt&&<p className="small">{t('הפרק נחתם. אפשר לפתוח פרק חדש.','The chapter is sealed. A new one can begin.')}</p>}
+    </section>}
 
-    {!wife&&<section className="panel hub" aria-label={t('המחווה היומית','The Daily Tribute')}><p className="eyebrow">{t('המחווה היומית','The Daily Tribute')}</p><h2>{t('תן לה הערצה','Give Her Devotion')}</h2><p>{t('מילה אחת או יותר שמגיעה אליה. היא מחליטה מתי לגלות, ללגום, להעניק או לחתום.','One or more words that reach her. She decides when to reveal, sip, grant, or seal.')}</p><form onSubmit={e=>{const el=e.currentTarget,b=form(e);if(!String(b.text||'').trim())return;void run(async()=>{await action('tribute-queue',{kind:'note',text:String(b.text).trim()});el.reset();});}}><label>{t('המחווה שלך','Your tribute')}<input name="text" required maxLength={4000}/></label><Button disabled={!play}>{t('שליחת מחווה','Send devotion')}</Button></form></section>}
-    {wife&&<section className="panel chamberlain" aria-label={t('המשרת האישי','The Chamberlain')}><p className="eyebrow">{t('המשרת האישי','The Chamberlain')}</p><h3>{t('תחילת פרק חדש','Start a New Chapter')}</h3><p>{t('בחרי מילה אחת. המשרת האישי ירכיב פרק בן מספר משימות שיופיע בתור שלך מיד.','Choose one word. The Chamberlain composes a multi-mission chapter that lands in your queue immediately.')}</p><div className="chamberlain-controls" role="group">
+    {!wife&&<section className="panel hub" aria-label={t('המחווה היומית','The Daily Tribute')}>
+      <p className="eyebrow">{t('המחווה היומית','The Daily Tribute')}</p>
+      <h2>{t('תן לה הערצה','Give Her Devotion')}</h2>
+      <p>{t('מילה אחת או יותר שמגיעה אליה. היא מחליטה מתי לגלות, ללגום, להעניק או לחתום.','One or more words that reach her. She decides when to reveal, sip, grant, or seal.')}</p>
+      <form onSubmit={e=>{const el=e.currentTarget,b=form(e);if(!String(b.text||'').trim())return;setTributeSent(false);void run(async()=>{await action('tribute-queue',{kind:'note',text:String(b.text).trim()});el.reset();setTributeSent(true);});}}>
+        <label>{t('המחווה שלך','Your tribute')}<input name="text" required maxLength={4000}/></label>
+        <Button disabled={!play}>{t('שליחת מחווה','Send devotion')}</Button>
+      </form>
+      {tributeSent&&<p className="small" role="status">{t('המחווה נשלחה. היא תגלה אותה כשתרצה.','Sent. She will reveal it when she chooses.')}</p>}
+    </section>}
+    {wife&&<section className="panel chamberlain" aria-label={t('המשרת האישי','The Chamberlain')}><p className="eyebrow">{t('המשרת האישי','The Chamberlain')}</p><h3>{t('תחילת פרק חדש','Start a New Chapter')}</h3><p>{t('בחרי מילה אחת. המשרת האישי ירכיב פרק בן מספר משימות שיופיע בתור שלך מיד.','Choose one word. The Chamberlain composes a multi-mission chapter that lands in your queue immediately.')}</p>{chapterOpen>0&&<p className="small">{t(`בפרק הפתוח: ${chapterOpen} משימות שעוד לא הוכרעו.`,`Open chapter: ${chapterOpen} missions still undecided.`)}</p>}<div className="chamberlain-controls" role="group">
   {/* Mood buttons - decree types */}
   {[ 'worship', 'tease', 'discipline', 'service', 'rest' ].map(mood=>(
-    <Button key={mood} onClick={()=>void run(()=>action('chamberlain-decree',{mood}))}>
+    <Button key={mood} disabled={!play} onClick={()=>void run(()=>action('chamberlain-decree',{mood}))}>
       {t(moodNameHe[mood]||mood,moodNameEn[mood]||mood)}
     </Button>
   ))}
   {/* Season pack selector */}
   {[ 'contract', 'tease', 'rest' ].map(pack=>(
-    <Button key={pack} onClick={()=>void run(()=>action('chamberlain-decree',{mood:'worship',season:pack}))}>
+    <Button key={pack} disabled={!play} onClick={()=>void run(()=>action('chamberlain-decree',{mood:'worship',season:pack}))}>
       {t(packNameHe[pack]||pack,packNameEn[pack]||pack)}
     </Button>
   ))}
-</div><p className="small dim">{t('הפרק בתור שלך עכשיו. אפשר למסור אותו מיד או לתת לו לחכות לבוקר.','The chapter is in your queue now. Deliver it right away or let it wait for morning.')}</p>{cliffhanger&&<p className="small dim">{t('המכתב למחר','The letter for tomorrow')}: {t(cliffhanger.he,cliffhanger.en)}</p>}</section>}
+</div><p className="small dim">{t('הפרק ייכנס לתור שלך מיד. אפשר למסור אותו מיד או לתת לו לחכות לבוקר.','The chapter lands in your queue immediately. Deliver it right away or let it wait until morning.')}</p>{cliffhanger&&<p className="small dim">{t('המכתב למחר','The letter for tomorrow')}: {t(cliffhanger.he,cliffhanger.en)}</p>}</section>}
     {wife&&paceAndEnd}
     {!wife&&statsPanel}
     {nudgeDue&&!held&&<section className="panel"><p>{t('עבר זמן מאז שהייתם כאן יחד. אפשר לחזור בצעד קטן: הודעה אחת או צ׳ק־אין קצר.','It has been a while since you were together here. You can ease back in with one small step: a message or a short check-in.')}</p><Button onClick={dismissNudge}>{t('לא עכשיו','Not now')}</Button></section>}

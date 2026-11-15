@@ -301,7 +301,7 @@ footer { padding-bottom: max(45px, calc(24px + env(safe-area-inset-bottom))); }
 }
 
 @media (max-width: 600px) {
-  header { padding-top: max(18px, calc(10px + env(safe-area-inset-top))); }
+  header { padding-top: max(24px, calc(12px + env(safe-area-inset-top))); }
   main {
     padding-left: max(16px, env(safe-area-inset-left));
     padding-right: max(16px, env(safe-area-inset-right));
@@ -357,4 +357,15 @@ footer { padding-bottom: max(45px, calc(24px + env(safe-area-inset-bottom))); }
 /* Installed app: iOS uses a translucent status bar, so the island inset applies. */
 @media (display-mode: standalone) {
   header { padding-top: max(26px, calc(14px + env(safe-area-inset-top))); }
+}
+
+/* Devotion and Chamberlain panels */
+.adoration-actions, .chamberlain-controls { display: flex; flex-wrap: wrap; gap: 8px; }
+.adoration-actions { margin-top: 12px; }
+.chamberlain-controls { margin: 12px 0 4px; }
+.adoration-words { margin: 14px 0 4px; font-size: 1.05rem; line-height: 1.8; }
+.adoration-words p { margin: 0 0 6px; }
+.dim { color: var(--muted); }
+@media (max-width: 600px) {
+  .adoration-actions button, .chamberlain-controls button { flex: 1 1 auto; min-width: 118px; }
 }

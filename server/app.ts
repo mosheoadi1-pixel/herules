@@ -23,11 +23,11 @@ const eveningSchema=z.object({name:z.string().trim().min(1).max(80),mood:z.enum(
 const paceSchema=z.object({commandsPerEvening:z.union([z.literal(1),z.literal(2),z.literal(3)])});
 const fail = (status: number, message: string): never => { throw Object.assign(new Error(message), { status }); };
 export type User = { id: string; email: string|null; nickname: string|null; role: 'wife'|'husband'; pair_id: string|null };
-export type Mission = { id: string; revision: number; title: string; text: string; points: number; secret: boolean; chapter?: boolean; surprise?:boolean; category?:string; revealedAt?:number; completionStyle?: 'simple'|'written'; status: string; scheduledAt?: number; completion?: string; submissionVersion?: number; deliveredAt?: number; acknowledgedAt?: number; adjustment?: {reason:'softer'|'adjust';note?:string;at:number}; replaces?: string; replacementId?: string; approvedAt?: number; rating?: 'love'|'like'|'skip'; ratedAt?: number; createdAt?: number };
+export type Mission = { id: string; revision: number; title: string; text: string; titleEn?: string; textEn?: string; points: number; secret: boolean; chapter?: boolean; surprise?:boolean; category?:string; revealedAt?:number; completionStyle?: 'simple'|'written'; status: string; scheduledAt?: number; completion?: string; submissionVersion?: number; deliveredAt?: number; acknowledgedAt?: number; adjustment?: {reason:'softer'|'adjust';note?:string;at:number}; replaces?: string; replacementId?: string; approvedAt?: number; rating?: 'love'|'like'|'skip'; ratedAt?: number; createdAt?: number };
 export type Reward = {id:string; title:string; description:string; cost:number};
 export type RewardRequest = Reward & {rewardId:string; status:'pending'|'approved'|'declined'};
 export type Proposal = { id: string; by: string; title: string; text: string; points: number; category?: string; at: number; status: 'pending'|'adopted'|'declined'; missionId?: string };
-export type Session = { id: string; status: string; terms: string; revision: number; revisions: { revision: number; terms: string }[]; approvals: string[]; pauses: string[]; remaining: number; last: number; started: boolean; points: number; missions: Mission[]; rewards?: Reward[]; rewardRequests?: RewardRequest[]; sequence?: string[]; autoProgress?:boolean; persona?:'strict'|'playful'|'caring'; followups?:string[]; checkIns?: Record<string,CheckIn>; reflections?: Record<string,Reflection>; messages: {id:string; by:string; text:string; at:number}[]; history: { at:number; event:string; by:string; rewardRequestId?:string; outcome?:'approved'|'declined' }[]; inbox: {id:string; at:number; event:string; readBy:string[]}[]; herPoints?: number; proposals?: Proposal[]; herWishes?: {id:string;title:string;cost:number;createdAt?:number}[]; commands?: {id:string;title:string;text:string;points:number}[]; notes?: {id:string;text:string;at:number}[]; nights?: {id:string;mood:'soft'|'playful'|'strict';at:number;missionIds:string[]}[]; moodCounts?: Record<'soft'|'playful'|'strict',number>; lastCareAt?: number; pace?: 1|2|3; eveningClosedAt?: number; savedEvenings?: {id:string;name:string;mood:'soft'|'playful'|'strict';steps:{he:string;en:string;points:number;minutesFromNow:number}[];createdAt:number}[]; chapterState?: { decree?: { mood: string; season?: string }; at?: number; cliffhanger?: { he: string; en: string } }; adoration?: { sippedFor?: string; grantedFor?: string; grantedAt?: number; sealedAt?: number } };
+export type Session = { id: string; status: string; terms: string; revision: number; revisions: { revision: number; terms: string }[]; approvals: string[]; pauses: string[]; remaining: number; last: number; started: boolean; points: number; missions: Mission[]; rewards?: Reward[]; rewardRequests?: RewardRequest[]; sequence?: string[]; autoProgress?:boolean; persona?:'strict'|'playful'|'caring'; followups?:string[]; checkIns?: Record<string,CheckIn>; reflections?: Record<string,Reflection>; messages: {id:string; by:string; text:string; at:number}[]; history: { at:number; event:string; by:string; rewardRequestId?:string; outcome?:'approved'|'declined' }[]; inbox: {id:string; at:number; event:string; readBy:string[]}[]; herPoints?: number; proposals?: Proposal[]; herWishes?: {id:string;title:string;cost:number;createdAt?:number}[]; commands?: {id:string;title:string;text:string;points:number}[]; notes?: {id:string;text:string;at:number}[]; nights?: {id:string;mood:'soft'|'playful'|'strict';at:number;missionIds:string[]}[]; moodCounts?: Record<'soft'|'playful'|'strict',number>; lastCareAt?: number; pace?: 1|2|3; eveningClosedAt?: number; savedEvenings?: {id:string;name:string;mood:'soft'|'playful'|'strict';steps:{he:string;en:string;points:number;minutesFromNow:number}[];createdAt:number}[]; chapterState?: { decree?: { mood: string; season?: string }; at?: number; cliffhanger?: { he: string; en: string } }; adoration?: { sippedFor?: string; grantedFor?: string; grantedAt?: number; sealedAt?: number; waiting?: number; ready?: number; last?: { id: string; kind: string; text: string; media?: string | null; at: number } } };
 const suspended = (s: Session) => s.approvals.length !== 2 || s.pauses.length > 0;
 const terminal = (s: Session) => ['stopped','expired'].includes(s.status);
 function notice(s: Session, event: string, by: string, reward?:{rewardRequestId?:string;outcome?:'approved'|'declined';missionId?:string}) {
@@ -48,7 +48,7 @@ function visible(s: Session, user: User) {
   const hidden=new Set(s.missions.filter(m=>m.surprise&&!m.revealedAt).map(m=>m.id));
   const missions=s.missions.filter(m => (!(m.secret||m.surprise) || !!m.deliveredAt)).map(m=>{if(hidden.has(m.id))return {id:m.id,revision:m.revision,status:m.status,surprise:true,category:m.category,deliveredAt:m.deliveredAt};if(m.replacementId&&hidden.has(m.replacementId)){const {replacementId,...rest}=m;return rest;}return m;});
   const allowed=(n:any)=>!n.missionId||!hidden.has(n.missionId);
-  return { ...s, commands:undefined, notes:undefined, savedEvenings:undefined, missions, history:s.history.filter(allowed),inbox:s.inbox.filter(allowed), ...(s.sequence?{sequence:s.sequence.filter(id=>missions.some(m=>m.id===id))}:{}) };
+  return { ...s, commands:undefined, notes:undefined, savedEvenings:undefined, chapterState:undefined, adoration:undefined, missions, history:s.history.filter(allowed),inbox:s.inbox.filter(allowed), ...(s.sequence?{sequence:s.sequence.filter(id=>missions.some(m=>m.id===id))}:{}) };
 }
 function runNight(s: Session, mood: 'soft'|'playful'|'strict', lang: 'he'|'en', steps: z.infer<typeof nightStep>[]) {
   if(eveningClosed(s))fail(409,'Evening is closed');
@@ -168,7 +168,20 @@ export async function createApp(pool: Pool, origin: string) {
   async function save(c:PoolClient,s:Session) {await c.query('UPDATE sessions SET status=$2,data=$3 WHERE id=$1',[s.id,s.status,JSON.stringify(s)]);}
   app.get('/api/state',async(req,res)=>{
     const u=await auth(req);
-    const sessions=await transaction(async c=>{const ids=(await c.query('SELECT id FROM sessions WHERE pair_id=$1 ORDER BY id',[u.pair_id])).rows; const values=[]; for(const {id} of ids){const s=await locked(c,id,u);await save(c,s);values.push(visible(s,u));}return values;});
+    const sessions=await transaction(async c=>{
+      const ids=(await c.query('SELECT id FROM sessions WHERE pair_id=$1 ORDER BY id',[u.pair_id])).rows;
+      // Her adoration queue: waiting = not revealed yet, ready = revealed but not sipped.
+      const counts=new Map<string,{waiting:number;ready:number}>();
+      if(u.role==='wife')for(const row of (await c.query("SELECT session_id::text AS id,count(*) FILTER (WHERE delivered_at IS NULL)::int AS waiting,count(*) FILTER (WHERE delivered_at IS NOT NULL AND rated=false)::int AS ready FROM tributes WHERE receiver_id=$1 GROUP BY session_id",[u.id])).rows)counts.set(row.id,{waiting:row.waiting,ready:row.ready});
+      const values=[];
+      for(const {id} of ids){
+        const s=await locked(c,id,u);await save(c,s);
+        const view:any=visible(s,u);
+        if(u.role==='wife'){const queue=counts.get(id)??{waiting:0,ready:0};view.adoration={...(view.adoration??{}),waiting:queue.waiting,ready:queue.ready};}
+        values.push(view);
+      }
+      return values;
+    });
     res.json({user:u,sessions,serverNow:Date.now()});
   });
   app.get('/api/sessions/:id',async(req,res)=>{const u=await auth(req); const session=await transaction(async c=>{const s=await locked(c,req.params.id as string,u);await save(c,s);return visible(s,u);});res.json({session,serverNow:Date.now()});});
@@ -190,11 +203,12 @@ export async function createApp(pool: Pool, origin: string) {
         }
         return {ok:true};
       }
-      const keyedRequest=['complete','review','adjust','replace','reward','reward-request','reward-decision','quick','her-night','evening-close','evening-run'].includes(op);
+      const keyedRequest=['complete','review','adjust','replace','reward','reward-request','reward-decision','quick','her-night','evening-close','evening-run','sip','grant','seal','tribute-reveal','chamberlain-decree','chamberlain-compose'].includes(op);
       let requestKey:string|undefined;
       if(keyedRequest){
-        if(u.role!==(['review','replace','reward','reward-decision','quick','her-night','evening-close','evening-run'].includes(op)?'wife':'husband'))fail(403,'Wrong role for action');
-        requestKey=uuid.parse(b.key);
+        if(u.role!==(['review','replace','reward','reward-decision','quick','her-night','evening-close','evening-run','sip','grant','seal','tribute-reveal','chamberlain-decree','chamberlain-compose'].includes(op)?'wife':'husband'))fail(403,'Wrong role for action');
+        // Newer clients always send a key; an older cached bundle still works, just without replay.
+        requestKey=uuid.parse(b.key??randomUUID());
         const previous=await c.query('SELECT result FROM request_keys WHERE session_id=$1 AND user_id=$2 AND kind=$3 AND key=$4',[s.id,u.id,op,requestKey]);
         // A committed retry is a read of the original result, even after return, pause or stop.
         if(previous.rowCount){await save(c,s);return previous.rows[0].result;}
@@ -263,7 +277,7 @@ export async function createApp(pool: Pool, origin: string) {
       else if(op==='note-delete'){wife();const id=uuid.parse(b.note);s.notes=(s.notes??[]).filter(n=>n.id!==id);}
       else if(op==='pace'){wife();const data=paceSchema.parse(b);s.pace=data.commandsPerEvening;response={pace:s.pace};}
       else if(op==='evening-close'){
-        wife();let closed=0;for(const m of s.missions)if(m.status==='queued'){m.status='cancelled';closed++;}
+        wife();let closed=0;for(const m of s.missions)if(m.status==='queued'&&!m.chapter){m.status='cancelled';closed++;}
         s.eveningClosedAt=Date.now();response={closed};
       }
       else if(op==='evening-save'){
@@ -274,8 +288,10 @@ export async function createApp(pool: Pool, origin: string) {
       else if(op==='tribute-queue'){
         if(u.role!=='husband')fail(403,'Husband role required');
         const key=z.string().uuid().parse(b.key);
+        // A committed retry returns the original tribute even if the session changed state since.
         const previous=await c.query('SELECT result FROM request_keys WHERE session_id=$1 AND user_id=$2 AND kind=$3 AND key=$4',[s.id,u.id,'tribute',key]);
-        if(previous.rowCount)return previous.rows[0].result;
+        if(previous.rowCount){await save(c,s);return previous.rows[0].result;}
+        gameplay();
         const data=z.object({kind:z.enum(['note','voice','photo','service','greeting']),text,media:z.string().trim().max(4000).optional()}).parse(b);
         if(!u.pair_id)fail(404,'Pair not found');
         const pair=await c.query('SELECT wife FROM pairs WHERE id=$1',[u.pair_id]);
@@ -287,38 +303,48 @@ export async function createApp(pool: Pool, origin: string) {
       }
       else if(op==='tribute-reveal'){
         if(u.role!=='wife')fail(403,'Wife role required');
+        gameplay();
         // One devotion is due her: reveal a specific one, or the oldest still waiting.
+        // Tributes belong to the session that received them; never leak an older arc into this one.
         const delivered = b.tributeId===undefined
-          ? await c.query('UPDATE tributes SET delivered_at=now() WHERE id=(SELECT id FROM tributes WHERE receiver_id=$1 AND delivered_at IS NULL ORDER BY created_at ASC LIMIT 1) AND receiver_id=$1 AND delivered_at IS NULL RETURNING *',[u.id])
-          : await c.query('UPDATE tributes SET delivered_at=now() WHERE id=$1 AND receiver_id=$2 AND delivered_at IS NULL RETURNING *',[z.string().uuid().parse(b.tributeId),u.id]);
+          ? await c.query('UPDATE tributes SET delivered_at=now() WHERE id=(SELECT id FROM tributes WHERE receiver_id=$1 AND session_id=$2 AND delivered_at IS NULL ORDER BY created_at ASC LIMIT 1) AND receiver_id=$1 AND session_id=$2 AND delivered_at IS NULL RETURNING *',[u.id,s.id])
+          : await c.query('UPDATE tributes SET delivered_at=now() WHERE id=$1 AND receiver_id=$2 AND session_id=$3 AND delivered_at IS NULL RETURNING *',[z.string().uuid().parse(b.tributeId),u.id,s.id]);
         if(delivered.rowCount===0)fail(404,'No devotion is waiting for you');
-        response={ok:true,tribute:delivered.rows[0]};
+        const tribute=delivered.rows[0];
+        // Keep the words in her state so the panel can actually show what he wrote.
+        s.adoration={...(s.adoration??{}),last:{id:tribute.id,kind:tribute.kind,text:tribute.text,media:tribute.media??null,at:Date.now()}};
+        response={ok:true,tribute};
       }
       else if(op==='sip'){
         if(u.role!=='wife')fail(403,'Wife role required');
-        const latest=await c.query('SELECT id FROM tributes WHERE receiver_id=$1 AND delivered_at IS NOT NULL AND rated=false ORDER BY delivered_at DESC LIMIT 1',[u.id]);
+        gameplay();
+        // Claim the tribute in the same statement so a double tap cannot sip twice.
+        const latest=await c.query('UPDATE tributes SET rated=true WHERE id=(SELECT id FROM tributes WHERE receiver_id=$1 AND session_id=$2 AND delivered_at IS NOT NULL AND rated=false ORDER BY delivered_at DESC LIMIT 1) AND rated=false RETURNING id',[u.id,s.id]);
         if(latest.rowCount===0)fail(404,'No adoration to sip yet');
-        await c.query('UPDATE tributes SET rated=true WHERE id=$1',[latest.rows[0].id]);
         s.adoration={...(s.adoration??{}),sippedFor:latest.rows[0].id};
         s.herPoints=(s.herPoints??0)+2;
         response={ok:true,glow:s.herPoints};
       }
       else if(op==='grant'){
         if(u.role!=='wife')fail(403,'Wife role required');
-        const latest=await c.query('SELECT id FROM tributes WHERE receiver_id=$1 AND delivered_at IS NOT NULL AND rated=true ORDER BY delivered_at DESC LIMIT 1',[u.id]);
-        if(latest.rowCount===0)fail(404,'Sip a devotion before granting the earned moment');
-        if(s.adoration?.grantedFor===latest.rows[0].id)fail(409,'This earned moment was already granted');
-        s.adoration={...(s.adoration??{}),grantedFor:latest.rows[0].id,grantedAt:Date.now()};
+        gameplay();
+        // The earned moment belongs to the sip she just took, not to a re-queried newest row.
+        const sipped=s.adoration?.sippedFor;
+        if(!sipped)fail(404,'Sip a devotion before granting the earned moment');
+        if(s.adoration?.grantedFor===sipped)fail(409,'This earned moment was already granted');
+        s.adoration={...(s.adoration??{}),grantedFor:sipped,grantedAt:Date.now()};
         s.herPoints=(s.herPoints??0)+3;
         response={ok:true,glow:s.herPoints};
       }
       else if(op==='seal'){
         if(u.role!=='wife')fail(403,'Wife role required');
+        gameplay();
         s.adoration={...(s.adoration??{}),sealedAt:Date.now()};
         response={ok:true};
       }
       else if(op==='chamberlain-decree'){
         if(u.role!=='wife')fail(403,'Wife role required');
+        gameplay();
         const decree=z.object({mood:z.enum(['worship','tease','discipline','service','rest']),season:z.string().trim().max(80).optional()}).parse(b);
         const composition=chamberlainCompose(decree,s);
         const composed=chamberlainPersistComposition(s,composition);
@@ -328,6 +354,7 @@ export async function createApp(pool: Pool, origin: string) {
       }
       else if(op==='chamberlain-compose'){
         if(u.role!=='wife')fail(403,'Wife role required');
+        gameplay();
         const decree=s.chapterState?.decree;
         // Return the rejection so TypeScript keeps the decree narrowed below.
         if(!decree)return fail(404,'No decree found for this session');
