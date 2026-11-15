@@ -14,7 +14,7 @@ type NightCardProps = {
   eveningName: string; setEveningName: Dispatch<SetStateAction<string>>; savedFull: boolean; saveEvening: () => void;
   savedList: SavedEvening[]; sendBlock: string | null; cap: number; usedNow: number; limitMessage: string;
   askRun: (evening: SavedEvening) => void; run: Run; action: Action;
-  favourite: Mood | undefined; nextScheduled: Mission | undefined; lastNight: Night | undefined;
+  favourite: Mood | null; nextScheduled: Mission | undefined; lastNight: Night | undefined;
   nightApproved: number; nightMissions: Mission[];
 };
 

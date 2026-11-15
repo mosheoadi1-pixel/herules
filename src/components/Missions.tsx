@@ -9,13 +9,13 @@ type MissionsTabProps = {
   t: Translate; label: (key: string) => string; date: (at: number) => string; run: Run; action: Action;
   editing: string; setEditing: Dispatch<SetStateAction<string>>;
   draft: Draft; setDraft: Dispatch<SetStateAction<Draft>>;
-  composerOpen: boolean; setComposerOpen: Dispatch<SetStateAction<boolean>>;
+  composerOpen: boolean; setComposerOpen: Dispatch<SetStateAction<boolean>>; setTab: (tab: string) => void;
   sequence: string[]; setSequence: Dispatch<SetStateAction<string[]>>;
   autoProgress: boolean; setAutoProgress: Dispatch<SetStateAction<boolean>>;
   drawnFollowup: string; setDrawnFollowup: Dispatch<SetStateAction<string>>;
 };
 
-export function MissionsTab({ s, u, wife, play, current, lang, t, label, date, run, action, editing, setEditing, draft, setDraft, composerOpen, setComposerOpen, sequence, setSequence, autoProgress, setAutoProgress, drawnFollowup, setDrawnFollowup }: MissionsTabProps) {
+export function MissionsTab({ s, u, wife, play, current, lang, t, label, date, run, action, editing, setEditing, draft, setDraft, composerOpen, setComposerOpen, setTab, sequence, setSequence, autoProgress, setAutoProgress, drawnFollowup, setDrawnFollowup }: MissionsTabProps) {
  const missionForm=(m:Mission)=><form onSubmit={e=>{const b=form(e);void run(()=>action('complete',{mission:m.id,text:b.completion,expectedVersion:m.submissionVersion??0}));}}>{m.completionStyle!=='simple'&&<label>{t('דיווח ביצוע כתוב','Written completion')}<textarea name="completion" required maxLength={4000} defaultValue={m.completion||''}/></label>}<Button disabled={!play}>{m.completionStyle==='simple'?t('סיימתי','Done'):t('שליחת ביצוע','Submit completion')}</Button></form>;
  const stylePicker=(value:string,onChange?:(value:string)=>void)=><label>{t('אופן סיום','Completion style')}<select name="completionStyle" {...(onChange?{value,onChange:(e:React.ChangeEvent<HTMLSelectElement>)=>onChange(e.target.value)}:{defaultValue:value})}><option value="simple">{t('פשוט — סיימתי, ואז בדיקה','Simple — Done, then review')}</option><option value="written">{t('דיווח כתוב ובדיקה','Written report and review')}</option></select></label>;
   return <><div className="section-title"><h2>{t('ההזמנות שלכם','Your invitations')}</h2><p>{t('קבלה מפורשת לפני ביצוע. אין הסכמה משתיקה או מניתוק.','Explicit acknowledgement before completion. Silence or disconnect never means consent.')}</p></div>
