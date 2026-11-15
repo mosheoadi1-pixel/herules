@@ -260,3 +260,101 @@ main.hc :focus-visible { outline: 4px solid #ffe6b3; outline-offset: 3px; }
   main.has-quick-bar { padding-bottom: 200px; }
   .sheet { position: fixed; inset: auto 0 0 0; margin: 0 auto; width: 100%; max-width: none; max-height: 80vh; border-radius: 20px 20px 0 0; }
 }
+
+/* ------------------------------------------------------------------
+   Phones — tuned for iPhone 17 (402 × 874 pt, Dynamic Island, 120 Hz)
+   and Samsung Galaxy S26 (≈360–412 dp, punch-hole, edge-to-edge).
+   Everything here is additive: the desktop layout is unchanged.
+   ------------------------------------------------------------------ */
+
+html {
+  -webkit-text-size-adjust: 100%;
+  text-size-adjust: 100%;
+  scroll-padding-top: env(safe-area-inset-top);
+  scroll-padding-bottom: calc(120px + env(safe-area-inset-bottom));
+}
+body {
+  min-height: 100vh;
+  min-height: 100dvh;
+  overscroll-behavior-y: contain;
+}
+button, a, input, select, textarea, summary, [role="button"] { touch-action: manipulation; }
+
+/* Keep the shell clear of the island, punch-hole, gesture bar and curved edges. */
+header {
+  padding-top: max(26px, calc(12px + env(safe-area-inset-top)));
+  padding-left: max(clamp(16px, 4vw, 40px), env(safe-area-inset-left));
+  padding-right: max(clamp(16px, 4vw, 40px), env(safe-area-inset-right));
+}
+main {
+  padding-left: max(24px, env(safe-area-inset-left));
+  padding-right: max(24px, env(safe-area-inset-right));
+}
+footer { padding-bottom: max(45px, calc(24px + env(safe-area-inset-bottom))); }
+
+/* Overlays: dynamic viewport height so browser chrome never clips them. */
+.roulette-dialog { max-height: 85vh; max-height: 85dvh; }
+.sheet {
+  max-height: 85vh;
+  max-height: 85dvh;
+  padding-bottom: max(clamp(20px, 4vw, 30px), calc(14px + env(safe-area-inset-bottom)));
+}
+
+@media (max-width: 600px) {
+  header { padding-top: max(18px, calc(10px + env(safe-area-inset-top))); }
+  main {
+    padding-left: max(16px, env(safe-area-inset-left));
+    padding-right: max(16px, env(safe-area-inset-right));
+  }
+
+  /* 16px form text stops iOS Safari from zooming the page on focus. */
+  input, select, textarea { font-size: 16px; }
+
+  /* Full-width command bar, inset for curved screens and the home indicator. */
+  .quick-bar {
+    padding-left: max(12px, env(safe-area-inset-left));
+    padding-right: max(12px, env(safe-area-inset-right));
+    padding-bottom: max(10px, env(safe-area-inset-bottom));
+  }
+  main.has-quick-bar { padding-bottom: calc(200px + env(safe-area-inset-bottom)); }
+
+  /* Bottom sheet clears the gesture bar. */
+  .sheet {
+    max-height: 80vh;
+    max-height: 80dvh;
+    padding-bottom: max(20px, calc(12px + env(safe-area-inset-bottom)));
+  }
+
+  /* Tab strip: momentum scrolling, snapping, no visible scrollbar. */
+  nav {
+    -webkit-overflow-scrolling: touch;
+    overscroll-behavior-x: contain;
+    scrollbar-width: none;
+    scroll-snap-type: x proximity;
+  }
+  nav::-webkit-scrollbar { display: none; }
+  nav button { scroll-snap-align: center; }
+}
+
+/* Fingers, not cursors: 44pt on iOS, 48dp on Android. */
+@media (pointer: coarse) {
+  button, summary, select { min-height: 48px; }
+  input:not([type="checkbox"]):not([type="radio"]) { min-height: 48px; }
+  nav button { min-height: 48px; padding-inline: 18px; }
+  .mood-tile { min-height: 96px; }
+}
+
+/* Landscape phones (874 × 402, 412 × ~390): give the content its height back. */
+@media (max-height: 480px) and (orientation: landscape) {
+  header { padding-block: 10px; }
+  .brand span { display: none; }
+  .hero:not(.compact) { min-height: 170px; padding: 20px; }
+  .panel { padding: 16px; }
+  main.has-quick-bar { padding-bottom: calc(120px + env(safe-area-inset-bottom)); }
+  .quick-bar { grid-template-columns: repeat(6, minmax(0, 1fr)); }
+}
+
+/* Installed app: iOS uses a translucent status bar, so the island inset applies. */
+@media (display-mode: standalone) {
+  header { padding-top: max(26px, calc(14px + env(safe-area-inset-top))); }
+}
