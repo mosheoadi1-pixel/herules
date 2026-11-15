@@ -1,4 +1,5 @@
 import type { Mission } from '../server/app';
+import { sparkDay } from './spark';
 
 const DAY=86400000;
 export const WISH_COOLDOWN_MS=DAY;
@@ -27,6 +28,23 @@ export function progressStats(missions:Mission[],now:number){
     graceUsed,
     ackRate:delivered?Math.min(100,Math.round(acknowledged/delivered*100)):null as number|null
   };
+}
+
+export type StreakStats={current:number;longest:number;todayDone:boolean};
+function consecutiveDays(days:Set<string>,nowMs:number):StreakStats{
+  const todayDone=days.has(sparkDay(nowMs));
+  let cursor=todayDone?nowMs:nowMs-DAY,current=0;
+  while(days.has(sparkDay(cursor))){current++;cursor-=DAY;}
+  let longest=0,run=0,previous=NaN;
+  for(const key of [...days].sort()){const at=Date.parse(key);run=at-previous===DAY?run+1:1;longest=Math.max(longest,run);previous=at;}
+  return {current,longest,todayDone};
+}
+type StreakMission=Pick<Mission,'status'|'approvedAt'|'deliveredAt'>;
+export function devotionStreak(missions:StreakMission[],nowMs:number):StreakStats{
+  return consecutiveDays(new Set(missions.filter(m=>m.status==='approved'&&m.approvedAt).map(m=>sparkDay(m.approvedAt!))),nowMs);
+}
+export function missionStreak(missions:StreakMission[],nowMs:number):StreakStats{
+  return consecutiveDays(new Set(missions.filter(m=>m.deliveredAt).map(m=>sparkDay(m.deliveredAt!))),nowMs);
 }
 
 export function careDue(missions:Mission[],lastCareAt=0){
@@ -67,7 +85,32 @@ export function eveningClosed(session:{eveningClosedAt?:number},now=Date.now()){
 }
 
 export function eveningUsed(missions:Mission[],now=Date.now()){
-  return missions.filter(m=>now-(m.createdAt??0)<EVENING_WINDOW_MS&&!['cancelled','refused'].includes(m.status)).length;
+  return missions.filter(m=>now-(m.createdAt??0)<EVENING_WINDOW_MS&&!['cancelled','refused'].includes(m.status)&&!m.season).length;
+}
+
+export type Adoration='loved'|'liked'|'ok';
+export type QueenScore={score:number;breakdown:{loved:number;liked:number;ok:number;total:number}};
+export function queenScore(missions:Pick<Mission,'status'|'adoration'>[]):QueenScore{
+  const breakdown={loved:0,liked:0,ok:0,total:0};
+  for(const m of missions)if(m.status==='approved'&&m.adoration){breakdown[m.adoration]++;breakdown.total++;}
+  return {score:breakdown.loved,breakdown};
+}
+
+export type QueenLevelKey='duchess'|'queen'|'empress';
+export type QueenLevel={level:QueenLevelKey;name:{he:string;en:string};next:number|null;toNext:number|null;progress:number};
+const queenTiers:{level:QueenLevelKey;name:{he:string;en:string};from:number;next:number|null}[]=[
+  {level:'duchess',name:{he:'דוכסית',en:'Duchess'},from:0,next:10},
+  {level:'queen',name:{he:'מלכה',en:'Queen'},from:10,next:25},
+  {level:'empress',name:{he:'קיסרית',en:'Empress'},from:25,next:null},
+];
+export function queenProgress(missions:Pick<Mission,'id'|'status'|'adoration'>[]):number{
+  const unique=[...new Map(missions.map(m=>[m.id,m])).values()];
+  return unique.filter(m=>m.status==='approved').length+queenScore(unique).score;
+}
+export function queenLevel(progress:number):QueenLevel{
+  const value=Math.max(0,progress);
+  const tier=[...queenTiers].reverse().find(t=>value>=t.from)??queenTiers[0];
+  return {level:tier.level,name:tier.name,next:tier.next,toNext:tier.next===null?null:tier.next-value,progress:value};
 }
 
 export function favouriteMood(moodCounts?:Partial<Record<Mood,number>>){

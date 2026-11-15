@@ -16,9 +16,11 @@ const row='challenges,"שלום, עולם","Say ""hello""\nworld",5,2,conversati
 try {
   const app=await createApp(pool,'http://localhost:4192');
   await pool.query("ALTER TABLE imported_ideas DROP CONSTRAINT imported_ideas_category_check, ADD CONSTRAINT imported_ideas_category_check CHECK(category IN ('challenges','timed','rewards','consequences','roleplay','anticipation','random','secret'))");
-  for(const category of ['teasing','cleaning','cooking']) {
+  for(const category of ['teasing','cleaning','cooking','worship','devotion','training','dresscode','public','denial']) {
     assert.equal(await importIdeas(pool,header+row.replace('challenges',category)),1);
   }
+  assert.equal((await pool.query("SELECT count(*) FROM imported_ideas WHERE category='worship'")).rows[0].count,'1');
+  await assert.rejects(importIdeas(pool,header+row.replace('challenges','unknown')));
   assert.equal(await importIdeas(pool,'\uFEFF'+header+row),1);
   assert.equal(await importIdeas(pool,header+row),0);
   const stored=(await pool.query("SELECT * FROM imported_ideas WHERE category='challenges'")).rows;
@@ -37,10 +39,10 @@ try {
   for(const bad of [row.replace('challenges','unknown'),row.replace(',5,2,',',0,2,'),...['0','-1','2.5','4.5','Infinity','invalid'].map(value=>row.replace(',5,2,',`,5,${value},`)),'challenges,"unclosed']) {
     await assert.rejects(importIdeas(pool,header+row.replace('שלום, עולם','רעיון חדש')+'\n'+bad));
   }
-  assert.equal((await pool.query('SELECT count(*) FROM imported_ideas')).rows[0].count,'5');
+  assert.equal((await pool.query('SELECT count(*) FROM imported_ideas')).rows[0].count,'11');
   await assert.rejects(importIdeas(pool,'wrong,header\n'+row));
   await createApp(pool,'http://localhost:4192');
-  assert.equal((await pool.query('SELECT count(*) FROM imported_ideas')).rows[0].count,'5');
+  assert.equal((await pool.query('SELECT count(*) FROM imported_ideas')).rows[0].count,'11');
   server=app.listen(4192);
   assert.equal((await fetch('http://localhost:4192/api/ideas')).status,401);
   const guest=await fetch('http://localhost:4192/api/guest',{method:'POST',headers:{Origin:'http://localhost:4192','Content-Type':'application/json'},body:JSON.stringify({nickname:'Importer test',role:'wife',adult:true})});
