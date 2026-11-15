@@ -8,6 +8,7 @@ import type { Idea } from '../library';
 import { topQuickPresets } from '../prefs';
 import { Button } from './Button';
 import { NightCard } from './NightCard';
+import { SeasonPanel } from './Seasons';
 import { CommandPanel } from './CommandPanel';
 import { ForYou } from './ForYou';
 import { Garden } from './Garden';
@@ -43,10 +44,12 @@ type DashboardTabProps = {
   sayOpen: boolean; setSayOpen: Dispatch<SetStateAction<boolean>>; sayText: string; setSayText: Dispatch<SetStateAction<string>>;
   sayDraft: SayDraft | null; setSayDraft: Dispatch<SetStateAction<SayDraft | null>>; sayReady: boolean;
   deck: DeckItem[]; skipDeck: (id: string) => void; gardenTotal: number; useIdea: (idea: Idea) => void;
+  askSeason: (packId: string) => void;
 };
 
-export function DashboardTab({ s, u, wife, ended, held, play, now, lang, t, date, label, run, action, nudgeDue, dismissNudge, progress, weekly, badges, ratingLabel, moodLabel, favourite, nextScheduled, notes, notesFull, awaitingReview, pendingRewards, recentApproved, needsCare, keysHintSeen, setKeysHintSeen, moodOrder, nightMood, lastMood, chooseMood, sendSteps, nightBlock, askNight, saveOpen, setSaveOpen, eveningName, setEveningName, savedFull, saveEvening, savedList, sendBlock, cap, usedNow, limitMessage, askRun, lastNight, nightApproved, nightMissions, choosePace, finishOnboarding, closedNow, windowHours, reopenHours, askClose, quickBlock, barPresets, askPreset, quickAt, setQuickAt, askQuick, sayOpen, setSayOpen, sayText, setSayText, sayDraft, setSayDraft, sayReady, deck, skipDeck, gardenTotal, useIdea }: DashboardTabProps) {
+export function DashboardTab({ s, u, wife, ended, held, play, now, lang, t, date, label, run, action, nudgeDue, dismissNudge, progress, weekly, badges, ratingLabel, moodLabel, favourite, nextScheduled, notes, notesFull, awaitingReview, pendingRewards, recentApproved, needsCare, keysHintSeen, setKeysHintSeen, moodOrder, nightMood, lastMood, chooseMood, sendSteps, nightBlock, askNight, saveOpen, setSaveOpen, eveningName, setEveningName, savedFull, saveEvening, savedList, sendBlock, cap, usedNow, limitMessage, askRun, lastNight, nightApproved, nightMissions, choosePace, finishOnboarding, closedNow, windowHours, reopenHours, askClose, quickBlock, barPresets, askPreset, quickAt, setQuickAt, askQuick, sayOpen, setSayOpen, sayText, setSayText, sayDraft, setSayDraft, sayReady, deck, skipDeck, gardenTotal, useIdea, askSeason }: DashboardTabProps) {
   const StatsBox=wife?'details':'section';
+  const [digestOpen,setDigestOpen]=useState(false);
    const statsPanel=<StatsBox className="panel stats" aria-label={t('התקדמות המשחק','Game progress')}>{wife?<summary><h2>{t('איך המשחק מתקדם','How the game is going')}</h2></summary>:<h2>{t('איך המשחק מתקדם','How the game is going')}</h2>}
       <div className="stat-grid">
         <div><strong>{progress.thisWeek}</strong><span>{progress.thisWeek===1?t('משימה שאושרה השבוע','Task approved this week'):t('משימות שאושרו השבוע','Tasks approved this week')}</span></div>
@@ -54,10 +57,22 @@ export function DashboardTab({ s, u, wife, ended, held, play, now, lang, t, date
         <div><strong>{progress.total}</strong><span>{progress.total===1?t('משימה שאושרה בסך הכול','Task approved in total'):t('משימות שאושרו בסך הכול','Tasks approved in total')}</span></div>
         <div><strong>{progress.ackRate===null?'—':`${progress.ackRate}%`}</strong><span>{t('הזמנות שאושרו בקבלה מפורשת','Invitations explicitly acknowledged')}</span></div>
       </div>
+      {s.streaks&&<div className="streak-grid">{([['streak-devotion',s.streaks.devotion],['streak-mission',s.streaks.mission]] as const).map(([key,streak])=><div key={key}><h3>{label(key)}</h3><p><strong>{streak.current}</strong> <span>{label('streak-days')}</span> · <span>{label('streak-best')} {streak.longest}</span></p><p className="small">{label(streak.todayDone?'streak-today-done':'streak-today-open')}</p></div>)}</div>}
+      {s.streaks&&<p className="small">{label('streak-hint')}</p>}
       <p className="small">{t('השבוע','This week')}: {weekly.herPointsThisWeek} {t('נקודות שלה','her points')}{weekly.topRating&&<> · {t('דירוג מוביל','Top rating')}: {ratingLabel(weekly.topRating)}</>}</p>
       {progress.graceUsed&&<p className="small">{t('יום חסד נוצל כדי לשמור על הרצף','A grace day kept your streak')}</p>}
       <div className="row" aria-label={t('אבני דרך','Milestones')}>{badges.map(b=><span key={b.at} className="badge">{b.at} {t('משימות','tasks')} · {b.reached?t('הושג','Reached'):t(`עוד ${b.at-progress.total}`,`${b.at-progress.total} to go`)}</span>)}</div>
     </StatsBox>;
+   const level=s.queenLevel;
+   const levelBlock=level&&<div className="queen-level"><p><strong>{t(level.name.he,level.name.en)}</strong> <span className="small">{label('queen-level')}</span></p>
+      {level.next===null?<p className="small">{label('queen-highest')}</p>:<>
+        <progress className="points-bar" max={level.next} value={level.progress} aria-label={label('queen-next')}/>
+        <p className="small">{t(`עוד ${level.toNext} נקודות לרמה הבאה`,`${level.toNext} more points to the next level`)}</p>
+      </>}
+      <p className="small">{label('queen-cosmetic')}</p></div>;
+   const queenPanel=level&&<section className="panel queen" aria-label={t('רמת מלכה','Queen level')}><h2>{t('רמת מלכה','Queen level')}</h2>
+      {levelBlock}
+       <p className="small">{t('הרמה עולה עם משימות שאושרו בלבד. היא אינה נקודות.','The level rises only with approved tasks. It is not points.')}</p></section>;
    const paceAndEnd=<>
      <section className="panel pace"><h2>{t('קצב הערב','Evening pace')}</h2>
        <p>{t('כמה פקודות מהירות אפשר לשלוח בערב אחד.','How many quick commands can be sent in one evening.')}</p>
@@ -81,6 +96,31 @@ export function DashboardTab({ s, u, wife, ended, held, play, now, lang, t, date
      <Button className="quiet" onClick={()=>finishOnboarding(3)}>{t('דילוג','Skip')}</Button>
    </section>;
    const quickBar=<div className="quick-bar" role="group" aria-label={t('פקודות מהירות לשליחה','Quick commands to send')}>{quickBlock&&<p role="status">{quickBlock}</p>}{barPresets.map(p=><button key={p.id} disabled={!!quickBlock} onClick={()=>askPreset(p)}>{lang==='he'?p.he:p.en}</button>)}</div>;
+   const digest=s.digest, sundayNow=new Date(now).getDay()===0;
+   const digestPanel=digest&&<section className={`panel digest${sundayNow?' digest-sunday':''}`} aria-labelledby="digest-heading">
+      <h2 id="digest-heading">{label('digest-title')}</h2>
+      {sundayNow&&<p className="digest-sunday-line" aria-live="polite">{label('digest-sunday')}</p>}
+      <Button className="quiet" aria-expanded={digestOpen} aria-controls="digest-body" onClick={()=>setDigestOpen(open=>!open)}>{label(digestOpen?'digest-hide':'digest-show')}</Button>
+      <div id="digest-body" hidden={!digestOpen}>
+        <p className="small">{label('digest-period')}: {digest.period.fromDay} – {digest.period.toDay}</p>
+        {digest.empty?<p className="empty">{label('digest-empty')}</p>:<>
+          <ul className="digest-list">
+            <li>{label('digest-approved')}: <strong>{digest.approved}</strong></li>
+            <li>{label('digest-husband-earned')}: <strong>{digest.pointsEarnedHusband}</strong></li>
+            <li>{label('digest-husband-spent')}: <strong>{digest.pointsSpentHusband}</strong></li>
+            <li>{label('digest-her-earned')}: <strong>{digest.pointsHerEarned}</strong></li>
+            <li>{label('digest-her-spent')}: <strong>{digest.pointsHerSpent}</strong></li>
+          </ul>
+          <h3>{label('digest-streaks')}</h3>
+          <ul className="digest-list">{([['streak-devotion',digest.streaks.devotion],['streak-mission',digest.streaks.mission]] as const).map(([key,streak])=><li key={key}>{label(key)}: <strong>{streak.current}</strong> {label('streak-days')}</li>)}</ul>
+          <h3>{label('digest-tags')}</h3>
+          <p>{digest.topTags.length?digest.topTags.map(tag=>label(tag)).join(' · '):label('digest-none')}</p>
+          {digest.topRated&&<p>{label('digest-top-rated')}: <strong>{digest.topRated.title}</strong></p>}
+        </>}
+        {digest.suggestion&&<p>{label('digest-suggestion')}: <strong>{lang==='he'?digest.suggestion.he:digest.suggestion.en}</strong></p>}
+        <p className="small">{label('digest-note')}</p>
+      </div>
+    </section>;
    const keyHint=keysHintSeen?null:<div className="keys-hint notice"><p>{t('קיצורים: 1–3 לבחירת מצב רוח · N להקלדת משפט · Esc לסגירת חלון.','Shortcuts: 1–3 choose a mood · N to say it · Esc closes a window.')}</p><Button className="quiet" onClick={()=>{save('hr-keys-hint',true);setKeysHintSeen(true);}}>{t('הבנתי','Got it')}</Button></div>;
   const [tributeSent,setTributeSent]=useState(false);
   const cliffhanger=s.chapterState?.cliffhanger;
@@ -139,10 +179,12 @@ export function DashboardTab({ s, u, wife, ended, held, play, now, lang, t, date
       {(s.wishRequests??[]).filter(r=>r.status==='pending').map(r=><article key={r.id}><h3>{r.title}</h3><p>{r.cost} {t('נקודות','points')}</p><div className="row"><Button className="primary" disabled={!play} onClick={()=>void run(()=>action('wish-decision',{request:r.id,approve:true}))}>{t('אישור משאלה','Approve wish')}</Button><Button disabled={!play} onClick={()=>void run(()=>action('wish-decision',{request:r.id,approve:false}))}>{t('דחיית משאלה','Decline wish')}</Button></div></article>)}
     </section>}
     {!wife&&statsPanel}
+    {!wife&&digestPanel}
     {nudgeDue&&!held&&<section className="panel"><p>{t('עבר זמן מאז שהייתם כאן יחד. אפשר לחזור בצעד קטן: הודעה אחת או צ׳ק־אין קצר.','It has been a while since you were together here. You can ease back in with one small step: a message or a short check-in.')}</p><Button onClick={dismissNudge}>{t('לא עכשיו','Not now')}</Button></section>}
     {wife&&<ForYou deck={deck} lang={lang} t={t} play={play} useIdea={useIdea} onSkip={skipDeck}/>}
     <Garden total={gardenTotal} t={t}/>
     {wife&&<NightCard t={t} date={date} label={label} moodLabel={moodLabel} moodOrder={moodOrder} nightMood={nightMood} lastMood={lastMood} chooseMood={chooseMood} sendSteps={sendSteps} play={play} ended={ended} nightBlock={nightBlock} askNight={askNight} saveOpen={saveOpen} setSaveOpen={setSaveOpen} eveningName={eveningName} setEveningName={setEveningName} savedFull={savedFull} saveEvening={saveEvening} savedList={savedList} sendBlock={sendBlock} cap={cap} usedNow={usedNow} limitMessage={limitMessage} askRun={askRun} run={run} action={action} favourite={favourite} nextScheduled={nextScheduled} lastNight={lastNight} nightApproved={nightApproved} nightMissions={nightMissions}/>}
+     {wife&&<SeasonPanel s={s} play={play} ended={ended} t={t} label={label} run={run} action={action} askSeason={askSeason}/>}
     {wife?<>
       <section className="panel"><h2>{t('שולחן הבדיקה שלך','Your review desk')}</h2>
         {!awaitingReview.length&&!pendingRewards.length&&<p className="empty">✓ {t('הכול מסודר. אין פריטים שממתינים לך.','All clear. Nothing is waiting for you.')}</p>}
@@ -157,6 +199,8 @@ export function DashboardTab({ s, u, wife, ended, held, play, now, lang, t, date
         <p className="small">{t('המשאלות מנוהלות בלשונית הפרסים.','Wishes are managed in the Rewards tab.')}</p>
       </section>
     {statsPanel}
+    {wife&&digestPanel}
+    {queenPanel}
     <details className="panel"><summary><h2>{t('הפתקים שלי','My notes')}</h2></summary>
       <p className="small">{t('הפתקים נשמרים רק אצלך ולא מוצגים לבעל.','Notes are kept only for you and are never shown to the husband.')}</p>
       {notesFull?<p className="notice">{t('הרשימה מלאה (50 פתקים). מחקו פתק כדי להוסיף.','The list is full (50 notes). Delete a note to add another.')}</p>:<form onSubmit={e=>{const el=e.currentTarget,b=form(e);if(!String(b.text).trim())return;void run(async()=>{await action('note-save',{text:String(b.text).trim()});el.reset();});}}>
