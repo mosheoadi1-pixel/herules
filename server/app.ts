@@ -382,7 +382,20 @@ export async function createApp(pool: Pool, origin: string) {
       }
       if(op!=='read'&&!op.startsWith('note-')&&!['evening-save','evening-delete','pace'].includes(op))notice(s,op,u.id,op==='reward-request'?{rewardRequestId:response.request.id}:op==='reward-decision'?{rewardRequestId:response.request.id,outcome:response.request.status}:(response.mission?.surprise?{missionId:response.mission.id}:mission?.surprise?{missionId:mission.id}:undefined));
       if(requestKey)await c.query('INSERT INTO request_keys VALUES($1,$2,$3,$4,$5)',[s.id,u.id,op,requestKey,JSON.stringify(response)]);
-      s.last=Date.now();await save(c,s);return response;
+    }
+    else if(op==='tribute-queue'){
+      const u=await auth(req),b=req.body;
+      if(u.role!=='husband')fail(403,'Husband role required');
+      const sid=z.string().uuid().parse(b.sessionId);
+      const sQuery=await c.query('SELECT * FROM sessions WHERE id=$1',[sid]);if(sQuery.rowCount===0)fail(404,'Session not found');
+      const sRow=sQuery.rows[0];const pairQuery=await c.query('SELECT * FROM pairs WHERE id=$1',[sRow.pair_id]);if(pairQuery.rowCount===0)fail(404,'Pair not found');const wifeId=pairQuery.rows[0].wife;
+      const key=z.string().uuid().parse(b.key);const prevQuery=await c.query('SELECT result FROM request_keys WHERE session_id=$1 AND user_id=$2 AND kind=$3 AND key=$4',[b.sessionId,u.id,'tribute',key]);if(prevQuery.rowCount){await save(c,s);return prevQuery.rows[0].result;}const ok=z.object({kind:z.enum('note','voice','photo','service','greeting'),text:z.string().trim().min(1).max(4000),media:z.string().optional()}).parse(b);await c.query('INSERT INTO tributes(session_id,giver_id,receiver_id,kind,text,media,delivered_at,rated) VALUES($1,$2,$3,$4,$5,$6,$7,$8)',$sessionId=b.sessionId,u.id,wifeId,ok.kind,ok.text,ok.media||null,null,false);await c.query('INSERT INTO request_keys VALUES($1,$2,$3,$4,$5)',[b.sessionId,u.id,'tribute',key,JSON.stringify({ok:true})]);return {ok:true,tributeId:randomUUID()};
+    }
+    else if(op==='tribute-reveal'){
+      const u=await auth(req),b=req.body;
+      if(u.role!=='wife')fail(403,'Wife role required');const tid=z.string().uuid().parse(b.tributeId);const tQuery=await c.query('SELECT * FROM tributes WHERE id=$1 AND receiver_id=$2',[tid,u.id]);if(tQuery.rowCount===0)fail(404,'Tribute not found or not for this user');const row=tQuery.rows[0];if(row.delivered_at)fail(409,'Already delivered');await c.query('UPDATE tributes SET delivered_at=now() WHERE id=$1',[tid]);return {ok:true,tribute:row};
+    }
+    s.last=Date.now();await save(c,s);return response;
     });
     if(result.terminal)fail(409,'Session is terminal');
     if(u.pair_id)emit(u.pair_id);res.json(result);
