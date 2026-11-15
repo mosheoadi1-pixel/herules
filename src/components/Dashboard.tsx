@@ -80,6 +80,21 @@ export function DashboardTab({ s, u, wife, ended, held, play, now, lang, t, date
     {wife&&s&&!ended&&s.pace===undefined&&onboardingPanel}
     {wife&&s&&quickBar}
     {wife&&<section className="panel hub" aria-label={t('האדורציה שלה','Her Adoration')}}><p className="eyebrow">{t('האדורציה שלה','Her Adoration')}</p><h2>{t('קבלת ההערצה','Receiving Adoration')}</h2><p>{t('טביעה אחת מגיעה לך. גלה אותה, לוגמי את תחושותיו, הענקי לה, או חתמי את הפרק. / One devotion is due you. Reveal it, sip his longing, grant the earned moment, or seal the chapter.')}</p><div className="adoration-actions" role="group"><Button className="primary" onClick={()=>void run(()=>action('tribute-reveal'))}>{t('פותח/ה','Reveal')}</Button><Button className="secondary" onClick={()=>void run(()=>action('sip'))}>{t('לוגמת','Sip')}</Button><Button className="secondary" onClick={()=>void run(()=>action('grant'))}>{t('מעניקה','Grant')}</Button><Button className="secondary" onClick={()=>void run(()=>action('seal'))}>{t('חותמת','Seal')}</Button></div></section>
+
+    {wife&&<section className="panel chamberlain" aria-label={t('המטבח','The Chamberlin')}><p className="eyebrow">{t('המטבח של הקיסר','The Emperor\'s Chamber')}</h2><h3>{t('תחילת פרק חדש','Start a New Chapter')}</h3><p>{t('בחרי מצב רוח ומארז סיפור. הקיסר ירכיב פרק בן מספר משימות שיגיעו בהדרגה. / Choose a mood and story pack. The Chamberlain will compose a multi-mission arc that unfolds gradually.')}</p><div className="chamberlain-controls" role="group">
+  {/* Mood buttons - decree types */}
+  {[ 'worship', 'tease', 'discipline', 'service', 'rest' ].map(mood=>(
+    <Button key={mood} onClick={()=>void run(()=>action('chamberlain-decree',{mood}))}>
+      {t(mood,'Worship')}
+    </Button>
+  ))}
+  {/* Season pack selector */}
+  {[ 'contract', 'tease', 'rest' ].map(pack=>(
+    <Button key={pack} onClick={()=>void run(()=>action('chamberlain-decree',{mood:'worship',season:pack}))}>
+      {t(pack,'The Contract')}
+    </Button>
+  ))}
+</div><p className="small dim">{t('לאחר האישור, המשימות יתווספו למפגש ויתחילו במסדרון בבוקר.','After approval, missions will be added to the session and begin at morning mode.')}</p></section>}
     {nudgeDue&&!held&&<section className="panel"><p>{t('עבר זמן מאז שהייתם כאן יחד. אפשר לחזור בצעד קטן: הודעה אחת או צ׳ק־אין קצר.','It has been a while since you were together here. You can ease back in with one small step: a message or a short check-in.')}</p><Button onClick={dismissNudge}>{t('לא עכשיו','Not now')}</Button></section>}
     {wife&&<ForYou deck={deck} lang={lang} t={t} play={play} useIdea={useIdea} onSkip={skipDeck}/>}
     <Garden total={gardenTotal} t={t}/>
