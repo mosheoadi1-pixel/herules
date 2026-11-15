@@ -421,7 +421,7 @@ export async function createApp(pool: Pool, origin: string) {
       // Returns mission specs that the dashboard will translate using its t()
       const composition=chamberlainCompose(decree,moodNames,sRow);
       // Persist the composed chapter into the session's missions
-      const result=await chamberlainPersistComposition(sRow.id,composition);
+      const result=await chamberlainPersistComposition(c,sRow.id,composition);
       // Acknowledge completion
       return {ok:true,composition,missionIds:result.missionIds,cliffhanger:result.cliffhanger};
     }
