@@ -574,8 +574,8 @@ try{
   for(const language of ['he','en']){
    const current=await w.locator('html').getAttribute('lang');if(current!==language)await w.getByRole('button',{name:language==='he'?'עברית':'English',exact:true}).click();
    assert.equal(await w.locator('html').getAttribute('dir'),language==='he'?'rtl':'ltr');
-    for(const id of ['missions','rewards','agreement','library','messages','inbox','history']){
-     const index=['missions','rewards','agreement','library','messages','inbox','history'].indexOf(id);await w.getByRole('navigation').getByRole('button').nth(index).click();
+    for(const id of ['missions','rewards','wishes','agreement','library','messages','inbox','history']){
+     const index=['missions','rewards','wishes','agreement','library','messages','inbox','history'].indexOf(id);await w.getByRole('navigation').getByRole('button').nth(index).click();
     assert.ok(await w.evaluate(()=>document.documentElement.scrollWidth<=window.innerWidth),`overflow ${width} ${language} ${id}`);
    }
   }
