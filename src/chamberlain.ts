@@ -155,16 +155,29 @@ function adaptMissionText(
 
 // Persist the composed chapter into the session
 // This is called from the server ops after chamberlainCompose
-export function chamberlainPersistComposition(
+// Merges the new missions into the session's existing missions array
+export async function chamberlainPersistComposition(
+  c: any, // pg PoolClient from the transaction
   sessionId: string,
-  missions: MissionSpec[],
-  server: any // pg Pool client - injected by the server ops
-): { missionIds: string[]; cliffhanger: { he: string; en: string } } {
-  // Generate mission IDs and persist each mission
-  // In production, this would use the existing mission creation pipeline
-  // For now, return structured data
+  missions: MissionSpec[]
+): Promise<{ missionIds: string[]; cliffhanger: { he: string; en: string } }> {
+  // Read current session data
+  const sQuery = await c.query('SELECT data FROM sessions WHERE id=$1', [sessionId]);
+  if (sQuery.rowCount === 0) throw new Error('Session not found');
+  const currentData = sQuery.rows[0].data;
+  const currentMissions = (currentData?.missions as Mission[]) || [];
 
-  const missionIds: string[] = missions.map(() => randomUUID().toString());
+  // Generate mission IDs for the new missions
+  const missionIds: string[] = missions.map(() => randomUUID());
+
+  // Merge new missions with existing ones (new missions come first)
+  const allMissions = [...missions.map(m => ({ id: randomUUID(), ...m }) as Mission), ...currentMissions];
+
+  // Update session data with merged missions
+  await c.query(
+    `UPDATE sessions SET data=$1 WHERE id=$2`,
+    [JSON.stringify({ ...currentData, missions: allMissions }), sessionId]
+  );
 
   // The cliffhanger is a single line she'll receive tomorrow at her adoration hour
   const cliffhanger = {
