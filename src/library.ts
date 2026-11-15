@@ -1,9 +1,9 @@
-export const categories = ['challenges','timed','rewards','consequences','roleplay','anticipation','random','secret','teasing','cleaning','cooking','worship','devotion','training','dresscode','public','denial'] as const;
+export const categories = ['challenges','timed','rewards','consequences','roleplay','anticipation','random','secret','teasing','cleaning','cooking'] as const;
 export type Category = typeof categories[number];
 export type Idea = {id:string;category:Category;he:string;en:string;minutes:number;intensity:number;tags:string[]};
 // Keep retained idea IDs stable so existing favorites never point to different activities.
 const bold: Record<Category, [string,string,number,number,string][]> = {
-teasing:[],cleaning:[],cooking:[],worship:[],devotion:[],training:[],dresscode:[],public:[],denial:[],
+teasing:[],cleaning:[],cooking:[],
 challenges:[
  ['הזמיני אותו למבט ממושך ולמחמאה נועזת','Invite a lingering look and a bold compliment, at a distance you both choose.',3,3,'flirtation'],
  ['בחרי כינוי משחק מוסכם ובקשי ממנו לפתוח בו הזמנה לדייט פרטי.','Choose an agreed scene nickname and ask him to use it in a private date invitation.',5,3,'control'],

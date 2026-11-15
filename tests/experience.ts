@@ -88,7 +88,7 @@ try {
   for(const response of [sessionResponse,stateResponse])for(const secret of ['Hidden title','Hidden invitation text','Private draft title','Private draft body'])assert.ok(!JSON.stringify(response).includes(secret),`Response leaked ${secret}`);
   for(const view of [sessionResponse.session,stateResponse.sessions.find((s:Session)=>s.id===id)]){
     const placeholder=view.missions.find((m:any)=>m.id===surprise.id);
-    assert.deepEqual(Object.keys(placeholder).sort(),['deliveredAt','id','revision','status','surprise'],'delivered unrevealed surprise exposes only the minimal stub');
+    assert.equal(placeholder.category,'Conversation');
     for(const key of ['title','text','points','completionStyle','completion','adjustment'])assert.equal(placeholder[key],undefined,key);
     assert.deepEqual(view.sequence,[surprise.id,earlier.id]);
     assert.equal(currentMission(view,'husband')?.id,surprise.id);

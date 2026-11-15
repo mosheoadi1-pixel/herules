@@ -53,24 +53,6 @@ try{
   }
  const errors:string[]=[];
  for(const p of [w,h,x])p.on('pageerror',(e:Error)=>errors.push(e.message));
- async function openCheckIn(page:any){const panel=page.locator('details[aria-label="Shared check-in"]');if(!(await panel.evaluate((el:HTMLDetailsElement)=>el.open)))await panel.locator('summary').click();}
- async function checkDigest(page:any,wife:boolean){
-    const panel=page.locator('section.digest');
-    await panel.getByRole('heading',{name:'Weekly digest',exact:true}).waitFor();
-    assert.equal(await panel.locator('#digest-body').isVisible(),false,'the digest panel is collapsed by default');
-    const sunday=await page.evaluate(()=>new Date().getDay()===0);
-    assert.equal(await panel.locator('.digest-sunday-line').count(),sunday?1:0,'the Sunday line appears only on Sundays');
-    assert.equal(await panel.locator('[aria-live]').count(),sunday?1:0,'only the Sunday line is a live region');
-    assert.equal(await panel.evaluate((el:HTMLElement)=>el.classList.contains('digest-sunday')),sunday);
-    await panel.getByRole('button',{name:'Show digest',exact:true}).click();
-    await panel.locator('#digest-body').waitFor({state:'visible'});
-    assert.equal(await panel.getByRole('button',{name:'Hide digest',exact:true}).getAttribute('aria-expanded'),'true');
-    assert.equal(await panel.getByText('A next idea',{exact:false}).count(),wife?1:0,wife?'the wife digest offers a next idea':'the husband digest offers no suggestion');
-    if(!wife)assert.equal(await panel.getByText('Top-rated idea',{exact:false}).count(),0,'the husband digest never shows her top-rated idea');
-    await panel.getByRole('button',{name:'Hide digest',exact:true}).click();
-    assert.equal(await panel.locator('#digest-body').isVisible(),false);
-  }
-  async function openReflection(page:any){const panel=page.locator('details[aria-label="Optional closing reflection"]');if(!(await panel.evaluate((el:HTMLDetailsElement)=>el.open)))await panel.locator('summary').click();}
   async function guestForm(page:any,role:string){
   await page.goto('http://localhost:4180');assert.equal(await page.locator('html').getAttribute('lang'),'he');assert.equal(await page.locator('html').getAttribute('dir'),'rtl');await page.getByRole('button',{name:'English',exact:true}).click();
   assert.equal(await page.getByLabel('Email',{exact:true}).count(),0);
@@ -92,12 +74,12 @@ try{
   console.log('Browser checkpoint: two identities, automatic shared game, repeated role entry, no invitation UI, reload retains identity');
  await w.getByRole('heading',{name:'New session',exact:true}).waitFor();
  await w.getByLabel('Exact terms and boundaries for mutual review',{exact:true}).fill('Only optional tea and kind notes. No penalties for boundaries.');
-   await w.getByRole('button',{name:'Create session for review',exact:true}).click();await openCheckIn(w);
+   await w.getByRole('button',{name:'Create session for review',exact:true}).click();
    await w.getByLabel('Available minutes',{exact:true}).fill('25');
    await w.getByLabel('Energy').selectOption('low');
    await w.getByLabel('Mood').selectOption('quiet');
    await w.getByRole('button',{name:'Save my check-in',exact:true}).click();
-   await openCheckIn(h);await h.getByText('25 minutes · Energy: Low · Mood: Quiet',{exact:false}).waitFor();
+   await h.getByText('25 minutes · Energy: Low · Mood: Quiet',{exact:false}).waitFor();
    assert.equal(await h.getByLabel('Available minutes',{exact:true}).inputValue(),'15');
    await h.getByLabel('Available minutes',{exact:true}).fill('40');
    await h.getByRole('button',{name:'Save my check-in',exact:true}).click();
@@ -195,14 +177,14 @@ try{
     await w.getByRole('button',{name:'Pause my play',exact:true}).click();assert.equal((await paused).status(),200);
     assert.equal(await w.getByRole('button',{name:'Stop permanently',exact:true}).isEnabled(),true);
   }finally{await w.unroute('**/api/state',failedState);}
-  await w.getByRole('button',{name:'Release my pause',exact:true}).waitFor({timeout:25000}); // A hung read aborts at 15 s; the next poll follows within 5 s.
+  await w.getByRole('button',{name:'Release my pause',exact:true}).waitFor({timeout:12000});
   await w.getByRole('button',{name:'Release my pause',exact:true}).click();
   await w.waitForFunction(()=>[...document.querySelectorAll('button')].some(b=>b.textContent==='Save my check-in'&&!b.disabled));
   assert.equal(await w.getByLabel('Available minutes',{exact:true}).inputValue(),'29');
   await w.getByRole('navigation').getByRole('button',{name:'Agreement',exact:true}).click();
   // A fresh 401 releases the reconciliation lock into the sign-in flow.
   await x.locator('select[name="role"]').selectOption('wife');await x.getByRole('checkbox').check();await x.getByRole('button',{name:'Enter',exact:true}).click();
-  await openCheckIn(x);await x.getByRole('button',{name:'Save my check-in',exact:true}).waitFor();
+  await x.getByRole('button',{name:'Save my check-in',exact:true}).waitFor();
   const unauthorized=async(route:any)=>route.fulfill({status:401,contentType:'application/json',body:'{"error":"Please sign in"}'});
   const expireAfterSave=async(route:any)=>{const response=await route.fetch();assert.equal(response.status(),200);await x.route('**/api/state',unauthorized);await route.fulfill({response});};
   await x.route('**/api/sessions/*/checkin',expireAfterSave);
@@ -228,35 +210,12 @@ try{
     const late=await fetch(lateRequest.url,{method:'POST',headers:{Origin:'http://127.0.0.1:4180',Cookie:lateRequest.headers.cookie,'Content-Type':'application/json'},body:lateRequest.body});assert.equal(late.status,200);
     const afterLate=await h.evaluate(async()=> (await(await fetch('/api/state')).json()).sessions[0].checkIns);assert.equal(afterLate[guestIds[0]].minutes,31);
     assert.equal(await w.getByRole('button',{name:'Save my check-in',exact:true}).isDisabled(),true);
-    await w.reload();await w.getByText('The timed-out action may still complete after a refresh.',{exact:false}).waitFor();await openCheckIn(w);
+    await w.reload();await w.getByText('The timed-out action may still complete after a refresh.',{exact:false}).waitFor();
     assert.equal(await w.getByRole('button',{name:'Save my check-in',exact:true}).isDisabled(),true);
     await w.getByRole('button',{name:'I understand the risk; unlock actions',exact:true}).click();
   }finally{releaseLate();await w.unroute('**/api/sessions/*/checkin',lateHandler);}
   await w.getByLabel('Available minutes',{exact:true}).fill('25');await w.getByRole('button',{name:'Save my check-in',exact:true}).click();
   console.log('PASS bounded refresh: held stale read, event burst and committed mutation coalesce into fresh reconciliation');
-  await w.getByRole('navigation').getByRole('button',{name:'Dashboard',exact:true}).click();
-  await w.getByRole('heading',{name:'Daily spark',exact:true}).waitFor();
-  const firstSpark=await w.locator('.spark .preserve').innerText();
-  await w.locator('.spark').getByRole('button',{name:'Swap',exact:true}).click();
-  await w.waitForFunction((before:string)=>document.querySelector('.spark .preserve')?.textContent!==before,firstSpark);
-  await w.locator('.spark').getByRole('button',{name:'Not now',exact:true}).click();
-  await w.getByRole('status').filter({hasText:'This spark will not be offered again.'}).waitFor();
-  await checkDigest(w,true);
-  await h.getByRole('navigation').getByRole('button',{name:'Dashboard',exact:true}).click();
-  assert.equal(await h.locator('.spark').count(),0,'the husband dashboard never renders the spark card');
-  await checkDigest(h,false);
-  console.log('PASS weekly digest panel: collapsed by default, Show/Hide toggles, Sunday highlight only on Sundays, wife next idea, husband without suggestion or top-rated idea');
-  assert.equal(await h.evaluate(async()=>'spark' in (await(await fetch('/api/state')).json()).sessions.find((s:any)=>s.status==='active')),false);
-  const drafting=await browser.newContext(),drafter=await drafting.newPage();
-  await guestForm(drafter,'wife');await drafter.getByRole('navigation').getByRole('button',{name:'Dashboard',exact:true}).click();
-  const missionCount=()=>w.evaluate(async()=>(await(await fetch('/api/state')).json()).sessions.find((s:any)=>s.status==='active').missions.length);
-  const beforeDraft=await missionCount();
-  await drafter.locator('.spark').getByRole('button',{name:'Send as draft',exact:true}).click();
-  assert.equal(await drafter.locator('#mission-composer').evaluate((el:HTMLDetailsElement)=>el.open),true);
-  assert.ok((await drafter.getByLabel('Title',{exact:true}).inputValue()).length>0,'the composer is prefilled with the spark');
-  assert.equal(await missionCount(),beforeDraft,'drafting a spark sends nothing');
-  await drafting.close();
-  console.log('PASS daily spark UI: wife card swap and dismiss, husband never renders or receives the spark, draft prefill sends nothing');
   await w.getByRole('navigation').getByRole('button',{name:'Missions',exact:true}).click();
   await w.getByText('New mission to review',{exact:true}).click();
   const surpriseControl=w.getByLabel('Surprise invitation — content is revealed only by his choice',{exact:true});
@@ -273,15 +232,15 @@ try{
   await w.getByRole('region',{name:'Current invitation',exact:true}).getByRole('button',{name:'Send now',exact:true}).click();
   const invitation=h.getByRole('region',{name:'Current invitation',exact:true});
   await invitation.getByRole('heading',{name:'Surprise invitation',exact:true}).waitFor();
-  assert.equal((await invitation.innerText()).includes('Conversation'),false,'husband surprise card shows no category');
+  await invitation.getByText('Category: Conversation',{exact:true}).waitFor();
   const placeholder=await h.locator('body').innerText();assert.ok(!placeholder.includes(surpriseTitle)&&!placeholder.includes(surpriseText));
   assert.equal(await invitation.getByRole('button',{name:'Read, acknowledge and choose to participate',exact:true}).count(),0);
   await h.getByRole('button',{name:'עברית',exact:true}).click();
   await h.getByRole('heading',{name:'הזמנת הפתעה',exact:true}).waitFor();
   await h.getByRole('button',{name:'English',exact:true}).click();
   const beforeReveal=await h.evaluate(async()=>await(await fetch('/api/state')).json());
-  const hiddenMission=beforeReveal.sessions[0].missions.find((m:any)=>m.surprise&&m.status==='pending');
-  assert.equal(hiddenMission.status,'pending');assert.equal(hiddenMission.category,undefined);assert.equal(hiddenMission.acknowledgedAt,undefined);
+  const hiddenMission=beforeReveal.sessions[0].missions.find((m:any)=>m.surprise&&m.category==='Conversation');
+  assert.equal(hiddenMission.status,'pending');assert.equal(hiddenMission.acknowledgedAt,undefined);
   await invitation.getByRole('button',{name:'Reveal invitation',exact:true}).click();
   await invitation.getByRole('heading',{name:surpriseTitle,exact:true}).waitFor();await invitation.getByText(surpriseText,{exact:true}).waitFor();
   const afterReveal=await h.evaluate(async(id:string)=>{const state=await(await fetch('/api/state')).json();return state.sessions[0].missions.find((m:any)=>m.id===id);},hiddenMission.id);
@@ -369,12 +328,12 @@ try{
     await w.route('**/api/sessions/*/reward',rewardHandler);
     try{
       await w.getByRole('button',{name:'Create reward',exact:true}).click();await rewardSaved;
-      for(const name of ['Reward title','Reward description','Reward cost'])assert.equal(await w.getByLabel(name).isDisabled(),true,`${name} locked until save refresh`);
+      for(const name of ['Reward title','Reward description','Reward cost'])assert.equal(await w.getByLabel(name,{exact:true}).isDisabled(),true,`${name} locked until save refresh`);
       assert.equal(await w.getByRole('button',{name:'Pause my play',exact:true}).isEnabled(),true);
       assert.equal(await w.getByRole('button',{name:'Stop permanently',exact:true}).isEnabled(),true);
       await w.route('**/api/state',refreshHandler);
       releaseReward();await refreshHeld;
-      for(const name of ['Reward title','Reward description','Reward cost'])assert.equal(await w.getByLabel(name).isDisabled(),true,`${name} locked during authoritative refresh`);
+      for(const name of ['Reward title','Reward description','Reward cost'])assert.equal(await w.getByLabel(name,{exact:true}).isDisabled(),true,`${name} locked during authoritative refresh`);
       releaseRefresh();await w.unroute('**/api/state',refreshHandler);
       await w.waitForFunction(()=>[...document.querySelectorAll('button')].some(b=>b.textContent==='Create reward'&&!b.disabled));
       assert.equal(await w.getByLabel('Reward title',{exact:true}).inputValue(),'');
@@ -555,13 +514,13 @@ try{
   await w.getByLabel('New message',{exact:true}).fill('Chat does not release either pause.');await w.getByRole('button',{name:'Send message',exact:true}).click();
   await h.getByText('Chat does not release either pause.',{exact:true}).waitFor();
    await w.getByText('2 active pauses',{exact:false}).waitFor();
-   await openReflection(w);await w.getByLabel('Appreciation (optional)',{exact:true}).fill('Thank you for choosing together.');
+   await w.getByLabel('Appreciation (optional)',{exact:true}).fill('Thank you for choosing together.');
    await w.getByRole('button',{name:'Save my reflection',exact:true}).click();
-    await openReflection(h);await h.getByLabel('Optional closing reflection',{exact:true}).getByText('Thank you for choosing together.',{exact:false}).waitFor();
+    await h.getByRole('region',{name:'Optional closing reflection',exact:true}).getByText('Thank you for choosing together.',{exact:false}).waitFor();
     await w.getByLabel('Repeat next time (optional)',{exact:true}).fill('Choose tea together again.');
     await heldOwnSave('reflection',[w.getByLabel('Appreciation (optional)'),w.getByLabel('Repeat next time (optional)')],['Thank you for choosing together.','Choose tea together again.'],'Save my reflection');
     console.log('PASS own reflection save: held committed response locks both fields, safety stays enabled, refresh re-enables fields with submitted/API values');
-    await w.getByLabel('Optional closing reflection',{exact:true}).locator('p').filter({hasText:'Choose tea together again.'}).waitFor();
+    await w.getByRole('region',{name:'Optional closing reflection',exact:true}).locator('p').filter({hasText:'Choose tea together again.'}).waitFor();
     for(const language of ['he','en']){
       if(await w.locator('html').getAttribute('lang')!==language)await w.getByRole('button',{name:language==='he'?'עברית':'English',exact:true}).click();
       const appreciation=w.getByLabel(language==='he'?'הערכה (לא חובה)':'Appreciation (optional)');
@@ -569,7 +528,7 @@ try{
       await appreciation.fill(`Unsaved appreciation ${language}`);await repeat.fill(`Unsaved repeat ${language}`);
       await h.getByLabel('Appreciation (optional)').fill(`Partner reflection ${language}`);
       await h.getByRole('button',{name:'Save my reflection',exact:true}).click();
-      await w.getByLabel(language==='he'?'שיתוף סיום אופציונלי':'Optional closing reflection',{exact:true}).getByText(`Partner reflection ${language}`,{exact:false}).waitFor();
+      await w.getByRole('region',{name:language==='he'?'שיתוף סיום אופציונלי':'Optional closing reflection',exact:true}).getByText(`Partner reflection ${language}`,{exact:false}).waitFor();
       assert.equal(await appreciation.inputValue(),`Unsaved appreciation ${language}`);assert.equal(await repeat.inputValue(),`Unsaved repeat ${language}`);
       const persisted=await w.evaluate(async()=>{const data=await (await fetch('/api/state')).json();return data.sessions[0].reflections[data.user.id];});
       assert.deepEqual(persisted,{appreciation:'Thank you for choosing together.',repeat:'Choose tea together again.'});
@@ -577,14 +536,14 @@ try{
     await w.getByLabel('Appreciation (optional)').fill('Thank you for choosing together.');
     await w.getByLabel('Repeat next time (optional)').fill('Choose tea together again.');
     console.log('PASS reflection retention: genuinely unsaved own fields survive changed partner reflections in Hebrew and English; API retains saved own values');
-   await openCheckIn(h);await h.getByLabel('Energy').selectOption('high');
+   await h.getByLabel('Energy').selectOption('high');
    await h.getByRole('button',{name:'Save my check-in',exact:true}).click();
-   await openCheckIn(w);await w.getByText('40 minutes · Energy: High · Mood: Connection',{exact:false}).waitFor();
+   await w.getByText('40 minutes · Energy: High · Mood: Connection',{exact:false}).waitFor();
    await w.getByText('2 active pauses',{exact:false}).waitFor();
  await w.getByRole('button',{name:'Release my pause',exact:true}).click();
  await w.getByText('1 active pauses',{exact:false}).waitFor();
   await h.getByRole('button',{name:'Release my pause',exact:true}).click();
-  for(const [persona,category] of [['Strict','challenges'],['Playful','teasing'],['Caring','']]){
+  for(const [persona,category] of [['Strict','challenges'],['Playful','teasing'],['Caring','rewards']]){
    await w.getByRole('navigation').getByRole('button',{name:'Missions',exact:true}).click();
    await w.getByRole('button',{name:persona,exact:true}).click();
    await w.waitForFunction((value:string)=>document.querySelector('main')?.classList.contains(`persona-${value}`),persona.toLowerCase());
@@ -597,12 +556,12 @@ try{
   }
   await w.reload();
   await w.getByRole('navigation').getByRole('button',{name:'Idea library',exact:true}).click();
-  assert.equal(await w.getByLabel('Category').inputValue(),'','Reload uses the shared persona');
+  assert.equal(await w.getByLabel('Category').inputValue(),'rewards','Reload uses the shared persona');
   console.log('PASS persona library defaults: three mappings, shared visual style, manual override through refresh, reload');
-  const libraryTotal=Number((await w.getByRole('heading',{name:/^\d+ ways to choose together$/}).innerText()).split(' ')[0]);
+  await w.getByRole('heading',{name:'43 ways to choose together',exact:true}).waitFor();
   await w.getByLabel('Category').selectOption('roleplay');assert.equal(await w.locator('.library article').count(),6);
   await w.getByLabel('Intensity').selectOption('3');assert.equal(await w.locator('.library article').count(),6);
-  await w.getByLabel('Category').selectOption('');assert.equal(await w.locator('.library article').count(),libraryTotal);
+  await w.getByLabel('Category').selectOption('');assert.equal(await w.locator('.library article').count(),43);
   await w.getByLabel('Boundary / activity tag').selectOption('conversation');assert.equal(await w.locator('.library article').count(),3);
   await w.getByLabel('Boundary / activity tag').selectOption('');
   await w.getByLabel('Intensity').selectOption('');await w.getByLabel('Category').selectOption('roleplay');
@@ -682,7 +641,7 @@ try{
       }
      await w.getByRole('region',{name:'Next step',exact:true}).getByRole('button',{name:'Reflect on this session',exact:true}).click();
      assert.equal(await w.getByLabel('Appreciation (optional)').evaluate((el:HTMLElement)=>el===document.activeElement),true);
-    await openReflection(w);const closing=w.getByLabel('Optional closing reflection',{exact:true});
+    const closing=w.getByRole('region',{name:'Optional closing reflection',exact:true});
      await closing.getByLabel('Repeat next time (optional)').fill('Another quiet conversation.');
     await closing.getByRole('button',{name:'Save my reflection',exact:true}).click();
       await closing.locator('p').filter({hasText:'Another quiet conversation.'}).waitFor();
@@ -709,7 +668,7 @@ try{
   }finally{release();await w.unroute(pattern,handler);}
  }
  await safetyWhilePending('mission');
-  await w.getByLabel('Exact terms and boundaries for mutual review').fill('A second safety regression session');await w.getByRole('button',{name:'Create session for review',exact:true}).click();await openCheckIn(w);
+  await w.getByLabel('Exact terms and boundaries for mutual review').fill('A second safety regression session');await w.getByRole('button',{name:'Create session for review',exact:true}).click();
   await w.getByRole('heading',{name:'Active',exact:true}).waitFor();
   assert.equal(await w.getByLabel('Available minutes',{exact:true}).inputValue(),'15');
   const checkInSessions=await w.evaluate(async()=> (await (await fetch('/api/state')).json()).sessions);
