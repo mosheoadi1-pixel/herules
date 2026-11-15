@@ -22,3 +22,15 @@ export function topQuickPresets(count:number):QuickPreset[]{
     .map(entry=>entry.preset);
   return [...used,...quickPresets.filter(preset=>!used.includes(preset))].slice(0,count);
 }
+
+const deckSkipKey='hr-deck-skips';
+export type DeckSkips=Record<string,number>;
+
+export function deckSkips():DeckSkips{
+  try{const value=JSON.parse(localStorage.getItem(deckSkipKey)||'null');return value&&typeof value==='object'&&!Array.isArray(value)?value:{};}
+  catch{return {};}
+}
+
+export function saveDeckSkips(value:DeckSkips){
+  try{localStorage.setItem(deckSkipKey,JSON.stringify(value));}catch{/* Preferences are optional when browser storage is unavailable. */}
+}

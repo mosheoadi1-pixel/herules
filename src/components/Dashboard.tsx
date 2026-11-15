@@ -1,15 +1,20 @@
 import type { Dispatch, SetStateAction } from 'react';
-import type { Mission, Session } from '../../server/app';
+import type { Mission, Session, User } from '../../server/app';
 import { progressStats, weeklyRecap, milestones, favouriteMood, WISH_COOLDOWN_MS, type Mood, type Rating } from '../progress';
 import { wishSuggestions } from '../quick';
 import { save, form, type Action, type Night, type Run, type SavedEvening, type SayDraft, type Translate } from '../app-shared';
+import type { DeckItem } from '../foryou';
+import type { Idea } from '../library';
 import { topQuickPresets } from '../prefs';
 import { Button } from './Button';
 import { NightCard } from './NightCard';
 import { CommandPanel } from './CommandPanel';
+import { ForYou } from './ForYou';
+import { Garden } from './Garden';
+import { Proposals } from './Proposals';
 
 type DashboardTabProps = {
-  s: Session; wife: boolean; ended: boolean; held: boolean; play: boolean; now: number; lang: 'he' | 'en';
+  s: Session; u: User; wife: boolean; ended: boolean; held: boolean; play: boolean; now: number; lang: 'he' | 'en';
   t: Translate; date: (at: number) => string; label: (key: string) => string;
   run: Run; action: Action;
   nudgeDue: boolean; dismissNudge: () => void;
@@ -31,9 +36,10 @@ type DashboardTabProps = {
   askQuick: (title: string, text: string, points: number, body: Record<string, unknown>, preset?: string, done?: () => void) => void;
   sayOpen: boolean; setSayOpen: Dispatch<SetStateAction<boolean>>; sayText: string; setSayText: Dispatch<SetStateAction<string>>;
   sayDraft: SayDraft | null; setSayDraft: Dispatch<SetStateAction<SayDraft | null>>; sayReady: boolean;
+  deck: DeckItem[]; skipDeck: (id: string) => void; gardenTotal: number; useIdea: (idea: Idea) => void;
 };
 
-export function DashboardTab({ s, wife, ended, held, play, now, lang, t, date, label, run, action, nudgeDue, dismissNudge, progress, weekly, badges, ratingLabel, moodLabel, favourite, nextScheduled, notes, notesFull, cheapestWish, awaitingReview, pendingRewards, recentApproved, needsCare, keysHintSeen, setKeysHintSeen, moodOrder, nightMood, lastMood, chooseMood, sendSteps, nightBlock, askNight, saveOpen, setSaveOpen, eveningName, setEveningName, savedFull, saveEvening, savedList, sendBlock, cap, usedNow, limitMessage, askRun, lastNight, nightApproved, nightMissions, choosePace, finishOnboarding, closedNow, windowHours, reopenHours, askClose, quickBlock, barPresets, askPreset, quickAt, setQuickAt, askQuick, sayOpen, setSayOpen, sayText, setSayText, sayDraft, setSayDraft, sayReady }: DashboardTabProps) {
+export function DashboardTab({ s, u, wife, ended, held, play, now, lang, t, date, label, run, action, nudgeDue, dismissNudge, progress, weekly, badges, ratingLabel, moodLabel, favourite, nextScheduled, notes, notesFull, cheapestWish, awaitingReview, pendingRewards, recentApproved, needsCare, keysHintSeen, setKeysHintSeen, moodOrder, nightMood, lastMood, chooseMood, sendSteps, nightBlock, askNight, saveOpen, setSaveOpen, eveningName, setEveningName, savedFull, saveEvening, savedList, sendBlock, cap, usedNow, limitMessage, askRun, lastNight, nightApproved, nightMissions, choosePace, finishOnboarding, closedNow, windowHours, reopenHours, askClose, quickBlock, barPresets, askPreset, quickAt, setQuickAt, askQuick, sayOpen, setSayOpen, sayText, setSayText, sayDraft, setSayDraft, sayReady, deck, skipDeck, gardenTotal, useIdea }: DashboardTabProps) {
   const StatsBox=wife?'details':'section';
    const statsPanel=<StatsBox className="panel stats" aria-label={t('התקדמות המשחק','Game progress')}>{wife?<summary><h2>{t('איך המשחק מתקדם','How the game is going')}</h2></summary>:<h2>{t('איך המשחק מתקדם','How the game is going')}</h2>}
       <div className="stat-grid">
@@ -77,6 +83,8 @@ export function DashboardTab({ s, wife, ended, held, play, now, lang, t, date, l
     {wife&&paceAndEnd}
     {!wife&&statsPanel}
     {nudgeDue&&!held&&<section className="panel"><p>{t('עבר זמן מאז שהייתם כאן יחד. אפשר לחזור בצעד קטן: הודעה אחת או צ׳ק־אין קצר.','It has been a while since you were together here. You can ease back in with one small step: a message or a short check-in.')}</p><Button onClick={dismissNudge}>{t('לא עכשיו','Not now')}</Button></section>}
+    {wife&&<ForYou deck={deck} lang={lang} t={t} play={play} useIdea={useIdea} onSkip={skipDeck}/>}
+    <Garden total={gardenTotal} t={t}/>
     {wife&&<NightCard t={t} date={date} label={label} moodLabel={moodLabel} moodOrder={moodOrder} nightMood={nightMood} lastMood={lastMood} chooseMood={chooseMood} sendSteps={sendSteps} play={play} ended={ended} nightBlock={nightBlock} askNight={askNight} saveOpen={saveOpen} setSaveOpen={setSaveOpen} eveningName={eveningName} setEveningName={setEveningName} savedFull={savedFull} saveEvening={saveEvening} savedList={savedList} sendBlock={sendBlock} cap={cap} usedNow={usedNow} limitMessage={limitMessage} askRun={askRun} run={run} action={action} favourite={favourite} nextScheduled={nextScheduled} lastNight={lastNight} nightApproved={nightApproved} nightMissions={nightMissions}/>}
     {wife?<>
       <section className="panel"><h2>{t('שולחן הבדיקה שלך','Your review desk')}</h2>
@@ -119,5 +127,6 @@ export function DashboardTab({ s, wife, ended, held, play, now, lang, t, date, l
     </>:<section className="panel"><h2>{t('טיפול אחריה','Looking after her')}</h2>
       {needsCare?<><p>{t('אחרי משימה שאושרה, דאג/י לה: מים, שמיכה, חיבוק או שיחה רכה. זה לא תלוי במשחק.','After an approved task, look after her: water, a blanket, a hug, or a gentle talk. This does not depend on the game.')}</p><Button className="primary" onClick={()=>void run(()=>action('aftercare',{}))}>{t('סימנתי: טיפלתי בה','Done: I looked after her')}</Button></>:<p className="empty">{t('אין כרגע משימה שממתינה לטיפול אחריה.','No task is waiting for aftercare right now.')}</p>}
     </section>}
+    <Proposals s={s} u={u} wife={wife} play={play} ended={ended} t={t} run={run} action={action}/>
   </>;
 }

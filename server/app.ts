@@ -25,7 +25,8 @@ export type User = { id: string; email: string|null; nickname: string|null; role
 export type Mission = { id: string; revision: number; title: string; text: string; points: number; secret: boolean; surprise?:boolean; category?:string; revealedAt?:number; completionStyle?: 'simple'|'written'; status: string; scheduledAt?: number; completion?: string; submissionVersion?: number; deliveredAt?: number; acknowledgedAt?: number; adjustment?: {reason:'softer'|'adjust';note?:string;at:number}; replaces?: string; replacementId?: string; approvedAt?: number; rating?: 'love'|'like'|'skip'; ratedAt?: number; createdAt?: number };
 export type Reward = {id:string; title:string; description:string; cost:number};
 export type RewardRequest = Reward & {rewardId:string; status:'pending'|'approved'|'declined'};
-export type Session = { id: string; status: string; terms: string; revision: number; revisions: { revision: number; terms: string }[]; approvals: string[]; pauses: string[]; remaining: number; last: number; started: boolean; points: number; missions: Mission[]; rewards?: Reward[]; rewardRequests?: RewardRequest[]; sequence?: string[]; autoProgress?:boolean; persona?:'strict'|'playful'|'caring'; followups?:string[]; checkIns?: Record<string,CheckIn>; reflections?: Record<string,Reflection>; messages: {id:string; by:string; text:string; at:number}[]; history: { at:number; event:string; by:string; rewardRequestId?:string; outcome?:'approved'|'declined' }[]; inbox: {id:string; at:number; event:string; readBy:string[]}[]; herPoints?: number; herWishes?: {id:string;title:string;cost:number;createdAt?:number}[]; commands?: {id:string;title:string;text:string;points:number}[]; notes?: {id:string;text:string;at:number}[]; nights?: {id:string;mood:'soft'|'playful'|'strict';at:number;missionIds:string[]}[]; moodCounts?: Record<'soft'|'playful'|'strict',number>; lastCareAt?: number; pace?: 1|2|3; eveningClosedAt?: number; savedEvenings?: {id:string;name:string;mood:'soft'|'playful'|'strict';steps:{he:string;en:string;points:number;minutesFromNow:number}[];createdAt:number}[] };
+export type Proposal = { id: string; by: string; title: string; text: string; points: number; category?: string; at: number; status: 'pending'|'adopted'|'declined'; missionId?: string };
+export type Session = { id: string; status: string; terms: string; revision: number; revisions: { revision: number; terms: string }[]; approvals: string[]; pauses: string[]; remaining: number; last: number; started: boolean; points: number; missions: Mission[]; rewards?: Reward[]; rewardRequests?: RewardRequest[]; sequence?: string[]; autoProgress?:boolean; persona?:'strict'|'playful'|'caring'; followups?:string[]; checkIns?: Record<string,CheckIn>; reflections?: Record<string,Reflection>; messages: {id:string; by:string; text:string; at:number}[]; history: { at:number; event:string; by:string; rewardRequestId?:string; outcome?:'approved'|'declined' }[]; inbox: {id:string; at:number; event:string; readBy:string[]}[]; herPoints?: number; proposals?: Proposal[]; herWishes?: {id:string;title:string;cost:number;createdAt?:number}[]; commands?: {id:string;title:string;text:string;points:number}[]; notes?: {id:string;text:string;at:number}[]; nights?: {id:string;mood:'soft'|'playful'|'strict';at:number;missionIds:string[]}[]; moodCounts?: Record<'soft'|'playful'|'strict',number>; lastCareAt?: number; pace?: 1|2|3; eveningClosedAt?: number; savedEvenings?: {id:string;name:string;mood:'soft'|'playful'|'strict';steps:{he:string;en:string;points:number;minutesFromNow:number}[];createdAt:number}[] };
 const suspended = (s: Session) => s.approvals.length !== 2 || s.pauses.length > 0;
 const terminal = (s: Session) => ['stopped','expired'].includes(s.status);
 function notice(s: Session, event: string, by: string, reward?:{rewardRequestId?:string;outcome?:'approved'|'declined';missionId?:string}) {
@@ -227,6 +228,26 @@ export async function createApp(pool: Pool, origin: string) {
         if(previous.rowCount){await save(c,s);return previous.rows[0].result;}
         const message={id:randomUUID(),by:u.id,text:text.parse(b.text),at:Date.now()};s.messages.push(message);response={message};
         await c.query('INSERT INTO request_keys VALUES($1,$2,$3,$4,$5)',[s.id,u.id,op,key,JSON.stringify(response)]);
+      }
+      else if(op==='propose'){
+        husband();
+        const key=uuid.parse(b.key);
+        const previous=await c.query('SELECT result FROM request_keys WHERE session_id=$1 AND user_id=$2 AND kind=$3 AND key=$4',[s.id,u.id,op,key]);
+        if(previous.rowCount){await save(c,s);return previous.rows[0].result;}
+        const data=z.object({title:z.string().trim().min(1).max(160),text,points:z.number().int().min(0).max(100),category:z.string().trim().max(80).optional()}).parse(b);
+        const list=s.proposals??=[];if(list.length>=20)fail(409,'Proposal list is full');
+        const proposal:Proposal={id:randomUUID(),by:u.id,...data,at:Date.now(),status:'pending'};list.push(proposal);response={proposal};
+        await c.query('INSERT INTO request_keys VALUES($1,$2,$3,$4,$5)',[s.id,u.id,op,key,JSON.stringify(response)]);
+      }
+      else if(op==='proposal-decide'){
+        wife();
+        const id=uuid.parse(b.proposal);const proposal=s.proposals?.find(p=>p.id===id)??fail(404,'Proposal unavailable');
+        if(proposal.status!=='pending')fail(409,'Proposal already decided');
+        if(z.boolean().parse(b.adopt)){
+          // Adoption only creates an editable draft in her composer; explicit delivery is still hers.
+          const m:Mission={id:randomUUID(),revision:s.revision,status:'draft',title:proposal.title,text:proposal.text,points:proposal.points,secret:false,completionStyle:'simple',createdAt:Date.now()};
+          s.missions.push(m);proposal.status='adopted';proposal.missionId=m.id;response={proposal,mission:m};
+        }else{proposal.status='declined';response={proposal};}
       }
       else if(op==='rate'&&mission){
         wife();const data=z.object({rating:z.enum(['love','like','skip'])}).parse(b);
