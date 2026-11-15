@@ -26,24 +26,18 @@ export type User = { id: string; email: string|null; nickname: string|null; role
 export type Mission = { id: string; revision: number; title: string; text: string; titleEn?: string; textEn?: string; points: number; secret: boolean; chapter?: boolean; surprise?:boolean; category?:string; revealedAt?:number; completionStyle?: 'simple'|'written'; status: string; scheduledAt?: number; completion?: string; submissionVersion?: number; deliveredAt?: number; acknowledgedAt?: number; adjustment?: {reason:'softer'|'adjust';note?:string;at:number}; replaces?: string; replacementId?: string; approvedAt?: number; rating?: 'love'|'like'|'skip'; ratedAt?: number; createdAt?: number };
 export type Reward = {id:string; title:string; description:string; cost:number};
 export type RewardRequest = Reward & {rewardId:string; status:'pending'|'approved'|'declined'};
-export type Wish = {id:string; title:string; description:string; link?:string; book:boolean; cost?:number; createdAt:number};
-export type WishRequest = {id:string; wish:string; title:string; cost:number; book:boolean; status:'pending'|'approved'|'declined'; at:number};
+export type Wish = {id:string; title:string; description:string; link?:string; cost?:number; createdAt:number};
+export type WishRequest = {id:string; wish:string; title:string; cost:number; status:'pending'|'approved'|'declined'; at:number};
 export type Proposal = { id: string; by: string; title: string; text: string; points: number; category?: string; at: number; status: 'pending'|'adopted'|'declined'; missionId?: string };
-export type Session = { id: string; status: string; terms: string; revision: number; revisions: { revision: number; terms: string }[]; approvals: string[]; pauses: string[]; remaining: number; unlimited?: boolean; last: number; started: boolean; points: number; missions: Mission[]; rewards?: Reward[]; rewardRequests?: RewardRequest[]; sequence?: string[]; autoProgress?:boolean; persona?:'strict'|'playful'|'caring'; followups?:string[]; checkIns?: Record<string,CheckIn>; reflections?: Record<string,Reflection>; messages: {id:string; by:string; text:string; at:number}[]; history: { at:number; event:string; by:string; rewardRequestId?:string; outcome?:'approved'|'declined' }[]; inbox: {id:string; at:number; event:string; readBy:string[]}[]; herPoints?: number; proposals?: Proposal[]; wishes?: Wish[]; wishRequests?: WishRequest[]; bookAllowance?: {monthly:number; month:string; spent:number}; commands?: {id:string;title:string;text:string;points:number}[]; notes?: {id:string;text:string;at:number}[]; nights?: {id:string;mood:'soft'|'playful'|'strict';at:number;missionIds:string[]}[]; moodCounts?: Record<'soft'|'playful'|'strict',number>; lastCareAt?: number; pace?: 1|2|3; eveningClosedAt?: number; savedEvenings?: {id:string;name:string;mood:'soft'|'playful'|'strict';steps:{he:string;en:string;points:number;minutesFromNow:number}[];createdAt:number}[]; chapterState?: { decree?: { mood: string; season?: string }; at?: number; cliffhanger?: { he: string; en: string } }; adoration?: { sippedFor?: string; grantedFor?: string; grantedAt?: number; sealedAt?: number; waiting?: number; ready?: number; last?: { id: string; kind: string; text: string; media?: string | null; at: number } } };
+export type Session = { id: string; status: string; terms: string; revision: number; revisions: { revision: number; terms: string }[]; approvals: string[]; pauses: string[]; remaining: number; unlimited?: boolean; last: number; started: boolean; points: number; missions: Mission[]; rewards?: Reward[]; rewardRequests?: RewardRequest[]; sequence?: string[]; autoProgress?:boolean; persona?:'strict'|'playful'|'caring'; followups?:string[]; checkIns?: Record<string,CheckIn>; reflections?: Record<string,Reflection>; messages: {id:string; by:string; text:string; at:number}[]; history: { at:number; event:string; by:string; rewardRequestId?:string; outcome?:'approved'|'declined' }[]; inbox: {id:string; at:number; event:string; readBy:string[]}[]; herPoints?: number; proposals?: Proposal[]; wishes?: Wish[]; wishRequests?: WishRequest[]; commands?: {id:string;title:string;text:string;points:number}[]; notes?: {id:string;text:string;at:number}[]; nights?: {id:string;mood:'soft'|'playful'|'strict';at:number;missionIds:string[]}[]; moodCounts?: Record<'soft'|'playful'|'strict',number>; lastCareAt?: number; pace?: 1|2|3; eveningClosedAt?: number; savedEvenings?: {id:string;name:string;mood:'soft'|'playful'|'strict';steps:{he:string;en:string;points:number;minutesFromNow:number}[];createdAt:number}[]; chapterState?: { decree?: { mood: string; season?: string }; at?: number; cliffhanger?: { he: string; en: string } }; adoration?: { sippedFor?: string; grantedFor?: string; grantedAt?: number; sealedAt?: number; waiting?: number; ready?: number; last?: { id: string; kind: string; text: string; media?: string | null; at: number } } };
 const suspended = (s: Session) => s.pauses.length > 0;
 const terminal = (s: Session) => ['stopped','expired'].includes(s.status);
 function notice(s: Session, event: string, by: string, reward?:{rewardRequestId?:string;outcome?:'approved'|'declined';missionId?:string}) {
   const at = Date.now(); s.history.push({ at, event, by, ...reward });
   s.inbox.push({ id: randomUUID(), at, event, readBy: [], ...(reward?.missionId?{missionId:reward.missionId}:{}) });
 }
-// Book allowance is calendar-month (Israel time) and unused amounts expire at month end; shared points never expire.
-function monthOf(at: number) {
-  const parts = new Intl.DateTimeFormat('en-US', { timeZone: 'Asia/Jerusalem', year: 'numeric', month: 'numeric' }).formatToParts(at);
-  return `${parts.find(p => p.type === 'year')!.value}-${parts.find(p => p.type === 'month')!.value.padStart(2, '0')}`;
-}
 function advance(s: Session) {
   const now = Date.now();
-  if (s.bookAllowance && s.bookAllowance.month !== monthOf(now)) { s.bookAllowance.month = monthOf(now); s.bookAllowance.spent = 0; }
   if (!terminal(s) && s.started && !suspended(s)) {
     // Unlimited sessions never count down and never expire; scheduled deliveries still run on time.
     if (!s.unlimited) {
@@ -443,7 +437,7 @@ export async function createApp(pool: Pool, origin: string) {
           response={night:runNight(s,saved.mood,data.lang,saved.steps)};
         }
         else if(op==='wish-add'){
-          wife();const data=z.object({title:z.string().trim().min(1).max(160),description:z.string().trim().max(4000).default(''),link:z.string().trim().regex(/^https?:\/\/\S+$/i).max(2000).optional(),book:z.boolean().default(false)}).parse(b);
+          wife();const data=z.object({title:z.string().trim().min(1).max(160),description:z.string().trim().max(4000).default(''),link:z.string().trim().regex(/^https?:\/\/\S+$/i).max(2000).optional()}).parse(b);
           const list=s.wishes??=[];if(list.length>=50)fail(409,'Wish list is full');const wish:Wish={id:randomUUID(),...data,createdAt:Date.now()};list.push(wish);response={wish};
         }
         else if(op==='wish-remove'){
@@ -456,24 +450,19 @@ export async function createApp(pool: Pool, origin: string) {
           if(s.wishRequests?.some(r=>r.wish===id&&r.status==='pending'))fail(409,'Wish has a pending request');
           wish.cost=z.number().int().min(0).max(Number.MAX_SAFE_INTEGER).parse(b.cost);
         }
-        else if(op==='books-allowance'){
-          husband();const monthly=z.number().int().min(0).max(Number.MAX_SAFE_INTEGER).parse(b.monthly);
-          s.bookAllowance={monthly,month:monthOf(Date.now()),spent:s.bookAllowance?.spent??0};
-        }
         else if(op==='wish-request'){
           wife();const id=uuid.parse(b.wish);const wish=s.wishes?.find(w=>w.id===id)??fail(404,'Wish unavailable');
           if(s.wishRequests?.some(r=>r.wish===id&&r.status==='pending'))fail(409,'Wish already requested');
           const list=s.wishRequests??=[];if(list.length>=200)fail(409,'Wish request list is full');
           const cost=wish.cost??fail(409,'Wish is not priced yet');
-          const request:WishRequest={id:randomUUID(),wish:id,title:wish.title,cost,book:wish.book,status:'pending',at:Date.now()};list.push(request);response={request};
+          const request:WishRequest={id:randomUUID(),wish:id,title:wish.title,cost,status:'pending',at:Date.now()};list.push(request);response={request};
         }
         else if(op==='wish-decision'){
           husband();const requestId=uuid.parse(b.request);const request=s.wishRequests?.find(r=>r.id===requestId)??fail(404,'Wish request unavailable');
           const approve=z.boolean().parse(b.approve);if(request.status!=='pending')fail(409,'Wish request already decided');
           if(approve){
             if(s.points<request.cost)fail(409,'Insufficient points for wish');
-            if(request.book&&(!s.bookAllowance||s.bookAllowance.monthly-s.bookAllowance.spent<request.cost))fail(409,'Book allowance exceeded');
-            s.points-=request.cost;if(request.book)s.bookAllowance!.spent+=request.cost;
+            s.points-=request.cost;
           }
           request.status=approve?'approved':'declined';response={request,points:s.points};
         }

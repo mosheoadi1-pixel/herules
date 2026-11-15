@@ -77,20 +77,19 @@ try {
   assert.equal(s.herPoints,preset.points);
   assert.equal(s.points,preset.points);
 
-  // Wishlist: she adds, only he prices, she requests priced wishes, he decides with shared points; books draw from a monthly allowance that expires.
+  // Wishlist: she adds, only he prices, she requests priced wishes, and he decides with shared points.
   await edit(row=>{row.points=20;});
   await op(h,'wish-add',{title:'Hidden'},403);
   await op(w,'wish-add',{title:'Carpet',description:'Soft and warm',link:'https://example.com/rug'});
   await op(w,'wish-add',{title:'Bad link',link:'javascript:alert(1)'},400);
-  await op(w,'wish-add',{title:'A novel',book:true});
+  await op(w,'wish-add',{title:'A specific book'});
   s=await state();
-  const carpet=s.wishes!.find(x=>x.title==='Carpet')!,novel=s.wishes!.find(x=>x.title==='A novel')!;
+  const carpet=s.wishes!.find(x=>x.title==='Carpet')!,book=s.wishes!.find(x=>x.title==='A specific book')!;
   assert.equal(carpet.cost,undefined);
   assert.equal((await op(w,'wish-request',{wish:carpet.id},409)).error,'Wish is not priced yet');
   await op(w,'wish-price',{wish:carpet.id,cost:50},403);
   await op(h,'wish-price',{wish:carpet.id,cost:50});
-  await op(h,'wish-price',{wish:novel.id,cost:1});
-  await op(h,'books-allowance',{monthly:2});
+  await op(h,'wish-price',{wish:book.id,cost:5});
   await op(w,'wish-request',{wish:carpet.id});
   s=await state();
   const carpetRequest=s.wishRequests!.find(r=>r.wish===carpet.id)!;
@@ -104,26 +103,13 @@ try {
   assert.equal(s.wishRequests!.find(r=>r.id===carpetRequest.id)!.status,'declined');
   assert.equal(s.points,20);
   await op(w,'wish-request',{wish:carpet.id});
-  await op(w,'wish-request',{wish:novel.id});
+  await op(w,'wish-request',{wish:book.id});
   s=await state();
-  const bookRequests=s.wishRequests!.filter(r=>r.wish===novel.id);
-  assert.equal(bookRequests.length,1);
-  await op(h,'wish-decision',{request:bookRequests[0].id,approve:true});
+  const bookRequest=s.wishRequests!.find(r=>r.wish===book.id)!;
+  await op(h,'wish-decision',{request:bookRequest.id,approve:true});
   s=await state();
-  assert.equal(s.points,19);
-  assert.equal(s.bookAllowance!.spent,1);
-  await op(w,'wish-request',{wish:novel.id});
-  s=await state();
-  const secondBook=s.wishRequests!.find(r=>r.wish===novel.id&&r.status==='pending')!;
-  await op(h,'books-allowance',{monthly:1});
-  assert.equal((await op(h,'wish-decision',{request:secondBook.id,approve:true},409)).error,'Book allowance exceeded');
-  await edit(row=>{row.bookAllowance!.month='2000-01';});
-  s=await state();
-  assert.equal(s.bookAllowance!.spent,0,'unused book allowance expires at the start of a new month');
-  await op(h,'wish-decision',{request:secondBook.id,approve:true});
-  s=await state();
-  assert.equal(s.points,18);
-  assert.equal(s.bookAllowance!.spent,1);
+  assert.equal(s.points,15);
+  assert.equal(s.wishRequests!.find(r=>r.id===bookRequest.id)!.status,'approved');
 
   // Saved commands are visible to her and hidden from him.
   await op(w,'command-save',{title:'Playlist',text:'Send one song each morning',points:1});
@@ -402,7 +388,7 @@ try {
   await op(w,'her-night',{...nightPayload,key:randomUUID()},409,'Session is terminal');
   await op(w,'evening-close',{key:randomUUID()},409,'Session is terminal');
   await op(w,'evening-save',{name:'Late',mood:'soft',steps:[nightStep]},409,'Session is terminal');
-  console.log('PASS play flow: approvals, quick commands, keyed retries, scheduling, review points, wishlist pricing and book allowance, private commands, aftercare, her night, quick ratings, private notes, progress helpers, pacing, done for tonight, saved evenings, night cap, devotions, chapters, terminal guard');
+  console.log('PASS play flow: approvals, quick commands, keyed retries, scheduling, review points, wishlist pricing and approval, private commands, aftercare, her night, quick ratings, private notes, progress helpers, pacing, done for tonight, saved evenings, night cap, devotions, chapters, terminal guard');
 } finally {
   if(server)await new Promise<void>(resolve=>server!.close(()=>resolve()));
   await pool.end();await db.stop();await rm(directory,{recursive:true,force:true,maxRetries:10,retryDelay:100});
