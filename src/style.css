@@ -729,3 +729,20 @@ html[dir="rtl"] .hero:not(.compact)::before {
 }
 .hero:not(.compact) h1 { color: #fbf1dd; }
 .hero:not(.compact) > p:last-child { color: #e3d4ea; }
+
+/* Comfortable reading pass: relaxed leading and rhythm for long-form panels, readable secondary text. */
+main .panel p,
+main article p,
+main .messages p,
+main blockquote p { line-height: 1.8; }
+main .panel .preserve,
+main .messages .preserve { line-height: 1.8; }
+main .panel > p + p { margin-top: 0.75em; }
+main .small,
+main time { font-size: 14px; line-height: 1.7; }
+
+/* Mobile reading comfort: roomier rhythm for stacked long-form content. */
+@media (max-width:600px) {
+  .guided-cards { gap: 14px; }
+  .cards.library { gap: 14px; }
+}
