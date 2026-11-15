@@ -316,6 +316,58 @@ try {
   assert.ok(hisView.history.some(item=>item.event==='evening-run'));
   assert.ok(hisView.inbox.some(item=>item.event==='evening-run'));
 
+  // Devotions: husband gives, she reveals, sips (+2 Glow), grants once (+3) and seals.
+  await op(w,'tribute-queue',{kind:'note',text:'x',key:randomUUID()},403);
+  await op(h,'tribute-queue',{kind:'note',text:'For you alone'},400);
+  const tributeKey=randomUUID();
+  const sent=await op(h,'tribute-queue',{kind:'note',text:'For you alone',key:tributeKey});
+  assert.ok(sent.tributeId);
+  assert.deepEqual(await op(h,'tribute-queue',{kind:'note',text:'For you alone',key:tributeKey}),sent);
+  await op(h,'tribute-reveal',{key:randomUUID()},403);
+  await op(h,'sip',{key:randomUUID()},403);
+  s=await state();
+  assert.equal(s.adoration?.waiting,1);
+  assert.equal(s.adoration?.ready,0);
+  const glow0=s.herPoints??0;
+  const revealKey=randomUUID();
+  const revealed=await op(w,'tribute-reveal',{key:revealKey});
+  assert.equal(revealed.tribute.text,'For you alone');
+  assert.deepEqual(await op(w,'tribute-reveal',{key:revealKey}),revealed);
+  await op(w,'tribute-reveal',{key:randomUUID()},404,'No devotion is waiting for you');
+  s=await state();
+  assert.equal(s.adoration?.last?.text,'For you alone');
+  assert.equal(s.adoration?.waiting,0);
+  assert.equal(s.adoration?.ready,1);
+  await op(w,'sip',{key:randomUUID()});
+  s=await state();
+  assert.equal(s.herPoints,glow0+2);
+  assert.equal(s.adoration?.ready,0);
+  await op(w,'sip',{key:randomUUID()},404,'No adoration to sip yet');
+  await op(w,'grant',{key:randomUUID()});
+  s=await state();
+  assert.equal(s.herPoints,glow0+5);
+  await op(w,'grant',{key:randomUUID()},409,'This earned moment was already granted');
+  await op(w,'seal',{key:randomUUID()});
+  s=await state();
+  assert.ok(s.adoration?.sealedAt!>0);
+  const hisDevotion=(await h(`/sessions/${id}`)).session as Session;
+  assert.equal(hisDevotion.adoration,undefined);
+  assert.equal(hisDevotion.chapterState,undefined);
+
+  // Chapters: composed as queued chapter missions with English copy, exempt from closing the evening.
+  const decreeKey=randomUUID();
+  const decree=await op(w,'chamberlain-decree',{mood:'rest',key:decreeKey});
+  assert.ok(decree.missionIds.length>0);
+  assert.deepEqual(await op(w,'chamberlain-decree',{mood:'rest',key:decreeKey}),decree);
+  s=await state();
+  const chapters=s.missions.filter(m=>m.chapter);
+  assert.equal(chapters.length,decree.missionIds.length);
+  assert.ok(chapters.every(m=>m.status==='queued'&&!!m.titleEn&&!!m.textEn));
+  const queuedChapters=chapters.filter(m=>m.status==='queued').length;
+  await op(w,'evening-close',{key:randomUUID()});
+  s=await state();
+  assert.equal(s.missions.filter(m=>m.chapter&&m.status==='queued').length,queuedChapters);
+
   // Terminal sessions still reject new play, including quick commands, ratings, nights and evenings.
   await op(w,'stop',{});
   await op(w,'quick',{preset:preset.id,key:randomUUID()},409,'Session is terminal');
@@ -323,7 +375,7 @@ try {
   await op(w,'her-night',{...nightPayload,key:randomUUID()},409,'Session is terminal');
   await op(w,'evening-close',{key:randomUUID()},409,'Session is terminal');
   await op(w,'evening-save',{name:'Late',mood:'soft',steps:[nightStep]},409,'Session is terminal');
-  console.log('PASS play flow: approvals, quick commands, keyed retries, scheduling, review points, wishes with cooldown, private commands, aftercare, her night, quick ratings, private notes, progress helpers, pacing, done for tonight, saved evenings, night cap, terminal guard');
+  console.log('PASS play flow: approvals, quick commands, keyed retries, scheduling, review points, wishes with cooldown, private commands, aftercare, her night, quick ratings, private notes, progress helpers, pacing, done for tonight, saved evenings, night cap, devotions, chapters, terminal guard');
 } finally {
   if(server)await new Promise<void>(resolve=>server!.close(()=>resolve()));
   await pool.end();await db.stop();await rm(directory,{recursive:true,force:true,maxRetries:10,retryDelay:100});

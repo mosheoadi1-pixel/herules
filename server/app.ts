@@ -166,25 +166,30 @@ export async function createApp(pool: Pool, origin: string) {
     const s=r.rows[0].data as Session; if(tick)advance(s); return s;
   }
   async function save(c:PoolClient,s:Session) {await c.query('UPDATE sessions SET status=$2,data=$3 WHERE id=$1',[s.id,s.status,JSON.stringify(s)]);}
+  // Her adoration queue for one session: waiting = not revealed yet, ready = revealed but not sipped.
+  async function adorationQueue(c:PoolClient,u:User,sessionId:string){
+    if(u.role!=='wife')return undefined;
+    const r=await c.query('SELECT count(*) FILTER (WHERE delivered_at IS NULL)::int AS waiting,count(*) FILTER (WHERE delivered_at IS NOT NULL AND rated=false)::int AS ready FROM tributes WHERE receiver_id=$1 AND session_id=$2',[u.id,sessionId]);
+    const row=r.rows[0]??{waiting:0,ready:0};
+    return {waiting:row.waiting as number,ready:row.ready as number};
+  }
   app.get('/api/state',async(req,res)=>{
     const u=await auth(req);
     const sessions=await transaction(async c=>{
       const ids=(await c.query('SELECT id FROM sessions WHERE pair_id=$1 ORDER BY id',[u.pair_id])).rows;
-      // Her adoration queue: waiting = not revealed yet, ready = revealed but not sipped.
-      const counts=new Map<string,{waiting:number;ready:number}>();
-      if(u.role==='wife')for(const row of (await c.query("SELECT session_id::text AS id,count(*) FILTER (WHERE delivered_at IS NULL)::int AS waiting,count(*) FILTER (WHERE delivered_at IS NOT NULL AND rated=false)::int AS ready FROM tributes WHERE receiver_id=$1 GROUP BY session_id",[u.id])).rows)counts.set(row.id,{waiting:row.waiting,ready:row.ready});
       const values=[];
       for(const {id} of ids){
         const s=await locked(c,id,u);await save(c,s);
         const view:any=visible(s,u);
-        if(u.role==='wife'){const queue=counts.get(id)??{waiting:0,ready:0};view.adoration={...(view.adoration??{}),waiting:queue.waiting,ready:queue.ready};}
+        const queue=await adorationQueue(c,u,id);
+        if(queue)view.adoration={...(view.adoration??{}),...queue};
         values.push(view);
       }
       return values;
     });
     res.json({user:u,sessions,serverNow:Date.now()});
   });
-  app.get('/api/sessions/:id',async(req,res)=>{const u=await auth(req); const session=await transaction(async c=>{const s=await locked(c,req.params.id as string,u);await save(c,s);return visible(s,u);});res.json({session,serverNow:Date.now()});});
+  app.get('/api/sessions/:id',async(req,res)=>{const u=await auth(req); const session=await transaction(async c=>{const s=await locked(c,req.params.id as string,u);await save(c,s);const view:any=visible(s,u);const queue=await adorationQueue(c,u,s.id);if(queue)view.adoration={...(view.adoration??{}),...queue};return view;});res.json({session,serverNow:Date.now()});});
   app.post('/api/sessions',async(req,res)=>{
     const u=await auth(req);if(!u.pair_id) fail(409,'Pair first');
     const b=z.object({terms:text,minutes:z.number().int().min(1).max(525600)}).parse(req.body);

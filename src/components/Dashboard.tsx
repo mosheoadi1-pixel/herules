@@ -88,7 +88,8 @@ export function DashboardTab({ s, u, wife, ended, held, play, now, lang, t, date
   const revealed=s.adoration?.last;
   const waiting=s.adoration?.waiting;
   const ready=s.adoration?.ready;
-  const canGrant=!!s.adoration?.sippedFor&&s.adoration.grantedFor!==s.adoration.sippedFor;
+  const sippedFor=s.adoration?.sippedFor;
+  const canGrant=!!sippedFor&&s.adoration?.grantedFor!==sippedFor;
   const chapterOpen=s.missions.filter(m=>m.chapter&&!['approved','refused','cancelled'].includes(m.status)).length;
   return <>
     {wife&&s&&!ended&&s.pace===undefined&&onboardingPanel}
