@@ -369,3 +369,363 @@ footer { padding-bottom: max(45px, calc(24px + env(safe-area-inset-bottom))); }
 @media (max-width: 600px) {
   .adoration-actions button, .chamberlain-controls button { flex: 1 1 auto; min-width: 118px; }
 }
+
+/* ------------------------------------------------------------------
+   HER REIGN — the midnight court.
+   Amethyst night, antique gold, celestial dust. Her surfaces are the
+   richest; his stay cooler so the two roles remain distinct.
+   Additive only: layout, spacing and the phone rules above are intact.
+------------------------------------------------------------------ */
+:root {
+  --night: #0a0512;
+  --night-soft: #120a20;
+  --court: #1d1132;
+  --court-deep: #130a22;
+  --gold: #e9c88b;
+  --gold-pale: #f7e7c2;
+  --gold-deep: #b8912f;
+  --royal: #5a1f86;
+  --royal-bright: #8a3ec0;
+  --line: #4a2f6b;
+  --muted: #c9b6dc;
+  color: #f6efff;
+  background: #0a0512;
+}
+
+body {
+  background:
+    radial-gradient(ellipse at 78% -12%, #4a1f70 0, transparent 44%),
+    radial-gradient(ellipse at 2% 38%, #2a1244 0, transparent 50%),
+    radial-gradient(ellipse at 55% 112%, #3a1a2e 0, transparent 55%),
+    var(--night);
+  color: #f6efff;
+}
+
+/* Celestial dust: fixed, inert, and behind every surface. */
+body::before {
+  content: '';
+  position: fixed;
+  inset: 0;
+  z-index: -1;
+  pointer-events: none;
+  opacity: .5;
+  background-image:
+    radial-gradient(1px 1px at 14% 22%, #fff9 50%, transparent 51%),
+    radial-gradient(1px 1px at 68% 12%, #f7e7c299 50%, transparent 51%),
+    radial-gradient(1.5px 1.5px at 88% 64%, #fff7 50%, transparent 51%),
+    radial-gradient(1px 1px at 34% 78%, #e9c88b88 50%, transparent 51%),
+    radial-gradient(1px 1px at 52% 44%, #fff6 50%, transparent 51%),
+    radial-gradient(1px 1px at 8% 66%, #fff5 50%, transparent 51%);
+  background-size: 420px 420px, 520px 520px, 610px 610px, 470px 470px, 380px 380px, 560px 560px;
+}
+
+::selection { background: #5a1f86; color: #f7e7c2; }
+* { scrollbar-color: #4a2f6b #0d0718; }
+
+/* Serif display type for the court's voice; body copy stays sans and legible. */
+.brand, .hero h1, .panel h2, .panel h3, .hub h2, .session h2,
+.section-title h2, .sheet h2, .roulette-dialog h3, .auth h2, .big-number strong {
+  font-family: "Palatino Linotype", "Book Antiqua", Palatino, Georgia, "Times New Roman", serif;
+  letter-spacing: .004em;
+}
+
+.hero h1, .panel h2, .hub h2, .section-title h2, .sheet h2 {
+  color: #f9efdb;
+  text-shadow: 0 0 34px #e9c88b2e;
+}
+
+/* A short gold rule beneath a heading, like a gilded margin. */
+.panel h2::after, .section-title h2::after, .hub h2::after {
+  content: '';
+  display: block;
+  width: 76px;
+  height: 2px;
+  margin-top: 12px;
+  border-radius: 2px;
+  background: linear-gradient(90deg, transparent, var(--gold), transparent);
+  opacity: .7;
+}
+.panel summary h2::after, summary h2::after { display: none; }
+
+.brand { color: #f7e7c2; text-shadow: 0 0 30px #e9c88b38; }
+.brand span { color: #bda9d4; }
+
+.eyebrow { color: var(--gold); letter-spacing: .2em; }
+.hero .eyebrow::before, .panel .eyebrow::before { content: '\2726'; margin-inline-end: .5em; opacity: .75; }
+
+/* Surfaces: deep amethyst glass with a gilded hairline. */
+.panel {
+  position: relative;
+  background: linear-gradient(160deg, #1f1236 0%, #130a22 74%);
+  border-color: var(--line);
+  box-shadow: 0 18px 46px #04010a66, inset 0 1px #ffffff0e, inset 0 0 0 1px #e9c88b0f;
+}
+.panel::after {
+  content: '';
+  position: absolute;
+  top: 0;
+  inset-inline: 22%;
+  height: 1px;
+  pointer-events: none;
+  background: linear-gradient(90deg, transparent, #e9c88b8c, transparent);
+}
+
+.auth {
+  border-color: #c9a25f;
+  background: linear-gradient(160deg, #241338, #140b23);
+  box-shadow: 0 30px 80px #04010a80, inset 0 0 0 1px #e9c88b1a;
+}
+
+/* The throne: her receiving surface, lit from one corner. */
+.hub {
+  position: relative;
+  isolation: isolate;
+  overflow: hidden;
+  background: linear-gradient(135deg, #4c2469 0%, #241238 58%, #150c24 100%);
+  border-color: #d9b26a;
+  box-shadow: 0 24px 60px #04010a80, inset 0 1px #ffffff12;
+}
+.hub::before {
+  content: '';
+  position: absolute;
+  top: -30%;
+  inset-inline-end: -8%;
+  width: 54%;
+  aspect-ratio: 1;
+  z-index: -1;
+  pointer-events: none;
+  background: radial-gradient(circle, #e9c88b3d, transparent 64%);
+}
+
+.session {
+  background: linear-gradient(120deg, #3d1a5c, #1c0f2c);
+  border-color: #7b5aa6;
+  box-shadow: 0 20px 52px #04010a70, inset 0 1px #ffffff0d;
+}
+
+.next-step {
+  background: linear-gradient(110deg, #35203f, #1a1026);
+  border-inline-start-color: var(--gold);
+}
+
+.safety { background: #150c24; border-color: #4a2f6b; }
+.other-invitation { background: #170e26; border-color: #432a63; }
+
+.current-invitation > .panel {
+  border-color: #e0bd7c;
+  background: linear-gradient(160deg, #3c1c5a, #1a0f2b 76%);
+  box-shadow: 0 0 0 1px #e9c88b26, 0 20px 50px #04010a80;
+}
+.current-invitation > summary > h2 { color: #f5dfae; }
+
+/* Metalwork. */
+button {
+  background: linear-gradient(180deg, #2b1742, #1c0f2c);
+  border-color: #5b3d7d;
+  color: #f6edff;
+  box-shadow: inset 0 1px #ffffff12;
+}
+button:hover:not(:disabled) {
+  background: linear-gradient(180deg, #3b2258, #26143a);
+  border-color: #c9a25f;
+  box-shadow: 0 0 0 1px #e9c88b33, 0 8px 22px #12061f66;
+}
+button.primary {
+  background: linear-gradient(180deg, #8a3ec0, #5a1f86);
+  border-color: #d9b26a;
+  color: #fff8ec;
+  box-shadow: 0 8px 24px #5a1f8640, inset 0 1px #ffffff2e;
+}
+button.primary:hover:not(:disabled) {
+  background: linear-gradient(180deg, #9c4bd4, #6b2a9c);
+  border-color: #f0d5a0;
+}
+button.gold {
+  background: linear-gradient(180deg, #f5dcaa, #d9b26a);
+  border-color: #f7e7c2;
+  color: #26123a;
+  box-shadow: 0 6px 20px #d9b26a3d, inset 0 1px #fffdf6;
+}
+button.gold:hover:not(:disabled) { background: linear-gradient(180deg, #f9e6bd, #e3bd76); }
+button.danger { background: linear-gradient(180deg, #5a1a2e, #3a0f1f); border-color: #d98b9d; color: #ffe9ee; }
+button.quiet { color: var(--gold); }
+button[aria-pressed="true"] { border-color: #e9c88b; background: #3a2154; }
+
+:focus-visible { outline-color: #f7e7c2; }
+input:focus-visible, textarea:focus-visible, select:focus-visible {
+  border-color: #e9c88b;
+  box-shadow: 0 0 0 3px #e9c88b26;
+}
+
+input:not([type="checkbox"]):not([type="radio"]), select, textarea {
+  background: #120a1f;
+  border-color: #4d3470;
+  color: #f6efff;
+}
+input::placeholder, textarea::placeholder { color: #a58cbe; }
+input[type="checkbox"], input[type="radio"] { accent-color: #b8912f; }
+fieldset { border-color: #6b4a92; }
+
+a { color: var(--gold-pale); }
+
+nav button.active, nav button[aria-current="page"] {
+  background: linear-gradient(180deg, #3c1d5c, #241037);
+  border-color: #a9843f;
+  color: #f8ebcd;
+  box-shadow: 0 0 0 1px #e9c88b26, 0 6px 18px #3a1a5e4d;
+}
+
+.badge {
+  background: #241338;
+  border-color: #8a6a3a;
+  color: #f0dcb0;
+  letter-spacing: .02em;
+}
+
+.notice {
+  background: linear-gradient(120deg, #2b1740, #1a0f2b);
+  border-color: #e9c88b;
+  border-inline-start-color: var(--gold);
+  color: #f2e4c8;
+}
+.error { background: #3a1024; border-color: #e08fa2; color: #ffe9ee; }
+.warning { border-color: #e0b96b; }
+.empty { border-color: #5b3d7d; color: var(--muted); }
+
+.cards.library .panel { background: linear-gradient(160deg, #241338, #150c24); border-color: #4a2f6b; }
+.cards.library .panel:hover { border-color: #d9b26a; box-shadow: 0 16px 38px #04010a80, 0 0 0 1px #e9c88b1f; }
+
+article { border-bottom-color: #4a2f6b66; }
+blockquote {
+  background: linear-gradient(120deg, #241338, #150c24);
+  border-inline-start-color: var(--gold);
+  border-radius: 12px;
+  padding: 14px 16px;
+}
+.adoration-words {
+  border: 1px solid #4a2f6b;
+  border-inline-start: 3px solid var(--gold);
+  padding: 16px 18px;
+  box-shadow: inset 0 1px #ffffff0d, 0 12px 30px #04010a4d;
+}
+.adoration-words .eyebrow { margin-block: 0 6px; }
+
+.messages article { background: #190f2a; border-color: #3f2a5e; }
+.messages .mine { background: #33205a; }
+
+.stat-grid > div { background: #170e26; border-color: #3f2a5e; }
+.stat-grid strong { color: #f2dcae; }
+.stat-grid > div:nth-child(1) strong { color: #f3dfb4; }
+.stat-grid > div:nth-child(2) strong { color: #e9c88b; }
+.stat-grid > div:nth-child(3) strong { color: #e7a9c6; }
+.stat-grid > div:nth-child(4) strong { color: #c9b6f0; }
+.big-number strong { color: #f2dcae; }
+
+.points-bar, .points-bar::-webkit-progress-bar { background: #241435; }
+.points-bar::-webkit-progress-value,
+.points-bar::-moz-progress-bar { background: linear-gradient(90deg, #b8912f, #f7e7c2); }
+
+.mood-tile[aria-pressed="true"] {
+  border-color: #e9c88b;
+  background: linear-gradient(145deg, #5a2a80, #2f1848);
+  box-shadow: 0 0 0 2px #e9c88b3d, 0 12px 30px #2f184866;
+}
+
+details.panel > summary::after { background: #1c1030; border-color: #5b3d7d; }
+
+footer { border-color: #3f2a5e; color: #bfaed0; }
+footer > span { color: var(--gold); }
+
+/* Overlays sit closer to the night than the page. */
+.sheet {
+  background: linear-gradient(165deg, #21133a, #120a20);
+  border-color: #c9a25f;
+  box-shadow: 0 30px 90px #04010ae6, inset 0 1px #ffffff14;
+}
+.sheet::backdrop { background: #05010cd9; }
+.sheet-steps li { background: #180e28; border-color: #3f2a5e; }
+.sheet h2 { color: #f9efdb; }
+
+.roulette-dialog {
+  background: linear-gradient(150deg, #2b1546, #150c24);
+  border-color: #d9b26a;
+  box-shadow: 0 30px 90px #04010ae6, inset 0 0 0 1px #e9c88b1a;
+}
+.roulette-dialog h3 { color: #f8e6bf; }
+.roulette { background: radial-gradient(ellipse at top, #3a1d58, #150c24 70%); border-color: #6b4a92; }
+.roulette-wheel { box-shadow: 0 0 0 5px #d9b26a, 0 16px 40px #04010a99; }
+
+.quick-bar {
+  background: #0b0614f7;
+  border-top-color: #3f2a5e;
+  box-shadow: inset 0 1px #e9c88b2e;
+}
+
+/* Her court: warmer gold, deeper amethyst, brighter gilding. */
+main.role-wife { --gold: #e9c88b; --line: #4a2f6b; --muted: #cdb9dd; }
+main.role-wife .hub {
+  background: linear-gradient(135deg, #54276f 0%, #241238 58%, #150c24 100%);
+  border-color: #e0bd7c;
+}
+main.role-wife .hub::before { background: radial-gradient(circle, #f0d5a04d, transparent 64%); }
+main.role-wife .panel::after { background: linear-gradient(90deg, transparent, #e9c88bb3, transparent); }
+main.role-wife.persona-strict { --line: #6a3352; --gold: #eeb08c; }
+main.role-wife.persona-playful { --line: #5b3a7a; --gold: #f2c3dc; }
+main.role-wife.persona-caring { --line: #54406e; --gold: #f5e2b8; }
+
+/* His side: kept in sapphire and silver, cool against her gold. */
+main.role-husband { --gold: #cfd9ea; --line: #34456b; --muted: #c3cde0; }
+main.role-husband .panel {
+  background: linear-gradient(160deg, #182238, #0e1526 74%);
+  box-shadow: 0 18px 46px #04010a66, inset 0 1px #ffffff0c;
+}
+main.role-husband .panel::after { background: linear-gradient(90deg, transparent, #cfd9ea80, transparent); }
+main.role-husband .hub {
+  background: linear-gradient(135deg, #2b3c61, #141d33 60%, #0d1424);
+  border-color: #8fa6c9;
+}
+main.role-husband .hub::before { background: radial-gradient(circle, #cfd9ea2e, transparent 64%); }
+main.role-husband .session { background: linear-gradient(120deg, #28395c, #101728); border-color: #7188ad; }
+main.role-husband .hero:not(.compact) { border-color: #5f7ba6; box-shadow: 0 32px 90px #04010a99, inset 0 0 0 1px #cfd9ea1f; }
+main.role-husband .current-invitation > .panel {
+  background: linear-gradient(160deg, #26354f, #101726);
+  border-color: #cfd9ea;
+}
+main.role-husband .current-invitation > summary > h2 { color: #e5ecf7; }
+main.role-husband button.primary { background: linear-gradient(180deg, #4a6491, #2f4266); border-color: #a9bcd8; }
+main.role-husband button.primary:hover:not(:disabled) { background: linear-gradient(180deg, #5876a8, #3a4f78); }
+main.role-husband button.gold {
+  background: linear-gradient(180deg, #e2e9f4, #c2cfe2);
+  border-color: #eef2f8;
+  color: #131c2e;
+}
+main.role-husband nav button.active, main.role-husband nav button[aria-current="page"] {
+  background: linear-gradient(180deg, #33456b, #23314f);
+  border-color: #93a8cc;
+  color: #f2f6fb;
+}
+main.role-husband .stat-grid strong { color: #dbe4f2; }
+main.role-husband .points-bar::-webkit-progress-value,
+main.role-husband .points-bar::-moz-progress-bar { background: linear-gradient(90deg, #8fa6c9, #dbe4f2); }
+main.role-husband .badge { background: #1b2740; border-color: #6f86ad; color: #e3ebf7; }
+
+/* High contrast keeps its promise, retinted to the court. */
+main.hc { --line: #f0d7a8; --gold: #ffe9c4; --muted: #f3ecfa; }
+main.hc .panel, main.hc .stat-grid > div, main.hc .account .badge { border-color: #f0d7a8; }
+main.hc button, main.hc input, main.hc select, main.hc textarea { border-color: #ffe9c4; }
+main.hc .notice, main.hc .empty, main.hc .error { border-color: #ffe9c4; }
+main.hc button.quiet { color: #ffe9c4; }
+
+/* The hero keeps its night scene; only the veil and the frame are gilded. */
+.hero:not(.compact) {
+  border-color: #8a6a3a;
+  box-shadow: 0 32px 90px #04010a99, inset 0 0 0 1px #e9c88b1f;
+}
+.hero:not(.compact)::before {
+  background: linear-gradient(90deg, #080410fa 0%, #100820ef 46%, #10082044 100%);
+}
+html[dir="rtl"] .hero:not(.compact)::before {
+  background: linear-gradient(270deg, #080410fa 0%, #100820ef 46%, #10082044 100%);
+}
+.hero:not(.compact) h1 { color: #fbf1dd; }
+.hero:not(.compact) > p:last-child { color: #e3d4ea; }

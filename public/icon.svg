@@ -1,1 +1,36 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512"><rect width="512" height="512" rx="96" fill="#180d13"/><path d="M104 132h64v98h176v-98h64v248h-64V282H168v98h-64z" fill="#c9a76d"/><path d="m176 90 36-36 44 36 44-36 36 36-24 22H200z" fill="#a43553"/></svg>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" role="img" aria-label="HER RULES">
+  <defs>
+    <linearGradient id="night" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#0a0514"/>
+      <stop offset=".55" stop-color="#1d0f33"/>
+      <stop offset="1" stop-color="#2b1147"/>
+    </linearGradient>
+    <linearGradient id="crown" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#f7e7c2"/>
+      <stop offset=".55" stop-color="#e9c88b"/>
+      <stop offset="1" stop-color="#b8912f"/>
+    </linearGradient>
+  </defs>
+  <rect width="512" height="512" rx="112" fill="url(#night)"/>
+  <circle cx="368" cy="140" r="58" fill="#f8eccd" opacity=".92"/>
+  <circle cx="392" cy="122" r="52" fill="#1d0f33"/>
+  <g fill="#f7e7c2" opacity=".8">
+    <circle cx="120" cy="120" r="4"/>
+    <circle cx="196" cy="88" r="3"/>
+    <circle cx="92" cy="214" r="3"/>
+    <circle cx="256" cy="70" r="2.5"/>
+    <circle cx="330" cy="252" r="2.5" opacity=".6"/>
+    <circle cx="150" cy="300" r="2.5" opacity=".5"/>
+  </g>
+  <path d="M126 372V232l58 44 38-86 38 86 58-44v140z" fill="url(#crown)"/>
+  <rect x="126" y="372" width="192" height="26" rx="13" fill="#e9c88b"/>
+  <g fill="#2b1147">
+    <circle cx="146" cy="352" r="9"/>
+    <circle cx="184" cy="352" r="9"/>
+    <circle cx="222" cy="352" r="9"/>
+    <circle cx="260" cy="352" r="9"/>
+    <circle cx="298" cy="352" r="9"/>
+  </g>
+  <circle cx="222" cy="222" r="11" fill="#8a3ec0"/>
+  <circle cx="222" cy="222" r="4" fill="#f7e7c2"/>
+</svg>
