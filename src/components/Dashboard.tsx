@@ -79,9 +79,7 @@ export function DashboardTab({ s, u, wife, ended, held, play, now, lang, t, date
   return <>
     {wife&&s&&!ended&&s.pace===undefined&&onboardingPanel}
     {wife&&s&&quickBar}
-    {wife&&<section className="panel hub"><p className="eyebrow">{t('חדר השליטה','CONTROL ROOM')}</p><h2>{t('מה תרצי לעשות הערב?','What would you like to do tonight?')}</h2><p>{t('בחרי מצב רוח, שלחי פקודה מוכנה, או בדקי מה ממתין לך. הכול נשאר בשליטתך.','Pick a mood, send a ready-made command, or check what is waiting for you. You stay in control of everything.')}</p></section>}
-    {wife&&paceAndEnd}
-    {!wife&&statsPanel}
+    {wife&&<section className="panel hub" aria-label={t('האדורציה שלה','Her Adoration')}}><p className="eyebrow">{t('האדורציה שלה','Her Adoration')}</p><h2>{t('קבלת ההערצה','Receiving Adoration')}</h2><p>{t('טביעה אחת מגיעה לך. גלה אותה, לוגמי את תחושותיו, הענקי לה, או חתמי את הפרק. / One devotion is due you. Reveal it, sip his longing, grant the earned moment, or seal the chapter.')}</p><div className="adoration-actions" role="group"><Button className="primary" onClick={()=>void run(()=>action('tribute-reveal'))}>{t('פותח/ה','Reveal')}</Button><Button className="secondary" onClick={()=>void run(()=>action('sip'))}>{t('לוגמת','Sip')}</Button><Button className="secondary" onClick={()=>void run(()=>action('grant'))}>{t('מעניקה','Grant')}</Button><Button className="secondary" onClick={()=>void run(()=>action('seal'))}>{t('חותמת','Seal')}</Button></div></section>
     {nudgeDue&&!held&&<section className="panel"><p>{t('עבר זמן מאז שהייתם כאן יחד. אפשר לחזור בצעד קטן: הודעה אחת או צ׳ק־אין קצר.','It has been a while since you were together here. You can ease back in with one small step: a message or a short check-in.')}</p><Button onClick={dismissNudge}>{t('לא עכשיו','Not now')}</Button></section>}
     {wife&&<ForYou deck={deck} lang={lang} t={t} play={play} useIdea={useIdea} onSkip={skipDeck}/>}
     <Garden total={gardenTotal} t={t}/>
