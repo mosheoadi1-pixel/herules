@@ -7,7 +7,7 @@ import pg from 'pg';
 import { startDatabase } from '../scripts/db/runtime.mjs';
 import { createApp, type Mission, type Session } from '../server/app.ts';
 import { quickPresets } from '../src/quick.ts';
-import { progressStats, careDue, milestones, quietDays, weeklyRecap, favouriteMood, WISH_COOLDOWN_MS } from '../src/progress.ts';
+import { progressStats, careDue, milestones, quietDays, weeklyRecap, favouriteMood } from '../src/progress.ts';
 
 const directory=await mkdtemp(join(tmpdir(),'her-rules-play-flow-'));
 const db=await startDatabase(directory,55441),pool=new pg.Pool({connectionString:db.url});
@@ -33,7 +33,6 @@ try {
   const id=(await w('/sessions',{terms:'Simple invitations, free refusal, pauses always available',minutes:120})).session.id;
   const op=(who:typeof w,name:string,body:Record<string,unknown>={},status=200,error?:string)=>who(`/sessions/${id}/${name}`,body,status,error);
   const state=async():Promise<Session>=>(await w(`/sessions/${id}`)).session;
-  async function ageWishes(){const row=(await pool.query('SELECT data FROM sessions WHERE id=$1',[id])).rows[0].data as Session;for(const wish of row.herWishes!)wish.createdAt=0;await pool.query('UPDATE sessions SET data=$2 WHERE id=$1',[id,JSON.stringify(row)]);}
   const edit=async(change:(row:Session)=>void)=>{const row=(await pool.query('SELECT data FROM sessions WHERE id=$1',[id])).rows[0].data as Session;change(row);await pool.query('UPDATE sessions SET data=$2 WHERE id=$1',[id,JSON.stringify(row)]);};
   const freshEvening=()=>edit(row=>{for(const m of row.missions)m.createdAt=0;delete row.eveningClosedAt;});
 
@@ -78,24 +77,53 @@ try {
   assert.equal(s.herPoints,preset.points);
   assert.equal(s.points,preset.points);
 
-  // Her wishes: spend only her own points; wishes cool down for a day; insufficient balance is rejected.
-  await op(h,'herwish',{title:'Hidden',cost:1},403);
-  await op(w,'herwish',{title:'An hour free of interruptions',cost:preset.points});
+  // Wishlist: she adds, only he prices, she requests priced wishes, he decides with shared points; books draw from a monthly allowance that expires.
+  await edit(row=>{row.points=20;});
+  await op(h,'wish-add',{title:'Hidden'},403);
+  await op(w,'wish-add',{title:'Carpet',description:'Soft and warm',link:'https://example.com/rug'});
+  await op(w,'wish-add',{title:'Bad link',link:'javascript:alert(1)'},400);
+  await op(w,'wish-add',{title:'A novel',book:true});
   s=await state();
-  const createdWish=s.herWishes!.find(x=>x.title==='An hour free of interruptions')!;
-  assert.ok(createdWish.createdAt!>0);
-  await op(w,'herwish',{title:'Too expensive',cost:999});
+  const carpet=s.wishes!.find(x=>x.title==='Carpet')!,novel=s.wishes!.find(x=>x.title==='A novel')!;
+  assert.equal(carpet.cost,undefined);
+  assert.equal((await op(w,'wish-request',{wish:carpet.id},409)).error,'Wish is not priced yet');
+  await op(w,'wish-price',{wish:carpet.id,cost:50},403);
+  await op(h,'wish-price',{wish:carpet.id,cost:50});
+  await op(h,'wish-price',{wish:novel.id,cost:1});
+  await op(h,'books-allowance',{monthly:2});
+  await op(w,'wish-request',{wish:carpet.id});
   s=await state();
-  const expensive=s.herWishes!.find(x=>x.title==='Too expensive')!;
-  assert.equal((await op(w,'herwish-redeem',{wish:expensive.id},409)).error,'Wish is still cooling down');
-  assert.equal((await op(w,'herwish-redeem',{wish:createdWish.id},409)).error,'Wish is still cooling down');
-  await ageWishes();
-  assert.equal((await op(w,'herwish-redeem',{wish:expensive.id},409)).error,'Not enough points');
-  await op(w,'herwish-redeem',{wish:createdWish.id});
+  const carpetRequest=s.wishRequests!.find(r=>r.wish===carpet.id)!;
+  assert.equal(carpetRequest.status,'pending');
+  assert.equal((await op(w,'wish-request',{wish:carpet.id},409)).error,'Wish already requested');
+  assert.equal((await op(w,'wish-remove',{wish:carpet.id},409)).error,'Wish has a pending request');
+  assert.equal((await op(h,'wish-price',{wish:carpet.id,cost:40},409)).error,'Wish has a pending request');
+  assert.equal((await op(h,'wish-decision',{request:carpetRequest.id,approve:true},409)).error,'Insufficient points for wish');
+  await op(h,'wish-decision',{request:carpetRequest.id,approve:false});
   s=await state();
-  assert.equal(s.herPoints,0);
-  assert.ok(!s.herWishes!.some(x=>x.id===createdWish.id));
-  assert.ok(s.herWishes!.some(x=>x.id===expensive.id));
+  assert.equal(s.wishRequests!.find(r=>r.id===carpetRequest.id)!.status,'declined');
+  assert.equal(s.points,20);
+  await op(w,'wish-request',{wish:carpet.id});
+  await op(w,'wish-request',{wish:novel.id});
+  s=await state();
+  const bookRequests=s.wishRequests!.filter(r=>r.wish===novel.id);
+  assert.equal(bookRequests.length,1);
+  await op(h,'wish-decision',{request:bookRequests[0].id,approve:true});
+  s=await state();
+  assert.equal(s.points,19);
+  assert.equal(s.bookAllowance!.spent,1);
+  await op(w,'wish-request',{wish:novel.id});
+  s=await state();
+  const secondBook=s.wishRequests!.find(r=>r.wish===novel.id&&r.status==='pending')!;
+  await op(h,'books-allowance',{monthly:1});
+  assert.equal((await op(h,'wish-decision',{request:secondBook.id,approve:true},409)).error,'Book allowance exceeded');
+  await edit(row=>{row.bookAllowance!.month='2000-01';});
+  s=await state();
+  assert.equal(s.bookAllowance!.spent,0,'unused book allowance expires at the start of a new month');
+  await op(h,'wish-decision',{request:secondBook.id,approve:true});
+  s=await state();
+  assert.equal(s.points,18);
+  assert.equal(s.bookAllowance!.spent,1);
 
   // Saved commands are visible to her and hidden from him.
   await op(w,'command-save',{title:'Playlist',text:'Send one song each morning',points:1});
@@ -199,7 +227,6 @@ try {
   assert.deepEqual(weeklyRecap([done(1)],now),{approvedThisWeek:1,topRating:null,herPointsThisWeek:1});
   assert.equal(favouriteMood({soft:0,playful:2,strict:2}),'playful');assert.equal(favouriteMood({soft:1,playful:0,strict:3}),'strict');
   assert.equal(favouriteMood({soft:0,playful:0,strict:0}),null);assert.equal(favouriteMood(undefined),null);
-  assert.equal(WISH_COOLDOWN_MS,86400000);
 
   // Pace: wife only, values 1-3, enforced per night and per evening for quick commands; cancelled commands free a slot.
   await op(h,'pace',{commandsPerEvening:2},403);
@@ -375,7 +402,7 @@ try {
   await op(w,'her-night',{...nightPayload,key:randomUUID()},409,'Session is terminal');
   await op(w,'evening-close',{key:randomUUID()},409,'Session is terminal');
   await op(w,'evening-save',{name:'Late',mood:'soft',steps:[nightStep]},409,'Session is terminal');
-  console.log('PASS play flow: approvals, quick commands, keyed retries, scheduling, review points, wishes with cooldown, private commands, aftercare, her night, quick ratings, private notes, progress helpers, pacing, done for tonight, saved evenings, night cap, devotions, chapters, terminal guard');
+  console.log('PASS play flow: approvals, quick commands, keyed retries, scheduling, review points, wishlist pricing and book allowance, private commands, aftercare, her night, quick ratings, private notes, progress helpers, pacing, done for tonight, saved evenings, night cap, devotions, chapters, terminal guard');
 } finally {
   if(server)await new Promise<void>(resolve=>server!.close(()=>resolve()));
   await pool.end();await db.stop();await rm(directory,{recursive:true,force:true,maxRetries:10,retryDelay:100});

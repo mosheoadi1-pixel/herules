@@ -1,8 +1,7 @@
 import { useState } from 'react';
 import type { Dispatch, SetStateAction } from 'react';
 import type { Mission, Session, User } from '../../server/app';
-import { progressStats, weeklyRecap, milestones, favouriteMood, WISH_COOLDOWN_MS, type Mood, type Rating } from '../progress';
-import { wishSuggestions } from '../quick';
+import { progressStats, weeklyRecap, milestones, favouriteMood, type Mood, type Rating } from '../progress';
 import { save, form, type Action, type Night, type Run, type SavedEvening, type SayDraft, type Translate } from '../app-shared';
 import type { DeckItem } from '../foryou';
 import type { Idea } from '../library';
@@ -28,7 +27,7 @@ type DashboardTabProps = {
   progress: ReturnType<typeof progressStats>; weekly: ReturnType<typeof weeklyRecap>; badges: ReturnType<typeof milestones>;
   ratingLabel: (rating: Rating) => string; moodLabel: (mood: Mood) => string;
   favourite: ReturnType<typeof favouriteMood>; nextScheduled: Mission | undefined;
-  notes: NonNullable<Session['notes']>; notesFull: boolean; cheapestWish: { cost: number } | undefined;
+  notes: NonNullable<Session['notes']>; notesFull: boolean;
   awaitingReview: Mission[]; pendingRewards: NonNullable<Session['rewardRequests']>; recentApproved: Mission[]; needsCare: boolean;
   keysHintSeen: boolean; setKeysHintSeen: Dispatch<SetStateAction<boolean>>;
   moodOrder: Mood[]; nightMood: Mood | ''; lastMood: Mood | ''; chooseMood: (mood: Mood) => void;
@@ -46,7 +45,7 @@ type DashboardTabProps = {
   deck: DeckItem[]; skipDeck: (id: string) => void; gardenTotal: number; useIdea: (idea: Idea) => void;
 };
 
-export function DashboardTab({ s, u, wife, ended, held, play, now, lang, t, date, label, run, action, nudgeDue, dismissNudge, progress, weekly, badges, ratingLabel, moodLabel, favourite, nextScheduled, notes, notesFull, cheapestWish, awaitingReview, pendingRewards, recentApproved, needsCare, keysHintSeen, setKeysHintSeen, moodOrder, nightMood, lastMood, chooseMood, sendSteps, nightBlock, askNight, saveOpen, setSaveOpen, eveningName, setEveningName, savedFull, saveEvening, savedList, sendBlock, cap, usedNow, limitMessage, askRun, lastNight, nightApproved, nightMissions, choosePace, finishOnboarding, closedNow, windowHours, reopenHours, askClose, quickBlock, barPresets, askPreset, quickAt, setQuickAt, askQuick, sayOpen, setSayOpen, sayText, setSayText, sayDraft, setSayDraft, sayReady, deck, skipDeck, gardenTotal, useIdea }: DashboardTabProps) {
+export function DashboardTab({ s, u, wife, ended, held, play, now, lang, t, date, label, run, action, nudgeDue, dismissNudge, progress, weekly, badges, ratingLabel, moodLabel, favourite, nextScheduled, notes, notesFull, awaitingReview, pendingRewards, recentApproved, needsCare, keysHintSeen, setKeysHintSeen, moodOrder, nightMood, lastMood, chooseMood, sendSteps, nightBlock, askNight, saveOpen, setSaveOpen, eveningName, setEveningName, savedFull, saveEvening, savedList, sendBlock, cap, usedNow, limitMessage, askRun, lastNight, nightApproved, nightMissions, choosePace, finishOnboarding, closedNow, windowHours, reopenHours, askClose, quickBlock, barPresets, askPreset, quickAt, setQuickAt, askQuick, sayOpen, setSayOpen, sayText, setSayText, sayDraft, setSayDraft, sayReady, deck, skipDeck, gardenTotal, useIdea }: DashboardTabProps) {
   const StatsBox=wife?'details':'section';
    const statsPanel=<StatsBox className="panel stats" aria-label={t('התקדמות המשחק','Game progress')}>{wife?<summary><h2>{t('איך המשחק מתקדם','How the game is going')}</h2></summary>:<h2>{t('איך המשחק מתקדם','How the game is going')}</h2>}
       <div className="stat-grid">
@@ -136,6 +135,9 @@ export function DashboardTab({ s, u, wife, ended, held, play, now, lang, t, date
   ))}
 </div><p className="small dim">{t('הפרק ייכנס לתור שלך מיד. אפשר למסור אותו מיד או לתת לו לחכות לבוקר.','The chapter lands in your queue immediately. Deliver it right away or let it wait until morning.')}</p>{cliffhanger&&<p className="small dim">{t('המכתב למחר','The letter for tomorrow')}: {t(cliffhanger.he,cliffhanger.en)}</p>}</section>}
     {wife&&paceAndEnd}
+    {!wife&&(s.wishRequests??[]).some(r=>r.status==='pending')&&<section className="panel"><h2>{t('בקשות משאלות','Wish requests')}</h2>
+      {(s.wishRequests??[]).filter(r=>r.status==='pending').map(r=><article key={r.id}><h3>{r.title}</h3><p>{r.cost} {t('נקודות','points')}{r.book?` · ${t('ספר','book')}`:''}</p><div className="row"><Button className="primary" disabled={!play} onClick={()=>void run(()=>action('wish-decision',{request:r.id,approve:true}))}>{t('אישור משאלה','Approve wish')}</Button><Button disabled={!play} onClick={()=>void run(()=>action('wish-decision',{request:r.id,approve:false}))}>{t('דחיית משאלה','Decline wish')}</Button></div></article>)}
+    </section>}
     {!wife&&statsPanel}
     {nudgeDue&&!held&&<section className="panel"><p>{t('עבר זמן מאז שהייתם כאן יחד. אפשר לחזור בצעד קטן: הודעה אחת או צ׳ק־אין קצר.','It has been a while since you were together here. You can ease back in with one small step: a message or a short check-in.')}</p><Button onClick={dismissNudge}>{t('לא עכשיו','Not now')}</Button></section>}
     {wife&&<ForYou deck={deck} lang={lang} t={t} play={play} useIdea={useIdea} onSkip={skipDeck}/>}
@@ -152,20 +154,7 @@ export function DashboardTab({ s, u, wife, ended, held, play, now, lang, t, date
       </section>
       <CommandPanel s={s} play={play} t={t} lang={lang} quickAt={quickAt} setQuickAt={setQuickAt} quickBlock={quickBlock} askPreset={askPreset} askQuick={askQuick} run={run} action={action} sayOpen={sayOpen} setSayOpen={setSayOpen} sayText={sayText} setSayText={setSayText} sayDraft={sayDraft} setSayDraft={setSayDraft} sayReady={sayReady}/>
       <section className="panel"><h2>{t('הזוהר שלך','Your Glow')}</h2><p className="big-number"><strong>{s?.herPoints??0}</strong> {t('זוהר','Glow')}</p><p className="small">{t('כל הערצה שאת מקבלת מוסיפה זוהר. הזוהר מגיע מהחסד שלך, לא מעבודה שלך.','Every devotion you receive adds Glow. Glow comes from your grace, not from your labor.')}</p>
-        {cheapestWish&&<div>
-          <progress className="points-bar" max={Math.max(cheapestWish.cost,1)} value={Math.min(s?.herPoints??0,Math.max(cheapestWish.cost,1))} aria-label={t('התקדמות למשאלה הזולה ביותר','Progress toward the cheapest wish')}/>
-          <p className="small">{(s?.herPoints??0)>=cheapestWish.cost?t('יש מספיק נקודות למשאלה הזולה.','There are enough points for the cheapest wish.'):t(`עוד ${cheapestWish.cost-(s?.herPoints??0)} נקודות למשאלה הזולה.`,`${cheapestWish.cost-(s?.herPoints??0)} more points to the cheapest wish.`)}</p>
-        </div>}
-        {!s?.herWishes?.length&&<p className="empty">{t('עדיין אין משאלות.','No wishes yet.')}</p>}
-        {(s?.herWishes??[]).map(w=>{const unlockAt=(w.createdAt??0)+WISH_COOLDOWN_MS,cooling=now<unlockAt;return <article key={w.id}><h4>{w.title}</h4><p>{w.cost} {t('נקודות','points')}</p><Button className="primary" disabled={!play||cooling||(s?.herPoints??0)<w.cost} onClick={()=>void run(()=>action('herwish-redeem',{wish:w.id}))}>{t('מימוש המשאלה','Redeem wish')}</Button>{cooling&&<p className="small">{t('אפשר לממש אחרי','Available after')} {date(unlockAt)}</p>}</article>;})}
-        <h3>{t('הוספת משאלה','Add a wish')}</h3>
-        <div className="quick-grid">{wishSuggestions.map(w=><button key={w.he} disabled={!play} onClick={()=>void run(()=>action('herwish',{title:lang==='he'?w.he:w.en,cost:w.cost}))}>{lang==='he'?w.he:w.en} · {w.cost}</button>)}</div>
-        <details className="subtle"><summary>{t('משאלה משלך','Your own wish')}</summary>
-        <form onSubmit={e=>{const el=e.currentTarget,b=form(e);void run(async()=>{await action('herwish',{title:b.title,cost:Number(b.cost)});el.reset();});}}>
-          <label>{t('משאלה','Wish')}<input name="title" required maxLength={160}/></label>
-          <label>{t('עלות בנקודות','Cost in points')}<input name="cost" type="number" min={0} max={100000} defaultValue={30} required/></label>
-          <Button disabled={!play}>{t('הוספת משאלה','Add wish')}</Button>
-        </form></details>
+        <p className="small">{t('המשאלות מנוהלות בלשונית הפרסים.','Wishes are managed in the Rewards tab.')}</p>
       </section>
     {statsPanel}
     <details className="panel"><summary><h2>{t('הפתקים שלי','My notes')}</h2></summary>

@@ -8,12 +8,6 @@ export const quickPresets:QuickPreset[]=[
   {id:'standby',he:'להיות זמין לכל בקשה שלה במשך 20 דקות, בלי עיסוק אחר.',en:'Stay available for any request she makes for 20 minutes, with nothing else on your hands.',points:2}
 ];
 
-export const wishSuggestions:{he:string;en:string;cost:number}[]=[
-  {he:'שעה בלי הפרעות, לבחירתה',en:'An hour free of interruptions, her choice',cost:30},
-  {he:'בחירת הסרט לערב',en:'Choose tonight’s movie',cost:15},
-  {he:'ערב פטור מכל משימה',en:'A night free of all tasks',cost:60}
-];
-
 export const nightTemplates:Record<'soft'|'playful'|'strict',{he:string;en:string;points:number}[]>={
   soft:[
     {he:'להביא לה שמיכה חמה ולשבת לידה בשקט במשך 15 דקות.',en:'Bring her a warm blanket and sit quietly beside her for 15 minutes.',points:1},

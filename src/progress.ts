@@ -1,7 +1,6 @@
 import type { Mission } from '../server/app';
 
 const DAY=86400000;
-export const WISH_COOLDOWN_MS=DAY;
 export const EVENING_WINDOW_MS=DAY/2;
 const dayKey=(at:number)=>new Date(at).toDateString();
 export type Mood='soft'|'playful'|'strict';
