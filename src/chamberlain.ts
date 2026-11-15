@@ -160,7 +160,8 @@ function adaptMissionText(
 export async function chamberlainPersistComposition(
   c: any, // pg PoolClient from the transaction
   sessionId: string,
-  missions: MissionSpec[]
+  missions: MissionSpec[],
+  morning?: number // 8am tomorrow in epoch milliseconds
 ): Promise<{ missionIds: string[]; cliffhanger: { he: string; en: string } }> {
   // Read current session data
   const sQuery = await c.query('SELECT data FROM sessions WHERE id=$1', [sessionId]);
@@ -170,6 +171,7 @@ export async function chamberlainPersistComposition(
 
   // Generate mission IDs and initialize each mission with required fields
   const missionIds: string[] = [];
+  const morningEpoch = morning ?? Math.floor(Date.now() / 86400000) * 86400000 + 8 * 3600000 // 8am tomorrow
   const initializedMissions: Mission[] = missions.map(m => ({
     id: randomUUID(),
     revision: 0,
@@ -180,8 +182,8 @@ export async function chamberlainPersistComposition(
     surprise: m.surprise ?? false,
     completionStyle: m.completionStyle ?? 'simple',
     category: m.category || 'unknown',
-    status: 'draft', // New missions start as draft
-    scheduledAt: undefined,
+    status: 'queued', // New missions start as queued (playable immediately)
+    scheduledAt: morningEpoch,
     completion: undefined,
     submissionVersion: undefined,
     deliveredAt: undefined,
