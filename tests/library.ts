@@ -1,6 +1,12 @@
 import assert from 'node:assert/strict';
-import { library, suggest } from '../src/library.ts';
+import { categories, library, suggest } from '../src/library.ts';
+import { labels } from '../src/i18n.ts';
 assert.equal(library.length,43);
+for(const c of ['worship','devotion','training','dresscode','public','denial']){
+  assert.ok(categories.includes(c as typeof categories[number]),`${c} must be a category`);
+  assert.ok(labels[c]?.[0]&&labels[c]?.[1],`${c} needs Hebrew and English labels`);
+  assert.equal(library.filter(i=>i.category===c).length,0,'New categories are never re-categorized or seeded');
+}
 assert.equal(new Set(library.map(i=>i.en)).size,43);
 assert.notEqual(library.find(v=>v.id==='custom-anticipation-1')!.en,library.find(v=>v.id==='custom-anticipation-2')!.en);
 assert.equal(new Set(library.map(i=>i.he)).size,43);

@@ -28,6 +28,19 @@ export function progressStats(missions:Mission[],now:number){
   };
 }
 
+// UTC calendar days: a streak counts whole UTC days with at least one timestamp, so the boundary is 00:00Z.
+export function streakStats(stamps:number[],now:number){
+  const days=new Set(stamps.filter(at=>Number.isFinite(at)&&at>0).map(at=>Math.floor(at/DAY)));
+  const today=Math.floor(now/DAY);
+  const todayDone=days.has(today);
+  let cursor=todayDone?today:today-1,current=0;
+  while(days.has(cursor)){current++;cursor--;}
+  const sorted=[...days].sort((a,b)=>a-b);
+  let longest=0,run=0,previous=NaN;
+  for(const day of sorted){run=day===previous+1?run+1:1;longest=Math.max(longest,run);previous=day;}
+  return {current,longest,todayDone};
+}
+
 export function careDue(missions:Mission[],lastCareAt=0){
   const last=missions.filter(m=>m.status==='approved').reduce((max,m)=>Math.max(max,m.approvedAt??0),0);
   return last>0&&lastCareAt<last;
@@ -73,4 +86,10 @@ export function favouriteMood(moodCounts?:Partial<Record<Mood,number>>){
   let best:Mood|null=null,max=0;
   for(const mood of moods){const count=moodCounts?.[mood]??0;if(count>max){max=count;best=mood;}}
   return best;
+}
+
+export function adorationTally(missions:Mission[]){
+  const tally={loved:0,liked:0,ok:0};
+  for(const m of missions){if(m.status==='approved'&&m.adoration){tally[m.adoration]++;}}
+  return tally;
 }

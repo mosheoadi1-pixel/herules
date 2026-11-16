@@ -32,6 +32,10 @@ try{
    console.log('PASS address aliases: nonconfigured 127.0.0.1 guest entry and cookie reload without Origin rejection');
   const contexts=[aliasContext,await browser.newContext(),await browser.newContext()];
   const w=aliasPage,h=await contexts[1].newPage(),x=await contexts[2].newPage();
+  async function openCheckIn(page:any){
+    const panel=page.locator('details').filter({has:page.locator('summary',{hasText:/How are we right now\?|איך אנחנו עכשיו\?/})});
+    if(!(await panel.evaluate((e:HTMLDetailsElement)=>e.open)))await panel.locator('summary').click();
+  }
   async function heldOwnSave(kind:'checkin'|'reflection',controls:any[],values:string[],buttonName:string){
     const pattern=`**/api/sessions/*/${kind}`;
     let release!:()=>void,committed!:()=>void;
@@ -63,47 +67,45 @@ try{
   await w.getByRole('button',{name:'English',exact:true}).click();
   await w.getByRole('heading',{name:'Waiting for the second player',exact:true}).waitFor();
   assert.equal(await w.getByRole('button',{name:'Create new invitation',exact:true}).count(),0);
-  await guestForm(h,'husband');await h.getByRole('heading',{name:'New session',exact:true}).waitFor();
+  await guestForm(h,'husband');await h.getByRole('region',{name:'Next step',exact:true}).waitFor();
   await guestForm(x,'husband');await x.locator('.account').waitFor();
   assert.equal(await x.evaluate(async()=> (await (await fetch('/api/state')).json()).user.id),await h.evaluate(async()=> (await (await fetch('/api/state')).json()).user.id));
   await x.getByRole('button',{name:'Sign out',exact:true}).click();
   const guestIds=await Promise.all([w,h].map(p=>p.evaluate(async()=> (await (await fetch('/api/state')).json()).user.id)));assert.equal(new Set(guestIds).size,2);
   const pairIds=await Promise.all([w,h].map(p=>p.evaluate(async()=> (await (await fetch('/api/state')).json()).user.pair_id)));assert.ok(pairIds[0]);assert.equal(pairIds[0],pairIds[1]);
-  await w.reload();await w.getByRole('heading',{name:'New session',exact:true}).waitFor();
+  await w.reload();await w.getByRole('region',{name:'Next step',exact:true}).waitFor();
  assert.equal(await w.evaluate(async()=> (await (await fetch('/api/state')).json()).user.id),guestIds[0]);
   console.log('Browser checkpoint: two identities, automatic shared game, repeated role entry, no invitation UI, reload retains identity');
- await w.getByRole('heading',{name:'New session',exact:true}).waitFor();
- await w.getByLabel('Exact terms and boundaries for mutual review',{exact:true}).fill('Only optional tea and kind notes. No penalties for boundaries.');
-   await w.getByRole('button',{name:'Create session for review',exact:true}).click();
-   await w.getByLabel('Available minutes',{exact:true}).fill('25');
+ await w.getByRole('region',{name:'Next step',exact:true}).waitFor();
+   await openCheckIn(w);await w.getByLabel('Available minutes',{exact:true}).fill('25');
    await w.getByLabel('Energy').selectOption('low');
    await w.getByLabel('Mood').selectOption('quiet');
    await w.getByRole('button',{name:'Save my check-in',exact:true}).click();
-   await h.getByText('25 minutes · Energy: Low · Mood: Quiet',{exact:false}).waitFor();
+   await openCheckIn(h);await h.getByText('25 minutes · Energy: Low · Mood: Quiet',{exact:false}).waitFor();
    assert.equal(await h.getByLabel('Available minutes',{exact:true}).inputValue(),'15');
-   await h.getByLabel('Available minutes',{exact:true}).fill('40');
+   await openCheckIn(h);await h.getByLabel('Available minutes',{exact:true}).fill('40');
    await h.getByRole('button',{name:'Save my check-in',exact:true}).click();
-   await w.getByText('40 minutes · Energy: Medium · Mood: Connection',{exact:false}).waitFor();
+   await openCheckIn(w);await w.getByText('40 minutes · Energy: Medium · Mood: Connection',{exact:false}).waitFor();
     assert.equal(await w.getByLabel('Available minutes',{exact:true}).inputValue(),'25');
     // A partner refresh must preserve values that were NEVER saved, not merely reload saved values.
-    await w.getByLabel('Available minutes',{exact:true}).fill('73');
+    await openCheckIn(w);await w.getByLabel('Available minutes',{exact:true}).fill('73');
     await w.getByLabel('Energy').selectOption('high');
     await w.getByLabel('Mood').selectOption('playful');
-    await h.getByLabel('Available minutes',{exact:true}).fill('41');
+    await openCheckIn(h);await h.getByLabel('Available minutes',{exact:true}).fill('41');
     await h.getByRole('button',{name:'Save my check-in',exact:true}).click();
-    await w.getByText('41 minutes · Energy: Medium · Mood: Connection',{exact:false}).waitFor();
+    await openCheckIn(w);await w.getByText('41 minutes · Energy: Medium · Mood: Connection',{exact:false}).waitFor();
     assert.equal(await w.getByLabel('Available minutes',{exact:true}).inputValue(),'73');
     assert.equal(await w.getByLabel('Energy').inputValue(),'high');
     assert.equal(await w.getByLabel('Mood').inputValue(),'playful');
     const savedCheckIn=await w.evaluate(async()=>{const data=await (await fetch('/api/state')).json();return data.sessions[0].checkIns[data.user.id];});
     assert.deepEqual(savedCheckIn,{minutes:25,energy:'low',mood:'quiet'});
-    await w.getByLabel('Available minutes',{exact:true}).fill('25');await w.getByLabel('Energy').selectOption('low');await w.getByLabel('Mood').selectOption('quiet');
+    await openCheckIn(w);await w.getByLabel('Available minutes',{exact:true}).fill('25');await w.getByLabel('Energy').selectOption('low');await w.getByLabel('Mood').selectOption('quiet');
     await h.waitForFunction(()=>[...document.querySelectorAll('button')].some(b=>b.textContent==='Save my check-in'&&!b.disabled));
-    await h.getByLabel('Available minutes',{exact:true}).fill('40');await h.getByRole('button',{name:'Save my check-in',exact:true}).click();
+    await openCheckIn(h);await h.getByLabel('Available minutes',{exact:true}).fill('40');await h.getByRole('button',{name:'Save my check-in',exact:true}).click();
      console.log('PASS cycle 2 gap: partner refresh preserves genuinely unsaved minutes/energy/mood; persisted own entry unchanged');
-     await w.getByLabel('Available minutes',{exact:true}).fill('26');
+     await openCheckIn(w);await w.getByLabel('Available minutes',{exact:true}).fill('26');
      await heldOwnSave('checkin',[w.getByLabel('Available minutes',{exact:true}),w.getByLabel('Energy'),w.getByLabel('Mood')],['26','low','quiet'],'Save my check-in');
-     await w.getByLabel('Available minutes',{exact:true}).fill('25');await w.getByRole('button',{name:'Save my check-in',exact:true}).click();
+     await openCheckIn(w);await w.getByLabel('Available minutes',{exact:true}).fill('25');await w.getByRole('button',{name:'Save my check-in',exact:true}).click();
      console.log('PASS own check-in save: held committed response locks all fields, safety stays enabled, refresh re-enables fields with submitted/API values');
     await w.getByRole('region',{name:'Next step',exact:true}).getByRole('button',{name:'Review agreement',exact:true}).click();
     await w.getByRole('heading',{name:'Explicit agreement · revision 1',exact:true}).waitFor();
@@ -127,7 +129,7 @@ try{
     const sendPartner=async(count:number)=>h.evaluate(async(count:number)=>{const state=await(await fetch('/api/state')).json(),id=state.sessions.find((s:any)=>s.status==='active').id;for(let i=0;i<count;i++){const r=await fetch(`/api/sessions/${id}/message`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({key:crypto.randomUUID(),text:`refresh burst ${crypto.randomUUID()}`})});if(!r.ok)throw new Error(`burst ${r.status}`);}},count);
     await sendPartner(1);await oldHeld;await sendPartner(8);
     await new Promise(r=>setTimeout(r,10500)); // Two five-second polls while the old read is held.
-    await w.getByLabel('Available minutes',{exact:true}).fill('27');
+    await openCheckIn(w);await w.getByLabel('Available minutes',{exact:true}).fill('27');
     const committed=w.waitForResponse((r:any)=>r.url().endsWith('/checkin')&&r.request().method()==='POST');
     await w.getByRole('button',{name:'Save my check-in',exact:true}).click();assert.equal((await committed).status(),200);
     releaseOld();await freshHeld;
@@ -151,7 +153,7 @@ try{
   await w.evaluate(()=>{const original=window.fetch;(window as any).originalFetch=original;(window as any).checkinParsed=false;window.fetch=async(...args)=>{const response=await original(...args);if(String(args[0]).endsWith('/checkin')){const json=response.json.bind(response);response.json=async()=>{const body=await json();(window as any).checkinParsed=true;return body;};}return response;};});
   try{
     await h.evaluate(async()=>{const state=await(await fetch('/api/state')).json(),id=state.sessions.find((s:any)=>s.status==='active').id;await fetch(`/api/sessions/${id}/message`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({key:crypto.randomUUID(),text:'refresh ordering'})});});
-    await heldA;await w.getByLabel('Available minutes',{exact:true}).fill('28');await w.getByRole('button',{name:'Save my check-in',exact:true}).click();await mutationSaved;
+    await heldA;await openCheckIn(w);await w.getByLabel('Available minutes',{exact:true}).fill('28');await w.getByRole('button',{name:'Save my check-in',exact:true}).click();await mutationSaved;
     releaseA();await heldB;
     const response=w.waitForResponse((r:any)=>r.url().endsWith('/checkin')&&r.request().method()==='POST');releaseMutation();await response;await w.waitForFunction(()=>(window as any).checkinParsed===true);
     releaseB();await heldC;
@@ -162,7 +164,7 @@ try{
   const failedState=async(route:any)=>route.fulfill({status:503,contentType:'application/json',body:JSON.stringify({error:'temporary failure'})});
   await w.route('**/api/state',failedState);
   try{
-    await w.getByLabel('Available minutes',{exact:true}).fill('29');
+    await openCheckIn(w);await w.getByLabel('Available minutes',{exact:true}).fill('29');
     const saved=w.waitForResponse((r:any)=>r.url().endsWith('/checkin')&&r.request().method()==='POST');
     await w.getByRole('button',{name:'Save my check-in',exact:true}).click();assert.equal((await saved).status(),200);
     await w.getByText('Waiting for a fresh server update before further actions.',{exact:false}).waitFor();
@@ -189,7 +191,7 @@ try{
   const expireAfterSave=async(route:any)=>{const response=await route.fetch();assert.equal(response.status(),200);await x.route('**/api/state',unauthorized);await route.fulfill({response});};
   await x.route('**/api/sessions/*/checkin',expireAfterSave);
   try{
-    await x.getByLabel('Available minutes',{exact:true}).fill('30');await x.getByRole('button',{name:'Save my check-in',exact:true}).click();
+    await openCheckIn(x);await x.getByLabel('Available minutes',{exact:true}).fill('30');await x.getByRole('button',{name:'Save my check-in',exact:true}).click();
     await x.getByRole('button',{name:'Enter',exact:true}).waitFor();assert.equal(await x.getByRole('button',{name:'Enter',exact:true}).isEnabled(),true);
   }finally{await x.unroute('**/api/state',unauthorized);await x.unroute('**/api/sessions/*/checkin',expireAfterSave);}
   await x.locator('select[name="role"]').selectOption('wife');await x.getByRole('checkbox').check();await x.getByRole('button',{name:'Enter',exact:true}).click();
@@ -200,7 +202,7 @@ try{
   const lateHandler=async(route:any)=>{lateRequest={url:route.request().url(),headers:route.request().headers(),body:route.request().postData()};lateEntered();await lateGate;await route.abort().catch(()=>{});};
   await w.route('**/api/sessions/*/checkin',lateHandler);
   try{
-    await w.getByLabel('Available minutes',{exact:true}).fill('31');await w.getByRole('button',{name:'Save my check-in',exact:true}).click();await lateHeld;
+    await openCheckIn(w);await w.getByLabel('Available minutes',{exact:true}).fill('31');await w.getByRole('button',{name:'Save my check-in',exact:true}).click();await lateHeld;
     await w.getByText('The timed-out action may still complete after a refresh.',{exact:false}).waitFor({timeout:20000});
     const unlock=w.getByRole('button',{name:'I understand the risk; unlock actions',exact:true});await unlock.waitFor();
     await w.waitForFunction(()=>[...document.querySelectorAll('button')].some(b=>b.textContent==='I understand the risk; unlock actions'&&!b.disabled));
@@ -214,7 +216,7 @@ try{
     assert.equal(await w.getByRole('button',{name:'Save my check-in',exact:true}).isDisabled(),true);
     await w.getByRole('button',{name:'I understand the risk; unlock actions',exact:true}).click();
   }finally{releaseLate();await w.unroute('**/api/sessions/*/checkin',lateHandler);}
-  await w.getByLabel('Available minutes',{exact:true}).fill('25');await w.getByRole('button',{name:'Save my check-in',exact:true}).click();
+  await openCheckIn(w);await w.getByLabel('Available minutes',{exact:true}).fill('25');await w.getByRole('button',{name:'Save my check-in',exact:true}).click();
   console.log('PASS bounded refresh: held stale read, event burst and committed mutation coalesce into fresh reconciliation');
   await w.getByRole('navigation').getByRole('button',{name:'Missions',exact:true}).click();
   await w.getByText('New mission to review',{exact:true}).click();
@@ -399,8 +401,8 @@ try{
     const partnerHandler=async(route:any)=>{const response=await route.fetch();assert.equal(response.status(),200);partnerCommitted();await partnerGate;await route.fulfill({response}).catch(()=>{});};
     await h.route('**/api/sessions/*/checkin',partnerHandler);
     try{
-      await h.getByLabel('Available minutes',{exact:true}).fill('44');await h.getByRole('button',{name:'Save my check-in',exact:true}).click();await partnerSaved;
-      await w.getByText('44 minutes · Energy:',{exact:false}).waitFor();
+      await openCheckIn(h);await h.getByLabel('Available minutes',{exact:true}).fill('44');await h.getByRole('button',{name:'Save my check-in',exact:true}).click();await partnerSaved;
+      await openCheckIn(w);await w.getByText('44 minutes · Energy:',{exact:false}).waitFor();
       await w.getByRole('navigation').getByRole('button',{name:'Rewards',exact:true}).click();
       await w.getByRole('button',{name:'Draft a bonus invitation',exact:true}).click();
       assert.equal(await w.getByLabel('Title',{exact:true}).isVisible(),true);
@@ -408,7 +410,7 @@ try{
       assert.equal(await w.getByLabel('Mission text and boundaries').inputValue(),'Keep this unsaved text');
     }finally{releasePartner();await h.unroute('**/api/sessions/*/checkin',partnerHandler);}
     await h.waitForFunction(()=>[...document.querySelectorAll('button')].some(b=>b.textContent==='Save my check-in'&&!b.disabled));
-    await h.getByLabel('Available minutes',{exact:true}).fill('40');await h.getByRole('button',{name:'Save my check-in',exact:true}).click();
+    await openCheckIn(h);await h.getByLabel('Available minutes',{exact:true}).fill('40');await h.getByRole('button',{name:'Save my check-in',exact:true}).click();
     assert.equal(await w.evaluate(async()=> (await(await fetch('/api/state')).json()).sessions[0].missions.length),beforeBonus);
     await w.getByRole('button',{name:'Save draft only',exact:true}).click();
     await w.getByRole('region',{name:'Current invitation',exact:true}).getByRole('button',{name:'Edit draft',exact:true}).click();
@@ -538,7 +540,7 @@ try{
     console.log('PASS reflection retention: genuinely unsaved own fields survive changed partner reflections in Hebrew and English; API retains saved own values');
    await h.getByLabel('Energy').selectOption('high');
    await h.getByRole('button',{name:'Save my check-in',exact:true}).click();
-   await w.getByText('40 minutes · Energy: High · Mood: Connection',{exact:false}).waitFor();
+   await openCheckIn(w);await w.getByText('40 minutes · Energy: High · Mood: Connection',{exact:false}).waitFor();
    await w.getByText('2 active pauses',{exact:false}).waitFor();
  await w.getByRole('button',{name:'Release my pause',exact:true}).click();
  await w.getByText('1 active pauses',{exact:false}).waitFor();
@@ -652,8 +654,6 @@ try{
          const next=w.getByRole('region',{name:language==='he'?'הצעד הבא':'Next step',exact:true});
          await next.getByRole('button',{name:language==='he'?'לשיתוף על המפגש':'Reflect on this session',exact:true}).focus();await w.keyboard.press('Enter');
          assert.equal(await w.locator('#reflection-appreciation').evaluate((el:HTMLElement)=>el===document.activeElement),true);
-         await next.getByRole('button',{name:language==='he'?'להתחלת מפגש נוסף':'Start another session',exact:true}).focus();await w.keyboard.press('Enter');
-         assert.equal(await w.locator('#new-session-terms').evaluate((el:HTMLElement)=>el===document.activeElement),true);
          assert.ok(await w.evaluate(()=>document.documentElement.scrollWidth<=innerWidth),`closing/new session overflow ${width} ${language}`);
          for(const selector of ['.reflection textarea','.reflection button','.session-select select','fieldset select','fieldset input']){
            for(const control of await w.locator(selector).all()){
@@ -662,13 +662,12 @@ try{
          }
        }
      }
-    assert.ok(await closing.evaluate((el:HTMLElement)=>!!(el.compareDocumentPosition([...document.querySelectorAll('h2')].find(h=>h.textContent==='New session')!)&Node.DOCUMENT_POSITION_FOLLOWING)),'Closing reflection appears before the new-session form');
    const snapshot=await w.evaluate(async()=>{const r=await fetch('/api/state');return r.json();});
    assert.ok(!JSON.stringify(snapshot).includes('must not arrive'));
   }finally{release();await w.unroute(pattern,handler);}
  }
  await safetyWhilePending('mission');
-  await w.getByLabel('Exact terms and boundaries for mutual review').fill('A second safety regression session');await w.getByRole('button',{name:'Create session for review',exact:true}).click();
+   await w.getByRole('region',{name:'Next step',exact:true}).waitFor();
   await w.getByRole('heading',{name:'Active',exact:true}).waitFor();
   assert.equal(await w.getByLabel('Available minutes',{exact:true}).inputValue(),'15');
   const checkInSessions=await w.evaluate(async()=> (await (await fetch('/api/state')).json()).sessions);

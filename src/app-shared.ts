@@ -1,7 +1,10 @@
 import type { FormEvent } from 'react';
 import type { Mission, Session, User } from '../server/app';
+import type { QueenLevel } from './queen';
+import type { Digest } from './digest';
+import type { Spark } from './spark';
 
-export type State = { user: User; sessions: Session[]; serverNow: number };
+export type State = { user: User; sessions: Session[]; serverNow: number; queenLevel?: QueenLevel; digest?: Digest; adorationTally?: { loved: number; liked: number; ok: number }; spark?: Spark };
 export type SheetStep = { title: string; text?: string; points: number; offset: string };
 export type Sheet = { title: string; intro?: string; steps?: SheetStep[]; confirm: string; onConfirm: () => void };
 export type SavedEvening = NonNullable<Session['savedEvenings']>[number];

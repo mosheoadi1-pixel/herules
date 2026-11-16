@@ -7,12 +7,21 @@ import { z } from 'zod';
 import { quickPresets } from '../src/quick.ts';
 import { eveningClosed, eveningUsed } from '../src/progress.ts';
 import { chamberlainCompose, chamberlainPersistComposition } from '../src/chamberlain.ts';
+import { queenLevel, queenProgress } from '../src/queen.ts';
+import { adorationTally } from '../src/progress.ts';
+import { weeklyDigest } from '../src/digest.ts';
+import { dailySpark, SPARK_REROLLS, SPARK_DISMISSED, type Spark, type SparkIdea } from '../src/spark.ts';
+import { library } from '../src/library.ts';
+import { SEASON_DAY_MS, seasonItemFor, seasonPack, seasonStartDefault } from '../src/seasons.ts';
+import { TROPHY_LIMIT, trophyEntries, type TrophyEntry, type TrophyPin, type TrophySource } from '../src/trophies.ts';
+import { AUCTION_LIMITS, highestBid, settleAuction, type AuctionOutcome } from '../src/auctions.ts';
+import { WHEEL_COST_MAX } from '../src/wheels.ts';
 const scrypt = promisify(scryptCallback);
 const hash = (v: string) => createHash('sha256').update(v).digest('hex');
 const text = z.string().trim().min(1).max(4000);
 const uuid = z.string().uuid();
 const completionStyle=z.enum(['simple','written']);
-const draftSchema=z.object({title:z.string().trim().min(1).max(160),text,points:z.number().int().min(0).max(100).default(0),secret:z.boolean().default(false),completionStyle:completionStyle.default('simple'),surprise:z.boolean().default(false),category:z.string().trim().max(80).optional()}).refine(v=>!v.surprise||!!v.category);
+const draftSchema=z.object({title:z.string().trim().min(1).max(160),text,points:z.number().int().min(0).max(100).default(0),secret:z.boolean().default(false),completionStyle:completionStyle.default('simple'),surprise:z.boolean().default(false),category:z.string().trim().max(80).optional(),repeat:z.enum(['daily','weekly']).optional()}).refine(v=>!v.surprise||!!v.category);
 const checkInSchema=z.object({minutes:z.number().int().min(1).max(1440),energy:z.enum(['low','medium','high']),mood:z.enum(['connection','playful','quiet'])});
 export type CheckIn=z.infer<typeof checkInSchema>;
 const reflectionSchema=z.object({appreciation:z.string().trim().max(1000).default(''),repeat:z.string().trim().max(1000).default('')}).refine(v=>!!(v.appreciation||v.repeat));
@@ -23,18 +32,43 @@ const eveningSchema=z.object({name:z.string().trim().min(1).max(80),mood:z.enum(
 const paceSchema=z.object({commandsPerEvening:z.union([z.literal(1),z.literal(2),z.literal(3)])});
 const fail = (status: number, message: string): never => { throw Object.assign(new Error(message), { status }); };
 export type User = { id: string; email: string|null; nickname: string|null; role: 'wife'|'husband'; pair_id: string|null };
-export type Mission = { id: string; revision: number; title: string; text: string; titleEn?: string; textEn?: string; points: number; secret: boolean; chapter?: boolean; surprise?:boolean; category?:string; revealedAt?:number; completionStyle?: 'simple'|'written'; status: string; scheduledAt?: number; completion?: string; submissionVersion?: number; deliveredAt?: number; acknowledgedAt?: number; adjustment?: {reason:'softer'|'adjust';note?:string;at:number}; replaces?: string; replacementId?: string; approvedAt?: number; rating?: 'love'|'like'|'skip'; ratedAt?: number; createdAt?: number };
+export type Mission = { id: string; revision: number; title: string; text: string; titleEn?: string; textEn?: string; points: number; secret: boolean; chapter?: boolean; surprise?:boolean; sealed?:boolean; revealsAt?:number; category?:string; revealedAt?:number; completionStyle?: 'simple'|'written'; status: string; scheduledAt?: number; completion?: string; submissionVersion?: number; deliveredAt?: number; acknowledgedAt?: number; adjustment?: {reason:'softer'|'adjust';note?:string;at:number}; replaces?: string; replacementId?: string; approvedAt?: number; rating?: 'love'|'like'|'skip'; ratedAt?: number; createdAt?: number; repeat?: 'daily'|'weekly'; repeatOf?: string; repeatStopped?: boolean; adoration?: 'loved'|'liked'|'ok'; adoredAt?: number; season?: {id:string;day:number} };
 export type Reward = {id:string; title:string; description:string; cost:number};
+export type Auction = {id:string; title:string; description:string; minBid:number; closesAt:number; status:'open'|'closed'|'void'; bids:{amount:number;at:number}[]; winningBid?:number; outcome?:AuctionOutcome; createdAt:number};
 export type RewardRequest = Reward & {rewardId:string; status:'pending'|'approved'|'declined'};
 export type Wish = {id:string; title:string; description:string; link?:string; cost?:number; createdAt:number};
 export type WishRequest = {id:string; wish:string; title:string; cost:number; status:'pending'|'approved'|'declined'; at:number};
 export type Proposal = { id: string; by: string; title: string; text: string; points: number; category?: string; at: number; status: 'pending'|'adopted'|'declined'; missionId?: string };
-export type Session = { id: string; status: string; terms: string; revision: number; revisions: { revision: number; terms: string }[]; approvals: string[]; pauses: string[]; remaining: number; unlimited?: boolean; last: number; started: boolean; points: number; missions: Mission[]; rewards?: Reward[]; rewardRequests?: RewardRequest[]; sequence?: string[]; autoProgress?:boolean; persona?:'strict'|'playful'|'caring'; followups?:string[]; checkIns?: Record<string,CheckIn>; reflections?: Record<string,Reflection>; messages: {id:string; by:string; text:string; at:number}[]; history: { at:number; event:string; by:string; rewardRequestId?:string; outcome?:'approved'|'declined' }[]; inbox: {id:string; at:number; event:string; readBy:string[]}[]; herPoints?: number; proposals?: Proposal[]; wishes?: Wish[]; wishRequests?: WishRequest[]; commands?: {id:string;title:string;text:string;points:number}[]; notes?: {id:string;text:string;at:number}[]; nights?: {id:string;mood:'soft'|'playful'|'strict';at:number;missionIds:string[]}[]; moodCounts?: Record<'soft'|'playful'|'strict',number>; lastCareAt?: number; pace?: 1|2|3; eveningClosedAt?: number; savedEvenings?: {id:string;name:string;mood:'soft'|'playful'|'strict';steps:{he:string;en:string;points:number;minutesFromNow:number}[];createdAt:number}[]; chapterState?: { decree?: { mood: string; season?: string }; at?: number; cliffhanger?: { he: string; en: string } }; adoration?: { sippedFor?: string; grantedFor?: string; grantedAt?: number; sealedAt?: number; waiting?: number; ready?: number; last?: { id: string; kind: string; text: string; media?: string | null; at: number } } };
+export type Session = { id: string; status: string; terms: string; revision: number; revisions: { revision: number; terms: string }[]; approvals: string[]; pauses: string[]; remaining: number; unlimited?: boolean; last: number; started: boolean; points: number; missions: Mission[]; rewards?: Reward[]; rewardRequests?: RewardRequest[]; sequence?: string[]; autoProgress?:boolean; persona?:'strict'|'playful'|'caring'; followups?:string[]; checkIns?: Record<string,CheckIn>; reflections?: Record<string,Reflection>; messages: {id:string; by:string; text:string; at:number}[]; history: { at:number; event:string; by:string; rewardRequestId?:string; outcome?:'approved'|'declined' }[]; inbox: {id:string; at:number; event:string; readBy:string[]}[]; herPoints?: number; proposals?: Proposal[]; wishes?: Wish[]; wishRequests?: WishRequest[]; commands?: {id:string;title:string;text:string;points:number}[]; notes?: {id:string;text:string;at:number}[]; whispers?: {id:string;text:string;at:number}[]; whisperSent?: number; spark?: { day: number; rerolls: number; dismissed: string[] }; seasonState?: {id:string;startsAt:number;days:number;stoppedAt?:number}; seasonProgress?: {id:string;done:number;total:number;running:boolean}; pins?: TrophyPin[]; trophies?: TrophyEntry[]; auctions?: Auction[]; wheelCost?: number; nights?: {id:string;mood:'soft'|'playful'|'strict';at:number;missionIds:string[]}[]; moodCounts?: Record<'soft'|'playful'|'strict',number>; lastCareAt?: number; pace?: 1|2|3; eveningClosedAt?: number; savedEvenings?: {id:string;name:string;mood:'soft'|'playful'|'strict';steps:{he:string;en:string;points:number;minutesFromNow:number}[];createdAt:number}[]; chapterState?: { decree?: { mood: string; season?: string }; at?: number; cliffhanger?: { he: string; en: string } }; adoration?: { sippedFor?: string; grantedFor?: string; grantedAt?: number; sealedAt?: number; waiting?: number; ready?: number; last?: { id: string; kind: string; text: string; media?: string | null; at: number } } };
 const suspended = (s: Session) => s.pauses.length > 0;
 const terminal = (s: Session) => ['stopped','expired'].includes(s.status);
 function notice(s: Session, event: string, by: string, reward?:{rewardRequestId?:string;outcome?:'approved'|'declined';missionId?:string}) {
   const at = Date.now(); s.history.push({ at, event, by, ...reward });
   s.inbox.push({ id: randomUUID(), at, event, readBy: [], ...(reward?.missionId?{missionId:reward.missionId}:{}) });
+}
+const repeatStep={daily:86400000,weekly:7*86400000} as const;
+// One queued successor per chain at most. Missed intervals are skipped, never backfilled.
+function repeatSuccessor(s:Session,m:Mission,now:number){
+  if(!m.repeat||m.repeatStopped)return;
+  const root=m.repeatOf??m.id;
+  if(s.missions.some(x=>(x.repeatOf??x.id)===root&&x.status==='queued'))return;
+  const step=repeatStep[m.repeat];
+  let at=(m.scheduledAt??now)+step;
+  while(at<=now)at+=step;
+  s.missions.push({id:randomUUID(),revision:s.revision,title:m.title,text:m.text,...(m.titleEn?{titleEn:m.titleEn}:{}),...(m.textEn?{textEn:m.textEn}:{}),points:m.points,secret:m.secret,completionStyle:m.completionStyle,category:m.category,surprise:m.surprise,repeat:m.repeat,repeatOf:root,status:'queued',scheduledAt:at,createdAt:now});
+}
+// Auction lots close on wall-clock time regardless of holds. Terminal sessions void every open lot; held sessions
+// void due lots without charging, so no points move while either personal pause is active.
+function settleAuctions(s: Session, now: number) {
+  const ended = terminal(s), held = suspended(s);
+  for (const lot of s.auctions ?? []) {
+    if (lot.status !== 'open' || (!ended && lot.closesAt > now)) continue;
+    const { outcome, charge } = settleAuction({ bids: lot.bids, points: s.points, terminal: ended, held });
+    if (charge) { s.points -= charge; lot.winningBid = charge; }
+    lot.status = outcome === 'void' ? 'void' : 'closed';
+    lot.outcome = outcome;
+    notice(s, 'auction-close', 'server');
+  }
 }
 function advance(s: Session) {
   const now = Date.now();
@@ -44,8 +78,9 @@ function advance(s: Session) {
       s.remaining = Math.max(0, s.remaining - (now - s.last));
       if (!s.remaining) { s.status = 'expired'; notice(s, 'expired', 'server'); }
     }
-    for (const m of s.missions) if (m.status === 'queued' && m.scheduledAt! <= now) { m.status = 'pending'; m.deliveredAt = now; notice(s, 'mission-delivered', 'server',m.surprise?{missionId:m.id}:undefined); }
+    for (const m of s.missions) if (m.status === 'queued' && m.scheduledAt! <= now) { m.status = 'pending'; m.deliveredAt = now; notice(s, 'mission-delivered', 'server',m.surprise?{missionId:m.id}:undefined); repeatSuccessor(s,m,now); }
   }
+  settleAuctions(s, now);
   s.last = now;
 }
 // A session without minutes is the pair's ongoing game: it never counts down and never expires.
@@ -62,12 +97,40 @@ async function ensureSession(c: PoolClient, u: User): Promise<Session | undefine
   await c.query('INSERT INTO sessions VALUES($1,$2,$3,$4)',[s.id,pair,s.status,JSON.stringify(s)]);
   return s;
 }
+// Derived at response time, never stored. Counts delivered occurrences of the current run only
+// (scheduledAt inside its window), so restarting a pack never counts the previous run.
+function seasonProgressOf(s: Session) {
+  const state = s.seasonState;
+  if (!state) return undefined;
+  const from = state.startsAt, until = from + state.days * SEASON_DAY_MS;
+  const done = s.missions.filter(m => m.season?.id === state.id && m.deliveredAt !== undefined && (m.scheduledAt ?? 0) >= from && (m.scheduledAt ?? 0) < until).length;
+  return { id: state.id, done, total: state.days, running: s.missions.some(m => !!m.season && m.status === 'queued') };
+}
+// Pins resolve against the missions this viewer may see. A mission that exists but is withheld is a hidden placeholder.
+function trophySource(s: Session, shown: { id?: string; title?: string; text?: string; completion?: string }[]): TrophySource {
+  return {
+    mission: id => {
+      if (!s.missions.some(m => m.id === id)) return undefined;
+      const view = shown.find(m => m.id === id);
+      return view?.title === undefined || view.text === undefined ? 'hidden' : { title: view.title, text: view.text, completion: view.completion };
+    },
+    reflection: id => s.reflections?.[id],
+  };
+}
 function visible(s: Session, user: User) {
-  if(user.role==='wife')return s;
+  if(user.role==='wife')return {...s,seasonProgress:seasonProgressOf(s),trophies:trophyEntries(s.pins,user,trophySource(s,s.missions))};
   const hidden=new Set(s.missions.filter(m=>m.surprise&&!m.revealedAt).map(m=>m.id));
-  const missions=s.missions.filter(m => (!(m.secret||m.surprise) || !!m.deliveredAt)).map(m=>{if(hidden.has(m.id))return {id:m.id,revision:m.revision,status:m.status,surprise:true,category:m.category,deliveredAt:m.deliveredAt};if(m.replacementId&&hidden.has(m.replacementId)){const {replacementId,...rest}=m;return rest;}return m;});
+  // A queued non-secret surprise is sealed: he sees that something is coming and when, never its category. Secret items stay fully hidden until delivery.
+  // Season packs are her plan: he sees each occurrence only once it is delivered.
+  const missions:Partial<Mission>[]=s.missions.flatMap((m):Partial<Mission>[]=>{
+    if(m.season&&!m.deliveredAt)return [];
+    if((m.secret||m.surprise)&&!m.deliveredAt)return m.surprise&&!m.secret&&m.status==='queued'?[{id:m.id,revision:m.revision,status:'queued',surprise:true,sealed:true,revealsAt:m.scheduledAt}]:[];
+    if(hidden.has(m.id))return [{id:m.id,revision:m.revision,status:m.status,surprise:true,deliveredAt:m.deliveredAt}];
+    if(m.replacementId&&hidden.has(m.replacementId)){const {replacementId,...rest}=m;return [rest];}
+    return [m];
+  });
   const allowed=(n:any)=>!n.missionId||!hidden.has(n.missionId);
-  return { ...s, commands:undefined, notes:undefined, savedEvenings:undefined, chapterState:undefined, adoration:undefined, missions, history:s.history.filter(allowed),inbox:s.inbox.filter(allowed), ...(s.sequence?{sequence:s.sequence.filter(id=>missions.some(m=>m.id===id))}:{}) };
+  return { ...s, commands:undefined, notes:undefined, whispers:undefined, whisperSent:(s.whispers??[]).length, spark:undefined, savedEvenings:undefined, chapterState:undefined, adoration:undefined, seasonProgress:seasonProgressOf(s), trophies:trophyEntries(s.pins,user,trophySource(s,missions)), pins:s.pins?.map(({ref,...pin})=>pin), missions, history:s.history.filter(allowed),inbox:s.inbox.filter(allowed), ...(s.sequence?{sequence:s.sequence.filter(id=>missions.some(m=>m.id===id))}:{}) };
 }
 function runNight(s: Session, mood: 'soft'|'playful'|'strict', lang: 'he'|'en', steps: z.infer<typeof nightStep>[]) {
   if(eveningClosed(s))fail(409,'Evening is closed');
@@ -194,21 +257,35 @@ export async function createApp(pool: Pool, origin: string) {
   }
   app.get('/api/state',async(req,res)=>{
     const u=await auth(req);
-    const {sessions,ensured}=await transaction(async c=>{
+    const now=Date.now();
+    const {sessions,ensured,queen,adoration,spark}=await transaction(async c=>{
       const ensured=await ensureSession(c,u);
       const ids=(await c.query('SELECT id FROM sessions WHERE pair_id=$1 ORDER BY id',[u.pair_id])).rows;
-      const values=[];
+      const values=[],allMissions:Mission[]=[];
+      let active:Session|undefined;
       for(const {id} of ids){
         const s=await locked(c,id,u);await save(c,s);
+        if(!active||(!terminal(s)&&terminal(active)))active=s;
+        allMissions.push(...s.missions);
         const view:any=visible(s,u);
         const queue=await adorationQueue(c,u,id);
         if(queue)view.adoration={...(view.adoration??{}),...queue};
         values.push(view);
       }
-      return {sessions:values,ensured};
+      // Her daily spark is derived for the current session from the library plus imported ideas.
+      let spark:Spark|undefined;
+      if(u.role==='wife'&&active){
+        const imported=(await c.query('SELECT id,category,he,en,minutes,intensity,tags FROM imported_ideas ORDER BY id')).rows as SparkIdea[];
+        const day=Math.floor(now/86400000),stored=active.spark;
+        const checkIn=active.checkIns?.[u.id];
+        spark=dailySpark([...library,...imported],{now,rerolls:stored?.day===day?stored.rerolls:0,dismissed:stored?.dismissed??[],energy:checkIn?.energy,mood:checkIn?.mood});
+      }
+      return {sessions:values,ensured,queen:u.role==='wife'?queenLevel(queenProgress(allMissions)):undefined,adoration:u.role==='wife'?adorationTally(allMissions):undefined,spark};
     });
     if(ensured&&u.pair_id)emit(u.pair_id);
-    res.json({user:u,sessions,serverNow:Date.now()});
+    // Derived per viewer on every read; the digest is never stored or pushed.
+    const digest=weeklyDigest(sessions.flatMap((view:any)=>view.missions),u.role,now);
+    res.json({user:u,sessions,serverNow:Date.now(),digest,...(queen?{queenLevel:queen}:{}),...(adoration?{adorationTally:adoration}:{}),...(spark?{spark}:{})});
   });
   app.get('/api/sessions/:id',async(req,res)=>{const u=await auth(req); const session=await transaction(async c=>{const s=await locked(c,req.params.id as string,u);await save(c,s);const view:any=visible(s,u);const queue=await adorationQueue(c,u,s.id);if(queue)view.adoration={...(view.adoration??{}),...queue};return view;});res.json({session,serverNow:Date.now()});});
   app.post('/api/sessions',async(req,res)=>{
@@ -229,27 +306,42 @@ export async function createApp(pool: Pool, origin: string) {
         }
         return {ok:true};
       }
-      const keyedRequest=['complete','review','adjust','replace','reward','reward-request','reward-decision','wish-add','wish-request','wish-decision','quick','her-night','evening-close','evening-run','sip','grant','seal','tribute-reveal','chamberlain-decree','chamberlain-compose'].includes(op);
+      const keyedRequest=['complete','review','adjust','replace','reward','reward-request','reward-decision','wish-add','wish-request','wish-decision','quick','her-night','evening-close','evening-run','sip','grant','seal','tribute-reveal','chamberlain-decree','chamberlain-compose','repeat-stop','adore','whisper','whisper-delete','spark-reroll','spark-dismiss','season-start','season-stop','pin','unpin','auction','auction-bid','wheel-config','wheel-spin'].includes(op);
       let requestKey:string|undefined;
       if(keyedRequest){
-        if(u.role!==(['review','replace','reward','reward-decision','wish-add','wish-request','quick','her-night','evening-close','evening-run','sip','grant','seal','tribute-reveal','chamberlain-decree','chamberlain-compose'].includes(op)?'wife':'husband'))fail(403,'Wrong role for action');
+        if(u.role!==(['review','replace','reward','reward-decision','wish-add','wish-request','quick','her-night','evening-close','evening-run','sip','grant','seal','tribute-reveal','chamberlain-decree','chamberlain-compose','repeat-stop','whisper-delete','spark-reroll','spark-dismiss','season-start','season-stop','pin','unpin','auction','wheel-config','wheel-spin'].includes(op)?'wife':'husband'))fail(403,'Wrong role for action');
         // Newer clients always send a key; an older cached bundle still works, just without replay.
         requestKey=uuid.parse(b.key??randomUUID());
         const previous=await c.query('SELECT result FROM request_keys WHERE session_id=$1 AND user_id=$2 AND kind=$3 AND key=$4',[s.id,u.id,op,requestKey]);
         // A committed retry is a read of the original result, even after return, pause or stop.
         if(previous.rowCount){await save(c,s);return previous.rows[0].result;}
       }
-      // Persist expiry even when a subsequent action must be rejected.
-      if(terminal(s)&&op!=='read'){await save(c,s);return {terminal:true};}
+      // Persist expiry even when a subsequent action must be rejected. Curation stays open on ended sessions.
+      if(terminal(s)&&op!=='read'&&!['pin','unpin'].includes(op)){await save(c,s);return {terminal:true};}
       const wife=()=>{if(u.role!=='wife')fail(403,'Wife role required');};
       const husband=()=>{if(u.role!=='husband')fail(403,'Husband role required');};
       const gameplay=()=>{if(suspended(s))fail(409,'Pause is active');};
       let mission:Mission|undefined;
-      if(['edit','queue','deliver','cancel','ack','refuse','complete','review','adjust','replace','reveal','rate'].includes(op)){mission=s.missions.find(m=>m.id===uuid.parse(b.mission));if(!mission)fail(404,'Mission unavailable');}
+      if(['edit','queue','deliver','cancel','ack','refuse','complete','review','adjust','replace','reveal','rate','repeat-stop','adore'].includes(op)){mission=s.missions.find(m=>m.id===uuid.parse(b.mission));if(!mission)fail(404,'Mission unavailable');}
       let response:any={ok:true};
       if(op==='stop'){s.status='stopped';for(const m of s.missions)if(!['approved','refused','cancelled'].includes(m.status))m.status='cancelled';}
       else if(op==='pause'){if(!s.pauses.includes(u.id))s.pauses.push(u.id);}
       else if(op==='resume'){s.pauses=s.pauses.filter(id=>id!==u.id);}
+      // Curation stays open on ended sessions so the archive can be arranged after play stops.
+      else if(op==='pin'){
+        wife();const data=z.object({kind:z.enum(['mission','completion','reflection']),ref:uuid}).parse(b);
+        const pins=s.pins??=[];
+        if(pins.some(p=>p.kind===data.kind&&p.ref===data.ref))fail(409,'Already pinned');
+        if(pins.length>=TROPHY_LIMIT)fail(409,'Trophy case is full');
+        if(data.kind==='reflection'){if(!s.reflections?.[data.ref])fail(404,'Pin target unavailable');}
+        else{const target=s.missions.find(m=>m.id===data.ref)??fail(404,'Pin target unavailable');if(data.kind==='completion'&&!target.completion?.trim())fail(409,'Completion required');}
+        const pin:TrophyPin={id:randomUUID(),kind:data.kind,ref:data.ref,at:Date.now()};pins.push(pin);response={pin:{id:pin.id,kind:pin.kind,at:pin.at}};
+      }
+      else if(op==='unpin'){
+        wife();const id=uuid.parse(b.pin);const pins=s.pins??[];if(!pins.some(p=>p.id===id))fail(404,'Pin unavailable');s.pins=pins.filter(p=>p.id!==id);
+      }
+      // Setting the spin price is a preference, not play: it stays available during either personal pause.
+      else if(op==='wheel-config'){wife();const data=z.object({cost:z.number().int().min(0).max(WHEEL_COST_MAX)}).parse(b);s.wheelCost=data.cost;response={wheelCost:s.wheelCost};}
       else if(op==='approve'||op==='revise'){/* Agreement flow removed; keep no-op for compatibility. */}
       else if(op==='aftercare'){husband();s.lastCareAt=Date.now();}
       else if(op==='read'){const ids=z.array(uuid).max(500).parse(b.ids);for(const n of s.inbox)if(ids.includes(n.id)&&!n.readBy.includes(u.id))n.readBy.push(u.id);}
@@ -382,8 +474,31 @@ export async function createApp(pool: Pool, origin: string) {
         response={ok:true,composition,missionIds:composed.missionIds,cliffhanger:composed.cliffhanger};
       }
       else {
-        gameplay();
-        if(op==='extend'){wife();s.remaining+=z.number().int().min(1).max(525600).parse(b.minutes)*60000;}
+        // Stopping a repeating chain, his private adoration and her daily spark stay available during either personal pause.
+        if(!['repeat-stop','adore','spark-reroll','spark-dismiss'].includes(op))gameplay();
+        if(op==='auction'){
+          wife();const data=z.object({title:z.string().trim().min(1).max(160),description:text,minBid:z.number().int().min(1).max(AUCTION_LIMITS.maxBid),closesAt:z.number().int()}).parse(b);
+          const now=Date.now();
+          if(data.closesAt<=now)fail(400,'Closing time must be in the future');
+          if(data.closesAt>now+AUCTION_LIMITS.maxAheadMs)fail(400,'Closing time must be within seven days');
+          const lots=s.auctions??=[];
+          if(lots.filter(lot=>lot.status==='open').length>=AUCTION_LIMITS.open)fail(409,'Too many open auctions');
+          if(lots.length>=AUCTION_LIMITS.stored)fail(409,'Auction list is full');
+          const lot:Auction={id:randomUUID(),title:data.title,description:data.description,minBid:data.minBid,closesAt:data.closesAt,status:'open',bids:[],createdAt:now};
+          lots.push(lot);response={auction:lot};
+        }
+        else if(op==='auction-bid'){
+          husband();const data=z.object({auction:uuid,amount:z.number().int().min(1).max(AUCTION_LIMITS.maxBid)}).parse(b);
+          const lot=s.auctions?.find(item=>item.id===data.auction)??fail(404,'Auction unavailable');
+          if(lot.status!=='open'||lot.closesAt<=Date.now())fail(409,'Auction is closed');
+          if(data.amount<lot.minBid)fail(409,'Bid is below the minimum');
+          if(data.amount<=(highestBid(lot.bids)??0))fail(409,'Bid must beat the current highest bid');
+          lot.bids.push({amount:data.amount,at:Date.now()});response={auction:lot};
+        }
+        else if(op==='extend'){wife();s.remaining+=z.number().int().min(1).max(525600).parse(b.minutes)*60000;}
+        else if(op==='wheel-spin'){
+          wife();const cost=s.wheelCost??0;if((s.herPoints??0)<cost)fail(409,'Not enough points for a spin');s.herPoints=(s.herPoints??0)-cost;response={herPoints:s.herPoints};
+        }
         else if(op==='persona'){wife();s.persona=z.enum(['strict','playful','caring']).parse(b.persona);}
         else if(op==='followup'){wife();const item=z.string().trim().min(1).max(4000).parse(b.text);const list=s.followups??=[];if(!list.includes(item))list.push(item);}
         else if(op==='reward'){
@@ -471,13 +586,76 @@ export async function createApp(pool: Pool, origin: string) {
           const list=s.commands??=[];if(list.length>=20)fail(409,'Command list is full');list.push({id:randomUUID(),...data});
         }
         else if(op==='command-delete'){wife();const id=uuid.parse(b.command);s.commands=(s.commands??[]).filter(c=>c.id!==id);}
+        else if(op==='whisper'){
+          husband();
+          const body=z.string().trim().min(1).max(400).parse(b.text);
+          const list=s.whispers??=[];
+          if(list.length>=20)fail(409,'Whisper list is full');
+          list.push({id:randomUUID(),text:body,at:Date.now()});
+          response={ok:true,whisperSent:list.length};
+        }
+        else if(op==='whisper-delete'){
+          wife();const id=uuid.parse(b.whisper);
+          s.whispers=(s.whispers??[]).filter(item=>item.id!==id);
+        }
+        else if(op==='spark-reroll'){
+          wife();
+          const day=Math.floor(Date.now()/86400000),spark=s.spark??={day,rerolls:0,dismissed:[]};
+          if(spark.day!==day){spark.day=day;spark.rerolls=0;}
+          if(spark.rerolls>=SPARK_REROLLS)fail(409,'Daily spark reroll limit reached');
+          spark.rerolls+=1;
+          response={ok:true,rerolls:spark.rerolls};
+        }
+        else if(op==='spark-dismiss'){
+          wife();
+          const idea=z.string().trim().min(1).max(160).parse(b.idea);
+          const spark=s.spark??={day:Math.floor(Date.now()/86400000),rerolls:0,dismissed:[]};
+          if(!spark.dismissed.includes(idea)){
+            if(spark.dismissed.length>=SPARK_DISMISSED)fail(409,'Spark dismiss list is full');
+            spark.dismissed.push(idea);
+          }
+          response={ok:true,dismissed:spark.dismissed.length};
+        }
+        else if(op==='season-start'){
+          wife();
+          const data=z.object({pack:z.string().min(1).max(40),startsAt:z.number().int().optional(),lang:z.enum(['he','en']).default('he')}).parse(b);
+          const pack=seasonPack(data.pack)??fail(404,'Season unavailable');
+          if(s.missions.some(m=>!!m.season&&m.status==='queued'))fail(409,'A season is already running');
+          const now=Date.now(),startsAt=data.startsAt??seasonStartDefault(now);
+          if(startsAt<now)fail(400,'Schedule must be in the future');
+          if(startsAt+(pack.days-1)*SEASON_DAY_MS>now+31536000000)fail(400,'Schedule must be within one year');
+          for(let day=1;day<=pack.days;day++){
+            const item=seasonItemFor(pack,day);
+            s.missions.push({id:randomUUID(),revision:s.revision,title:data.lang==='he'?item.title.he:item.title.en,text:data.lang==='he'?item.text.he:item.text.en,points:item.points,secret:false,completionStyle:'simple',status:'queued',scheduledAt:startsAt+(day-1)*SEASON_DAY_MS,createdAt:now,season:{id:pack.id,day}});
+          }
+          s.seasonState={id:pack.id,startsAt,days:pack.days};
+          response={season:{id:pack.id,days:pack.days,startsAt}};
+        }
+        else if(op==='season-stop'){
+          wife();
+          const data=z.object({pack:z.string().min(1).max(40).optional()}).parse(b);
+          const state=s.seasonState??fail(409,'No season is running');
+          if(state.stoppedAt!==undefined)fail(409,'No season is running');
+          if(data.pack!==undefined&&data.pack!==state.id)fail(404,'Season unavailable');
+          let cancelled=0;for(const m of s.missions)if(m.season&&m.status==='queued'){m.status='cancelled';cancelled++;}
+          state.stoppedAt=Date.now();response={cancelled};
+        }
         else if(mission){
           const m=mission;if(m.revision!==s.revision)fail(409,'Mission belongs to a previous agreement');
-          if(['edit','queue','deliver','cancel','review','replace'].includes(op))wife();else husband();
+          if(['edit','queue','deliver','cancel','review','replace','repeat-stop'].includes(op))wife();else husband();
           if(op==='edit'){if(m.status!=='draft')fail(409,'Delivered terms are immutable');const data=draftSchema.parse({...m,...b});Object.assign(m,data);}
-          else if(op==='queue'){if(!['draft','queued'].includes(m.status))fail(409,'Draft required');m.scheduledAt=z.number().int().min(Date.now()).max(Date.now()+31536000000).parse(b.scheduledAt);m.status='queued';}
-          else if(op==='deliver'){if(!['draft','queued'].includes(m.status))fail(409,'Draft required');m.status='pending';m.deliveredAt=Date.now();}
-          else if(op==='cancel'){if(['approved','refused'].includes(m.status))fail(409,'Mission already final');m.status='cancelled';}
+          else if(op==='queue'){
+            if(!['draft','queued'].includes(m.status))fail(409,'Draft required');
+            const at=z.number().int().min(Date.now()).max(Date.now()+31536000000).parse(b.scheduledAt);
+            // Repeat is chosen when queueing. A successor already in a chain cannot change its own pacing.
+            if(b.repeat!==undefined&&b.repeat!==null){
+              if(m.repeatOf)fail(409,'Repeating chain settings are fixed');
+              m.repeat=z.enum(['daily','weekly']).parse(b.repeat);m.repeatStopped=undefined;
+            }
+            m.scheduledAt=at;m.status='queued';
+          }
+          else if(op==='deliver'){if(!['draft','queued'].includes(m.status))fail(409,'Draft required');m.status='pending';m.deliveredAt=Date.now();repeatSuccessor(s,m,Date.now());}
+          else if(op==='cancel'){if(['approved','refused'].includes(m.status))fail(409,'Mission already final');const wasRepeating=m.status==='queued'&&!!m.repeat&&!m.repeatStopped;m.status='cancelled';if(wasRepeating)repeatSuccessor(s,m,Date.now());}
           else if(op==='reveal'){if(!m.surprise||!m.deliveredAt||m.status!=='pending')fail(409,'Pending surprise required');if(m.revealedAt){await save(c,s);return {ok:true};}m.revealedAt=Date.now();}
           else if(op==='ack'){if(m.surprise&&!m.revealedAt)fail(409,'Reveal invitation first');if(!['pending','acknowledged'].includes(m.status))fail(409,'Pending mission required');m.status='acknowledged';m.acknowledgedAt??=Date.now();}
           else if(op==='refuse'){if(!['pending','acknowledged','revision','adjustment','refused'].includes(m.status))fail(409,'Mission cannot be refused here');m.status='refused';}
@@ -501,6 +679,21 @@ export async function createApp(pool: Pool, origin: string) {
             m.completion=m.completionStyle==='simple'?z.string().trim().max(4000).default('').parse(b.text):text.parse(b.text);m.submissionVersion=expectedVersion+1;m.status='submitted';
             response={mission:m.id,submissionVersion:m.submissionVersion,completion:m.completion,status:m.status};
           }
+          else if(op==='repeat-stop'){
+            wife();
+            const root=m.repeatOf??m.id;
+            m.repeatStopped=true;
+            const orig=s.missions.find(x=>x.id===root);
+            if(orig)orig.repeatStopped=true;
+            for(const other of s.missions){if((other.repeatOf??other.id)===root&&other.status==='queued'){other.status='cancelled';}}
+            response={ok:true};
+          }
+          else if(op==='adore'){
+            husband();
+            if(m.status!=='approved')fail(409,'Approved mission required');
+            m.adoration=z.enum(['loved','liked','ok']).parse(b.adoration);m.adoredAt=Date.now();
+            response={ok:true};
+          }
           else if(op==='review'){
             const approve=z.boolean().parse(b.approve),version=z.number().int().min(0).parse(b.submissionVersion);
             if(version!==(m.submissionVersion??0))fail(409,'Submission changed; review the current work');
@@ -513,7 +706,7 @@ export async function createApp(pool: Pool, origin: string) {
           }
         }else fail(404,'Unknown action');
       }
-      if(op!=='read'&&!op.startsWith('note-')&&!['evening-save','evening-delete','pace','tribute-queue','tribute-reveal','sip','grant','seal','chamberlain-decree','chamberlain-compose'].includes(op))notice(s,op,u.id,op==='reward-request'?{rewardRequestId:response.request.id}:op==='reward-decision'?{rewardRequestId:response.request.id,outcome:response.request.status}:(response.mission?.surprise?{missionId:response.mission.id}:mission?.surprise?{missionId:mission.id}:undefined));
+      if(op!=='read'&&!op.startsWith('note-')&&!['evening-save','evening-delete','pace','tribute-queue','tribute-reveal','sip','grant','seal','chamberlain-decree','chamberlain-compose','adore','wheel-config'].includes(op))notice(s,op,u.id,op==='reward-request'?{rewardRequestId:response.request.id}:op==='reward-decision'?{rewardRequestId:response.request.id,outcome:response.request.status}:(response.mission?.surprise?{missionId:response.mission.id}:mission?.surprise?{missionId:mission.id}:undefined));
       if(requestKey)await c.query('INSERT INTO request_keys VALUES($1,$2,$3,$4,$5)',[s.id,u.id,op,requestKey,JSON.stringify(response)]);
       s.last=Date.now();await save(c,s);return response;
     });

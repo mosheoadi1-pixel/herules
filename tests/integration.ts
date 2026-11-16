@@ -64,12 +64,13 @@ try {
   await guestCall(0,'/invite',{},404);await guestCall(0,'/redeem',{token:'a'.repeat(64)},404);
   // Entry itself opens the ongoing session: loading state with nothing active yields one unlimited session.
   const guestSession=(await guestCall(0,'/state')).sessions[0];
+  // The agreement flow was removed (commit d606a49): approve is a no-op and only the role check gates missions.
   await guestCall(0,`/sessions/${guestSession.id}/approve`,{revision:1});await guestCall(0,`/sessions/${guestSession.id}/approve`,{revision:1});
-  assert.equal((await guestCall(1,`/sessions/${guestSession.id}`)).session.approvals.length,1);
-  await guestCall(1,`/sessions/${guestSession.id}/mission`,{key:randomUUID(),title:'Forbidden',text:'Forbidden'},409);
+  assert.equal((await guestCall(1,`/sessions/${guestSession.id}`)).session.approvals.length,0);
+  await guestCall(1,`/sessions/${guestSession.id}/mission`,{key:randomUUID(),title:'Forbidden',text:'Forbidden'},403);
   await guestCall(1,`/sessions/${guestSession.id}/approve`,{revision:1});
   await guestCall(1,`/sessions/${guestSession.id}/mission`,{key:randomUUID(),title:'Forbidden',text:'Forbidden'},403);
-  assert.equal((await guestCall(0,`/sessions/${guestSession.id}`)).session.approvals.length,2);
+  assert.equal((await guestCall(0,`/sessions/${guestSession.id}`)).session.approvals.length,0);
   assert.equal((await pool.query('SELECT password FROM users WHERE id=$1',[guests[0].user.id])).rows[0].password,null);
   await pool.query('DELETE FROM approvals WHERE session_id=$1',[guestSession.id]);await pool.query('DELETE FROM sessions WHERE id=$1',[guestSession.id]);
   console.log('PASS two players: concurrent repeated entry, automatic shared game, same role reuses identity, no invitations and independent approvals');
@@ -154,13 +155,14 @@ try {
   await action(h, 'resume');
   const unfinished=await action(w,'mission',{key:randomUUID(),title:'Old terms',text:'Must be cancelled on revision'});
   await action(w, 'revise', { terms: 'New mutually reviewed boundaries' });
-  assert.equal((await w(`/sessions/${id}`)).session.missions.find((v:any)=>v.id===unfinished.mission.id).status,'cancelled');
-  await action(w,'mission',{key:randomUUID(),title:'blocked',text:'blocked'},409);
+  assert.equal((await w(`/sessions/${id}`)).session.missions.find((v:any)=>v.id===unfinished.mission.id).status,'draft');
+  await action(w,'mission',{key:randomUUID(),title:'Allowed without agreement',text:'Pauses are the only gate'});
+  await action(h,'pause');
   const reviewFrozen=(await w(`/sessions/${id}`)).session.remaining;
   await pool.query("UPDATE sessions SET data=jsonb_set(data,'{last}',to_jsonb($2::bigint)) WHERE id=$1",[id,Date.now()-60000]);
   assert.equal((await w(`/sessions/${id}`)).session.remaining,reviewFrozen);
   await action(h,'pause');await action(w,'resume');assert.equal((await h(`/sessions/${id}`)).session.pauses.length,1);await action(h,'resume');
-  await action(h, 'approve', { revision: 1 }, 409);
+  await action(h, 'approve', { revision: 1 });
   await action(w, 'approve', { revision: 2 }); await action(h, 'approve', { revision: 2 });
   const scheduled = await action(w, 'mission', { key: randomUUID(), title: 'Future', text: 'A timed note', secret: true });
   await action(w, 'queue', { mission: scheduled.mission.id, scheduledAt: Date.now() + 100 });

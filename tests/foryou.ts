@@ -49,11 +49,13 @@ const now=Date.now();
 }
 
 // Local skips age out after two weeks and hide the idea until then.
+// The daily menu only surfaces six of many eligible ideas, so this uses a one-idea pool to
+// observe the skip filter itself rather than the day's ranking.
 {
   const skipped=idea('anticipation-21');
-  const recent=foryouDeck(library,session([]),{lang:'he',now,skips:{[skipped.id]:now}});
-  const aged=foryouDeck(library,session([]),{lang:'he',now:now+15*86400000,skips:{[skipped.id]:now}});
-  assert.ok(recent.every(item=>item.idea.id!==skipped.id),'fresh skip hidden');
+  const recent=foryouDeck([skipped],session([]),{lang:'he',now,skips:{[skipped.id]:now}});
+  const aged=foryouDeck([skipped],session([]),{lang:'he',now:now+15*86400000,skips:{[skipped.id]:now}});
+  assert.equal(recent.length,0,'fresh skip hidden');
   assert.ok(aged.some(item=>item.idea.id===skipped.id),'aged skip returns');
 }
 

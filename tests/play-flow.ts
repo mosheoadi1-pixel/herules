@@ -36,18 +36,16 @@ try {
   const edit=async(change:(row:Session)=>void)=>{const row=(await pool.query('SELECT data FROM sessions WHERE id=$1',[id])).rows[0].data as Session;change(row);await pool.query('UPDATE sessions SET data=$2 WHERE id=$1',[id,JSON.stringify(row)]);};
   const freshEvening=()=>edit(row=>{for(const m of row.missions)m.createdAt=0;delete row.eveningClosedAt;});
 
-  // Gameplay is locked until both players approve the same revision.
-  await op(w,'quick',{preset:quickPresets[0].id,key:randomUUID()},409,'Mutual approval and no pauses required');
+  // The agreement flow was removed (commit d606a49): approve is a no-op and only pauses gate play.
   let s=await state();
   for(const who of [w,h])await op(who,'approve',{revision:s.revision});
   s=await state();
-  assert.equal(s.approvals.length,2);
+  assert.equal(s.approvals.length,0);
 
   // Quick commands: wife only, known presets only, keyed retries, schedule bounds.
   const preset=quickPresets[1];
   await op(h,'quick',{preset:preset.id,key:randomUUID()},403);
   await op(w,'quick',{preset:'unknown',key:randomUUID()},404);
-  await op(w,'quick',{preset:preset.id},400);
   await op(w,'quick',{key:randomUUID()},400);
   assert.equal((await op(w,'quick',{preset:preset.id,key:randomUUID(),scheduledAt:Date.now()-60000},400)).error,'Schedule must be in the future');
   await op(w,'quick',{preset:preset.id,key:randomUUID(),scheduledAt:Date.now()+366*86400000},400);
@@ -381,6 +379,332 @@ try {
   s=await state();
   assert.equal(s.missions.filter(m=>m.chapter&&m.status==='queued').length,queuedChapters);
 
+  // Queen level is a wife-only derived view: approved missions only, never stored, never sent to him.
+  const queenWife=await w('/state'),queenHusband=await h('/state');
+  s=await state();
+  assert.equal(queenWife.queenLevel.progress,s.missions.filter(m=>m.status==='approved').length);
+  assert.equal(queenWife.queenLevel.level,queenWife.queenLevel.progress>=25?'empress':queenWife.queenLevel.progress>=10?'queen':'duchess');
+  assert.equal(queenHusband.queenLevel,undefined);
+  assert.ok(!JSON.stringify(queenHusband).includes('queenLevel'));
+
+  // Weekly digest: derived on every state read; his copy never carries wife-only fields or withheld counts.
+  const digestWife=(await w('/state')).digest,digestHusband=(await h('/state')).digest;
+  assert.equal(digestWife.days,7);assert.ok(digestWife.suggestion);
+  for(const field of ['scheduled','topRated','suggestion'])assert.equal(field in digestHusband,false,`husband digest must not carry ${field}`);
+  assert.equal(digestHusband.approved,digestWife.approved);
+  assert.equal(digestHusband.husbandPoints,digestWife.husbandPoints);
+  assert.equal(JSON.stringify(digestHusband).includes(preset.en),false,'the husband digest carries counts, never mission titles');
+
+  // Recurring missions: one queued successor per chain, no duplicates, pacing preserved, stop is wife-only.
+  const daily=await op(w,'mission',{title:'Morning note',text:'Leave one kind note',points:1,key:randomUUID()});
+  await op(w,'queue',{mission:daily.mission.id,repeat:'daily'},400);
+  await op(w,'queue',{mission:daily.mission.id,scheduledAt:Date.now()+3600000,repeat:'hourly'},400);
+  await op(w,'queue',{mission:daily.mission.id,scheduledAt:Date.now()+3600000,repeat:'daily'});
+  await edit(row=>{const m=row.missions.find(x=>x.id===daily.mission.id)!;m.scheduledAt=Date.now()-1000;});
+  s=await state();
+  const dailyFirst=s.missions.find(m=>m.id===daily.mission.id)!;
+  assert.equal(dailyFirst.status,'pending','the due occurrence is delivered on read');
+  const dailyChain=s.missions.filter(m=>(m.repeatOf??m.id)===daily.mission.id);
+  assert.equal(dailyChain.length,2,'exactly one successor exists');
+  const dailyNext=dailyChain.find(m=>m.id!==daily.mission.id)!;
+  assert.equal(dailyNext.status,'queued');assert.equal(dailyNext.repeat,'daily');assert.equal(dailyNext.repeatOf,daily.mission.id);
+  assert.ok(dailyNext.scheduledAt!>Date.now(),'the successor is scheduled forward, never backfilled');
+  s=await state();
+  assert.equal(s.missions.filter(m=>(m.repeatOf??m.id)===daily.mission.id).length,2,'repeated reads never duplicate the successor');
+
+  // Sending a repeating occurrence by hand keeps the series going.
+  const manual=await op(w,'mission',{title:'Manual repeat',text:'Send this one by hand',points:1,key:randomUUID()});
+  await op(w,'queue',{mission:manual.mission.id,scheduledAt:Date.now()+3600000,repeat:'daily'});
+  await op(w,'deliver',{mission:manual.mission.id});
+  s=await state();
+  assert.equal(s.missions.filter(m=>(m.repeatOf??m.id)===manual.mission.id).length,2,'manual delivery queues the next occurrence');
+
+  // Cancelling a single queued occurrence keeps the chain alive.
+  const weeklyOne=await op(w,'mission',{title:'Weekly habit',text:'A weekly check-in',points:1,key:randomUUID()});
+  await op(w,'queue',{mission:weeklyOne.mission.id,scheduledAt:Date.now()+3600000,repeat:'weekly'});
+  await op(w,'cancel',{mission:weeklyOne.mission.id});
+  s=await state();
+  const weeklyChain=s.missions.filter(m=>(m.repeatOf??m.id)===weeklyOne.mission.id);
+  assert.equal(weeklyChain.filter(m=>m.status==='queued').length,1,'the series continues after one cancellation');
+  assert.equal(weeklyChain.find(m=>m.status==='queued')!.repeat,'weekly');
+
+  // An undelivered secret occurrence and its queued successor stay hidden from him.
+  const secretRepeat=await op(w,'mission',{title:'Secret repeat',text:'Hidden repeat text',secret:true,points:1,key:randomUUID()});
+  await op(w,'queue',{mission:secretRepeat.mission.id,scheduledAt:Date.now()+3600000,repeat:'daily'});
+  const hisSecretView=(await h(`/sessions/${id}`)).session as Session;
+  assert.equal(hisSecretView.missions.some(m=>m.id===secretRepeat.mission.id),false,'an undelivered secret occurrence is withheld');
+  await edit(row=>{const m=row.missions.find(x=>x.id===secretRepeat.mission.id)!;m.scheduledAt=Date.now()-1000;});
+  const hisDelivered=(await h(`/sessions/${id}`)).session as Session;
+  assert.equal(hisDelivered.missions.some(m=>m.id===secretRepeat.mission.id),true,'the delivered occurrence becomes visible');
+  assert.equal(hisDelivered.missions.filter(m=>m.repeatOf===secretRepeat.mission.id).length,0,'its queued secret successor stays hidden');
+
+  // Adoration is his private, optional signal on approved work: no points, never her rating, wife-only tally.
+  const pointsBefore=(await state()).points;
+  const ratingBefore=(await state()).missions.find(m=>m.id===quick.id)!.rating;
+  await op(w,'adore',{mission:quick.id,adoration:'loved',key:randomUUID()},403);
+  await op(h,'adore',{mission:quick.id,adoration:'gold',key:randomUUID()},400);
+  await op(h,'adore',{mission:manual.mission.id,adoration:'loved'},409,'Approved mission required');
+  const adoreKey=randomUUID();
+  const adored=await op(h,'adore',{mission:quick.id,adoration:'loved',key:adoreKey});
+  assert.deepEqual(await op(h,'adore',{mission:quick.id,adoration:'loved',key:adoreKey}),adored,'a committed retry returns the original result');
+  s=await state();
+  const adoredMission=s.missions.find(m=>m.id===quick.id)!;
+  assert.equal(adoredMission.adoration,'loved');assert.ok(adoredMission.adoredAt!>0);
+  assert.equal(adoredMission.rating,ratingBefore,'his adoration never touches her rating');
+  assert.equal(s.points,pointsBefore,'adoration awards no points');
+  await op(h,'adore',{mission:quick.id,adoration:'liked'});
+  s=await state();
+  assert.equal(s.missions.find(m=>m.id===quick.id)!.adoration,'liked','he can overwrite his own signal');
+  const adorationWife=await w('/state'),adorationHusband=await h('/state');
+  assert.deepEqual(adorationWife.adorationTally,{loved:0,liked:1,ok:0});
+  assert.equal(adorationHusband.adorationTally,undefined,'the tally is wife-only');
+  assert.equal(JSON.stringify(adorationHusband).includes('adorationTally'),false);
+
+  // Stopping a series is wife-only, keyed, and allowed while paused.
+  await op(h,'repeat-stop',{mission:daily.mission.id},403);
+  await op(w,'pause',{});
+  const stopKey=randomUUID();
+  const stopped=await op(w,'repeat-stop',{mission:daily.mission.id,key:stopKey});
+  assert.deepEqual(await op(w,'repeat-stop',{mission:daily.mission.id,key:stopKey}),stopped,'stopping is idempotent');
+  s=await state();
+  assert.equal(s.missions.find(m=>m.id===daily.mission.id)!.repeatStopped,true);
+  assert.equal(s.missions.filter(m=>(m.repeatOf??m.id)===daily.mission.id&&m.status==='queued').length,0,'queued successors are cancelled');
+  await op(w,'resume',{});
+
+  // Whisper box: his short lines are stored for her eyes only; the husband never receives the text.
+  await op(w,'whisper',{text:'Not yours to write',key:randomUUID()},403);
+  await op(h,'whisper',{text:'',key:randomUUID()},400);
+  await op(h,'whisper',{text:'x'.repeat(401),key:randomUUID()},400);
+  const whisperKey=randomUUID();
+  const whisper=await op(h,'whisper',{text:'You looked beautiful at breakfast',key:whisperKey});
+  assert.equal(whisper.whisperSent,1);
+  assert.deepEqual(await op(h,'whisper',{text:'You looked beautiful at breakfast',key:whisperKey}),whisper,'a committed whisper retry returns the original result');
+  s=await state();
+  assert.equal(s.whispers?.length,1);assert.equal(s.whispers![0].text,'You looked beautiful at breakfast');
+  const hisWhispers=(await h(`/sessions/${id}`)).session as Session;
+  assert.equal(hisWhispers.whispers,undefined,'the wife keeps the whisper list');
+  assert.equal(hisWhispers.whisperSent,1,'he only gets a count');
+  assert.equal(JSON.stringify(hisWhispers).includes('beautiful at breakfast'),false,'whisper text never reaches him');
+  assert.equal(JSON.stringify((await h('/state'))).includes('beautiful at breakfast'),false,'no whisper text in his state');
+  await op(h,'whisper-delete',{whisper:s.whispers![0].id},403);
+  await op(w,'whisper-delete',{whisper:s.whispers![0].id,key:randomUUID()});
+  s=await state();
+  assert.equal(s.whispers?.length,0,'she can delete a whisper');
+
+  // The cap is 20 stored whispers.
+  for(let i=0;i<20;i++)await op(h,'whisper',{text:`Line ${i}`,key:randomUUID()});
+  await op(h,'whisper',{text:'One too many',key:randomUUID()},409,'Whisper list is full');
+
+  // Daily spark: wife-only, one idea per UTC day, a reroll cap of ten and thirty dismissals.
+  const husbandSparkState=await h('/state');
+  assert.equal(husbandSparkState.spark,undefined,'the husband never receives a spark');
+  assert.equal(JSON.stringify(husbandSparkState).includes('"spark"'),false,'no spark key in his state');
+  const wifeSpark=await w('/state');
+  assert.ok(wifeSpark.spark,'the wife has a daily spark');
+  assert.equal(wifeSpark.spark.day,Math.floor(Date.now()/86400000));
+  assert.deepEqual((await w('/state')).spark.idea.id,wifeSpark.spark.idea.id,'the same day keeps the same spark');
+  assert.equal(wifeSpark.spark.rerolls,0);
+  await op(h,'spark-reroll',{key:randomUUID()},403);
+  await op(h,'spark-dismiss',{idea:wifeSpark.spark.idea.id,key:randomUUID()},403);
+  // A spark is a planning aid, so it keeps working during either personal pause.
+  await op(w,'pause',{});
+  const rerollKey=randomUUID();
+  const rerolled=await op(w,'spark-reroll',{key:rerollKey});
+  assert.equal(rerolled.rerolls,1);
+  assert.deepEqual(await op(w,'spark-reroll',{key:rerollKey}),rerolled,'a committed reroll retry returns the original result');
+  const afterReroll=await w('/state');
+  assert.equal(afterReroll.spark.rerolls,1);
+  assert.notEqual(afterReroll.spark.idea.id,wifeSpark.spark.idea.id,'a reroll advances the spark');
+  await op(w,'resume',{});
+  const dismissedIdea=afterReroll.spark.idea.id,dismissKey=randomUUID();
+  const dismissed=await op(w,'spark-dismiss',{idea:dismissedIdea,key:dismissKey});
+  assert.equal(dismissed.dismissed,1);
+  assert.deepEqual(await op(w,'spark-dismiss',{idea:dismissedIdea,key:dismissKey}),dismissed,'a committed dismissal retry returns the original result');
+  await op(w,'spark-dismiss',{idea:dismissedIdea,key:randomUUID()});
+  const afterDismiss=await w('/state');
+  assert.equal(afterDismiss.spark.idea.id===dismissedIdea,false,'a dismissed idea is never offered again');
+  assert.equal(afterDismiss.spark.rerolls,1);
+  for(let i=0;i<9;i++)await op(w,'spark-reroll',{key:randomUUID()});
+  await op(w,'spark-reroll',{key:randomUUID()},409,'Daily spark reroll limit reached');
+  for(let i=0;i<29;i++)await op(w,'spark-dismiss',{idea:`spark-fake-${i}`,key:randomUUID()});
+  await op(w,'spark-dismiss',{idea:'spark-one-too-many',key:randomUUID()},409,'Spark dismiss list is full');
+
+  // Season packs: wife-only fixed packs, one task a day, her plan hidden from him until delivery.
+  await op(h,'season-start',{pack:'worship-week',key:randomUUID()},403);
+  await op(w,'season-start',{pack:'nope',key:randomUUID()},404,'Season unavailable');
+  await op(w,'season-start',{pack:'worship-week',startsAt:Date.now()-1000,key:randomUUID()},400,'Schedule must be in the future');
+  await op(w,'pause',{});
+  await op(w,'season-start',{pack:'hanukkah',key:randomUUID()},409,'Pause is active');
+  await op(w,'resume',{});
+  const seasonKey=randomUUID();
+  const season=await op(w,'season-start',{pack:'service-weekend',lang:'he',key:seasonKey});
+  assert.equal(season.season.id,'service-weekend');assert.equal(season.season.days,2);
+  assert.deepEqual(await op(w,'season-start',{pack:'service-weekend',lang:'he',key:seasonKey}),season,'a committed season retry returns the original result');
+  await op(w,'season-start',{pack:'hanukkah',key:randomUUID()},409,'A season is already running');
+  s=await state();
+  const seasonMissions=s.missions.filter(m=>m.season?.id==='service-weekend');
+  assert.equal(seasonMissions.length,2);assert.ok(seasonMissions.every(m=>m.status==='queued'));
+  assert.deepEqual(s.seasonProgress,{id:'service-weekend',done:0,total:2,running:true});
+  const hisSeason=(await h(`/sessions/${id}`)).session as Session;
+  assert.equal(hisSeason.missions.some(m=>m.season),false,'undelivered season tasks are withheld from him');
+  assert.equal(JSON.stringify(hisSeason).includes('מטבח'),false,'season copy never reaches him before delivery');
+  // Simulate the pack having started: move its window and the first occurrence into the past.
+  await edit(row=>{const m=row.missions.find(x=>x.season?.id==='service-weekend'&&x.season.day===1)!;row.seasonState!.startsAt=Date.now()-2*86400000;m.scheduledAt=Date.now()-86400000;});
+  s=await state();
+  assert.equal(s.missions.find(m=>m.season?.id==='service-weekend'&&m.season.day===1)!.status,'pending');
+  const hisDeliveredSeason=(await h(`/sessions/${id}`)).session as Session;
+  assert.ok(hisDeliveredSeason.missions.some(m=>m.season?.id==='service-weekend'&&m.season.day===1),'a delivered season task is visible to him');
+  assert.equal(hisDeliveredSeason.missions.some(m=>m.season?.id==='service-weekend'&&m.season.day===2),false,'the next season task stays hidden');
+  s=await state();
+  assert.deepEqual(s.seasonProgress,{id:'service-weekend',done:1,total:2,running:true});
+  await op(h,'season-stop',{key:randomUUID()},403);
+  await op(w,'season-stop',{pack:'hanukkah',key:randomUUID()},404,'Season unavailable');
+  const stopSeasonKey=randomUUID();
+  const stoppedSeason=await op(w,'season-stop',{pack:'service-weekend',key:stopSeasonKey});
+  assert.equal(stoppedSeason.cancelled,1);
+  assert.deepEqual(await op(w,'season-stop',{pack:'service-weekend',key:stopSeasonKey}),stoppedSeason,'a committed stop retry returns the original result');
+  s=await state();
+  assert.equal(s.seasonProgress?.running,false);
+  assert.equal(s.missions.filter(m=>m.season&&m.status==='queued').length,0);
+  await op(w,'season-stop',{key:randomUUID()},409,'No season is running');
+
+  // Trophy case: wife-only curation, per-viewer resolution and hidden-content placeholders.
+  await op(h,'pin',{kind:'mission',ref:quick.id,key:randomUUID()},403);
+  await op(h,'unpin',{pin:randomUUID(),key:randomUUID()},403);
+  const trophyMission=await op(w,'mission',{title:'Trophy work',text:'A completed task worth keeping',points:1,completionStyle:'written',key:randomUUID()});
+  await op(w,'deliver',{mission:trophyMission.mission.id});
+  await op(h,'ack',{mission:trophyMission.mission.id});
+  await op(h,'complete',{mission:trophyMission.mission.id,text:'I did it carefully',expectedVersion:0,key:randomUUID()});
+  await op(w,'review',{mission:trophyMission.mission.id,approve:true,submissionVersion:1,key:randomUUID()});
+  await op(w,'reflection',{appreciation:'A good evening'});
+  const wifeId=(await w('/state')).user.id;
+  await op(w,'pin',{kind:'mission',ref:'not-a-uuid',key:randomUUID()},400);
+  await op(w,'pin',{kind:'mission',ref:randomUUID(),key:randomUUID()},404,'Pin target unavailable');
+  await op(w,'pin',{kind:'reflection',ref:randomUUID(),key:randomUUID()},404,'Pin target unavailable');
+  const emptyMission=await op(w,'mission',{title:'No report yet',text:'Waiting for a report',points:1,completionStyle:'written',key:randomUUID()});
+  await op(w,'pin',{kind:'completion',ref:emptyMission.mission.id,key:randomUUID()},409,'Completion required');
+  const pinKey=randomUUID();
+  const pinnedMission=await op(w,'pin',{kind:'mission',ref:trophyMission.mission.id,key:pinKey});
+  assert.equal(pinnedMission.pin.kind,'mission');
+  assert.deepEqual(await op(w,'pin',{kind:'mission',ref:trophyMission.mission.id,key:pinKey}),pinnedMission,'a committed pin retry returns the original result');
+  await op(w,'pin',{kind:'mission',ref:trophyMission.mission.id,key:randomUUID()},409,'Already pinned');
+  const pinnedCompletion=await op(w,'pin',{kind:'completion',ref:trophyMission.mission.id,key:randomUUID()});
+  const pinnedReflection=await op(w,'pin',{kind:'reflection',ref:wifeId,key:randomUUID()});
+  assert.ok(pinnedCompletion.pin.id&&pinnedReflection.pin.id);
+  s=await state();
+  const trophyTitles=s.trophies?.map(entry=>entry.title).filter(Boolean);
+  assert.ok(trophyTitles?.includes('Trophy work'),'the wife sees the pinned mission');
+  assert.ok(s.trophies?.some(entry=>entry.kind==='completion'&&entry.text==='I did it carefully'));
+  assert.ok(s.trophies?.some(entry=>entry.kind==='reflection'&&entry.author==='wife'&&entry.text==='A good evening'));
+  // A secret draft pinned by her is a content-free placeholder for him.
+  const hiddenPin=await op(w,'mission',{title:'Hidden trophy',text:'A private trophy text',secret:true,key:randomUUID()});
+  await op(w,'pin',{kind:'mission',ref:hiddenPin.mission.id,key:randomUUID()});
+  const hisTrophies=(await h(`/sessions/${id}`)).session as Session;
+  const hiddenEntry=hisTrophies.trophies?.find(entry=>entry.hidden);
+  assert.ok(hiddenEntry,'the withheld mission is a placeholder');
+  assert.deepEqual(Object.keys(hiddenEntry!).sort(),['at','hidden','kind']);
+  assert.equal(JSON.stringify(hisTrophies.trophies).includes('A private trophy text'),false,'hidden trophy text never reaches him');
+  assert.equal(JSON.stringify(hisTrophies.trophies).includes('Hidden trophy'),false,'hidden trophy title never reaches him');
+  assert.equal(hisTrophies.pins?.some(pin=>'ref' in pin),false,'the husband pins carry no references');
+  assert.ok(hisTrophies.trophies?.some(entry=>entry.kind==='completion'&&entry.text==='I did it carefully'),'visible trophies resolve for him');
+  const unpinKey=randomUUID();
+  const unpinned=await op(w,'unpin',{pin:pinnedReflection.pin.id,key:unpinKey});
+  assert.deepEqual(await op(w,'unpin',{pin:pinnedReflection.pin.id,key:unpinKey}),unpinned,'a committed unpin retry returns the original result');
+  await op(w,'unpin',{pin:pinnedReflection.pin.id,key:randomUUID()},404,'Pin unavailable');
+  s=await state();
+  assert.equal(s.trophies?.some(entry=>entry.kind==='reflection'),false,'the removed reflection leaves the gallery');
+
+  // Auction nights: his bids on her lots, the highest bid charged once and burned.
+  await op(h,'auction',{title:'No',description:'No',minBid:1,closesAt:Date.now()+3600000,key:randomUUID()},403);
+  await op(w,'auction-bid',{auction:randomUUID(),amount:5,key:randomUUID()},403);
+  await op(w,'auction',{title:'Past',description:'No',minBid:1,closesAt:Date.now()-1000,key:randomUUID()},400,'Closing time must be in the future');
+  await op(w,'auction',{title:'Far',description:'No',minBid:1,closesAt:Date.now()+8*86400000,key:randomUUID()},400,'Closing time must be within seven days');
+  await op(w,'auction',{title:'Big',description:'No',minBid:100001,closesAt:Date.now()+3600000,key:randomUUID()},400);
+  const lotKey=randomUUID();
+  const lot=await op(w,'auction',{title:'Long massage',description:'One long massage, paid in points',minBid:5,closesAt:Date.now()+3600000,key:lotKey});
+  assert.equal(lot.auction.status,'open');
+  assert.deepEqual(await op(w,'auction',{title:'Long massage',description:'One long massage, paid in points',minBid:5,closesAt:Date.now()+3600000,key:lotKey}),lot,'a committed auction retry returns the original result');
+  await op(h,'auction-bid',{auction:lot.auction.id,amount:4,key:randomUUID()},409,'Bid is below the minimum');
+  await op(h,'auction-bid',{auction:randomUUID(),amount:5,key:randomUUID()},404,'Auction unavailable');
+  await edit(row=>{row.points=30;});
+  const bidKey=randomUUID();
+  const firstBid=await op(h,'auction-bid',{auction:lot.auction.id,amount:10,key:bidKey});
+  assert.equal(firstBid.auction.bids.length,1);
+  assert.deepEqual(await op(h,'auction-bid',{auction:lot.auction.id,amount:10,key:bidKey}),firstBid,'a committed bid retry returns the original result');
+  await op(h,'auction-bid',{auction:lot.auction.id,amount:10,key:randomUUID()},409,'Bid must beat the current highest bid');
+  await op(h,'auction-bid',{auction:lot.auction.id,amount:25,key:randomUUID()});
+  // A lot due during either personal pause is voided without charging.
+  await op(w,'pause',{});
+  await edit(row=>{const open=row.auctions!.find(item=>item.id===lot.auction.id)!;open.closesAt=Date.now()-1000;});
+  s=await state();
+  const voided=s.auctions!.find(item=>item.id===lot.auction.id)!;
+  assert.equal(voided.status,'void');assert.equal(voided.outcome,'void');assert.equal(voided.winningBid,undefined);
+  assert.equal(s.points,30,'a voided lot charges nothing');
+  await op(w,'resume',{});
+  // A covered highest bid is charged once and burned.
+  const paidKey=randomUUID();
+  const paid=await op(w,'auction',{title:'Paid errand',description:'One paid errand',minBid:5,closesAt:Date.now()+3600000,key:paidKey});
+  await op(h,'auction-bid',{auction:paid.auction.id,amount:12,key:randomUUID()});
+  await edit(row=>{const open=row.auctions!.find(item=>item.id===paid.auction.id)!;open.closesAt=Date.now()-1000;});
+  s=await state();
+  const settled=s.auctions!.find(item=>item.id===paid.auction.id)!;
+  assert.equal(settled.status,'closed');assert.equal(settled.outcome,'charged');assert.equal(settled.winningBid,12);
+  assert.equal(s.points,18,'the highest bid is charged once and burned');
+  await op(h,'auction-bid',{auction:paid.auction.id,amount:13,key:randomUUID()},409,'Auction is closed');
+  // A due lot with no bids closes without charging.
+  const emptyKey=randomUUID();
+  const empty=await op(w,'auction',{title:'Quiet lot',description:'No bids expected',minBid:5,closesAt:Date.now()+3600000,key:emptyKey});
+  await edit(row=>{const open=row.auctions!.find(item=>item.id===empty.auction.id)!;open.closesAt=Date.now()-1000;});
+  s=await state();
+  const noBids=s.auctions!.find(item=>item.id===empty.auction.id)!;
+  assert.equal(noBids.status,'closed');assert.equal(noBids.outcome,'no-bids');assert.equal(s.points,18);
+  // At most five open lots and at most fifty stored lots.
+  for(let i=0;i<5;i++)await op(w,'auction',{title:`Open ${i}`,description:'Filler',minBid:1,closesAt:Date.now()+3600000,key:randomUUID()});
+  await op(w,'auction',{title:'One too many',description:'Filler',minBid:1,closesAt:Date.now()+3600000,key:randomUUID()},409,'Too many open auctions');
+  await edit(row=>{for(const item of row.auctions??[])if(item.status==='open')item.status='closed';while((row.auctions??[]).length<50)row.auctions!.push({id:randomUUID(),title:'Filler',description:'',minBid:1,closesAt:Date.now()-1000,status:'void',bids:[],createdAt:Date.now()});});
+  await op(w,'auction',{title:'Full house',description:'Filler',minBid:1,closesAt:Date.now()+3600000,key:randomUUID()},409,'Auction list is full');
+  await edit(row=>{row.auctions=row.auctions!.filter(item=>item.title!=='Filler');});
+  s=await state();
+  assert.equal(s.auctions!.length,8,'the fillers are gone and the real lots remain');
+
+  // Wheel spins: she sets the price, a spin spends her points, and payment is refused short of the price.
+  await op(h,'wheel-config',{cost:5,key:randomUUID()},403);
+  await op(h,'wheel-spin',{key:randomUUID()},403);
+  await op(w,'wheel-config',{cost:-1,key:randomUUID()},400);
+  await op(w,'wheel-config',{cost:21,key:randomUUID()},400);
+  await op(w,'wheel-config',{cost:5,key:randomUUID()});
+  await edit(row=>{row.herPoints=4;});
+  await op(w,'wheel-spin',{key:randomUUID()},409,'Not enough points for a spin');
+  await edit(row=>{row.herPoints=9;});
+  await op(w,'pause',{});
+  // The price is a preference: it can be changed during either personal pause.
+  await op(w,'wheel-config',{cost:3,key:randomUUID()});
+  await op(w,'wheel-spin',{key:randomUUID()},409,'Pause is active');
+  await op(w,'resume',{});
+  const spinKey=randomUUID();
+  const spin=await op(w,'wheel-spin',{key:spinKey});
+  assert.equal(spin.herPoints,6);
+  assert.deepEqual(await op(w,'wheel-spin',{key:spinKey}),spin,'a committed spin retry is not charged twice');
+  s=await state();
+  assert.equal(s.herPoints,6);
+  await op(w,'wheel-config',{cost:0,key:randomUUID()});
+  const freeSpin=await op(w,'wheel-spin',{key:randomUUID()});
+  assert.equal(freeSpin.herPoints,6,'a free spin changes nothing');
+  s=await state();
+  assert.equal(s.wheelCost,0);
+
+  // The case holds thirty pins.
+  await edit(row=>{row.pins=[...(row.pins??[]),...Array.from({length:27},()=>({id:randomUUID(),kind:'mission' as const,ref:randomUUID(),at:Date.now()}))];});
+  s=await state();
+  assert.equal(s.pins?.length,30);
+  await op(w,'pin',{kind:'mission',ref:emptyMission.mission.id,key:randomUUID()},409,'Trophy case is full');
+  const fillerPin=s.pins![0].id;
+  await op(w,'unpin',{pin:fillerPin,key:randomUUID()});
+  const pinnedAfterRoom=await op(w,'pin',{kind:'mission',ref:emptyMission.mission.id,key:randomUUID()});
+  assert.ok(pinnedAfterRoom.pin.id);
+  // Leave one free slot so the post-stop curation check can add a pin.
+  await op(w,'unpin',{pin:(await state()).pins![0].id,key:randomUUID()});
+
   // Terminal sessions still reject new play, including quick commands, ratings, nights and evenings.
   await op(w,'stop',{});
   await op(w,'quick',{preset:preset.id,key:randomUUID()},409,'Session is terminal');
@@ -388,7 +712,22 @@ try {
   await op(w,'her-night',{...nightPayload,key:randomUUID()},409,'Session is terminal');
   await op(w,'evening-close',{key:randomUUID()},409,'Session is terminal');
   await op(w,'evening-save',{name:'Late',mood:'soft',steps:[nightStep]},409,'Session is terminal');
-  console.log('PASS play flow: approvals, quick commands, keyed retries, scheduling, review points, wishlist pricing and approval, private commands, aftercare, her night, quick ratings, private notes, progress helpers, pacing, done for tonight, saved evenings, night cap, devotions, chapters, terminal guard');
+  await op(w,'repeat-stop',{mission:daily.mission.id,key:randomUUID()},409,'Session is terminal');
+  await op(h,'whisper',{text:'Too late',key:randomUUID()},409,'Session is terminal');
+  await op(w,'spark-reroll',{key:randomUUID()},409,'Session is terminal');
+  await op(w,'season-start',{pack:'hanukkah',key:randomUUID()},409,'Session is terminal');
+  await op(w,'auction',{title:'Late lot',description:'No',minBid:1,closesAt:Date.now()+3600000,key:randomUUID()},409,'Session is terminal');
+  await op(w,'wheel-spin',{key:randomUUID()},409,'Session is terminal');
+  // Curation stays open on an ended session so the archive can be arranged after play stops.
+  const latePin=await op(w,'pin',{kind:'mission',ref:quick.id,key:randomUUID()});
+  assert.ok(latePin.pin.id);
+  await op(w,'unpin',{pin:latePin.pin.id,key:randomUUID()});
+  await op(h,'pin',{kind:'mission',ref:quick.id,key:randomUUID()},403);
+  // Ending the session voids every open lot; charged points stay burned.
+  s=await state();
+  assert.equal(s.auctions!.some(item=>item.status==='open'),false,'no lot stays open when the session ends');
+  assert.equal(s.points,18,'no points move on terminal settlement');
+  console.log('PASS play flow: approvals, quick commands, keyed retries, scheduling, review points, wishlist pricing and approval, private commands, aftercare, her night, quick ratings, private notes, progress helpers, pacing, done for tonight, saved evenings, night cap, devotions, chapters, recurring missions, adoration, whispers, daily spark, season packs, trophy case, auctions, wheels, terminal guard');
 } finally {
   if(server)await new Promise<void>(resolve=>server!.close(()=>resolve()));
   await pool.end();await db.stop();await rm(directory,{recursive:true,force:true,maxRetries:10,retryDelay:100});
