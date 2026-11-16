@@ -48,10 +48,10 @@ export function Roulette({ideas,lang,onChoose,mood,herPoints,wheelCost,play,ende
     </div>
     {weighted&&!mood&&<p className="small">{l('wheel-no-checkin')}</p>}
     <div className="row">
-      <label>{l('wheel-cost')}<input type="number" min={0} max={WHEEL_COST_MAX} step={1} inputMode="numeric" value={costDraft} onChange={e=>setCostDraft(e.target.value)}/></label>
+      <label>{l('wheel-cost')}<input type="number" min={0} max={WHEEL_COST_MAX} step={1} inputMode="numeric" value={costDraft} aria-invalid={costInvalid||undefined} aria-describedby={costInvalid?'wheel-cost-error':undefined} onChange={e=>setCostDraft(e.target.value)}/></label>
       <button type="button" disabled={ended} onClick={()=>void saveCost()}>{l('wheel-save-cost')}</button>
     </div>
-    {costInvalid&&<p className="error" role="alert">{l('wheel-cost-invalid')}</p>}
+    {costInvalid&&<p id="wheel-cost-error" className="error" role="alert">{l('wheel-cost-invalid')}</p>}
     <div className="roulette-stage" aria-hidden="true"><div className="roulette-pointer"/><svg className="roulette-wheel" viewBox="-100 -100 200 200" style={{transform:`rotate(${angle}deg)`}}>
       {Array.from({length:8},(_,index)=>{const start=index*Math.PI/4-Math.PI/2,end=(index+1)*Math.PI/4-Math.PI/2;return <path key={index} d={`M 0 0 L ${100*Math.cos(start)} ${100*Math.sin(start)} A 100 100 0 0 1 ${100*Math.cos(end)} ${100*Math.sin(end)} Z`} fill={colors[index%colors.length]} stroke="#f4dfcc" strokeWidth=".6"/>;})}<circle r="8" fill="#f4dfcc"/>
     </svg></div>

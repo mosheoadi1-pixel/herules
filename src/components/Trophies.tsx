@@ -7,7 +7,7 @@ const kindLabel = (kind: TrophyKind, t: Translate) => kind === 'mission' ? t('ה
 
 export function PinButton({ s, kind, target, t, run, action }: { s: Session; kind: TrophyKind; target: string; t: Translate; run: Run; action: Action }) {
   const pin = s.pins?.find(item => item.kind === kind && item.ref === target);
-  return <Button type="button" className={pin ? 'primary' : 'quiet'} aria-pressed={!!pin} onClick={() => void run(() => pin ? action('unpin', { pin: pin.id }) : action('pin', { kind, ref: target }))}>{pin ? t(`הסרת ${kindLabel(kind, t)} מהגביעים`, `Remove ${kindLabel(kind, t)} from trophies`) : t(`שמירת ${kindLabel(kind, t)} בגביעים`, `Keep ${kindLabel(kind, t)} in trophies`)}</Button>;
+  return <Button type="button" className={pin ? 'primary' : 'quiet'} aria-pressed={!!pin} onClick={() => void run(() => pin ? action('unpin', { pin: pin.id }) : action('pin', { kind, ref: target }))}>{pin ? t(`הסרת ${kindLabel(kind, t)} מארון הגביעים`, `Remove ${kindLabel(kind, t)} from the trophy case`) : t(`שמירת ${kindLabel(kind, t)} בארון הגביעים`, `Keep ${kindLabel(kind, t)} in the trophy case`)}</Button>;
 }
 
 export function TrophyCase({ s, wife, open, t, date, run, action }: { s: Session; wife: boolean; open: boolean; t: Translate; date: (at: number) => string; run: Run; action: Action }) {
