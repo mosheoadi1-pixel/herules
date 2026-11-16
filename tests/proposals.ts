@@ -95,5 +95,5 @@ try {
 } finally {
   await pool.end().catch(()=>{});
   await server?.closeAllConnections();await new Promise<void>(resolve=>server!.close(()=>resolve()));
-  await rm(directory,{recursive:true,force:true});
+  await db.stop();await rm(directory,{recursive:true,force:true});
 }

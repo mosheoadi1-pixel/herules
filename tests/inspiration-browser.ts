@@ -25,9 +25,7 @@ try {
   await page.goto('http://localhost:4189');await page.getByRole('button',{name:'English',exact:true}).click();
   await page.locator('select[name="role"]').selectOption(role);await page.getByRole('checkbox').check();await page.getByRole('button',{name:'Enter',exact:true}).click();
  }
- await w.getByRole('heading',{name:'New session',exact:true}).waitFor();
- await w.getByLabel('Exact terms and boundaries for mutual review',{exact:true}).fill('Optional activities; decline without penalty.');
- await w.getByRole('button',{name:'Create session for review',exact:true}).click();
+ await w.getByRole('region',{name:'Next step',exact:true}).waitFor();
  await h.getByRole('navigation').waitFor();
  assert.equal(await h.getByRole('navigation').getByRole('button',{name:'Punishments inspiration',exact:true}).count(),0);
  assert.equal(await w.getByRole('navigation').getByRole('button',{name:'Punishments inspiration',exact:true}).count(),1);

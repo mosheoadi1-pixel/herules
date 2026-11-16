@@ -10,4 +10,4 @@ CREATE TABLE IF NOT EXISTS imported_ideas (
 -- Upgrade existing installations as well as newly created tables.
 ALTER TABLE imported_ideas
  DROP CONSTRAINT IF EXISTS imported_ideas_category_check,
- ADD CONSTRAINT imported_ideas_category_check CHECK(category IN ('challenges','timed','rewards','consequences','roleplay','anticipation','random','secret','teasing','cleaning','cooking'));
+ ADD CONSTRAINT imported_ideas_category_check CHECK(category IN ('challenges','timed','rewards','consequences','roleplay','anticipation','random','secret','teasing','cleaning','cooking','worship','devotion','training','dresscode','public','denial'));

@@ -35,10 +35,11 @@ try {
   // Trusting a supplied identity, accepting invalid values, or gating check-ins on play must fail here.
   const wifeId=(await w('/state')).user.id,husbandId=(await h('/state')).user.id;
   const checkin={minutes:15,energy:'low',mood:'quiet'};
-  const gameplayState=(s:Session)=>{const {last,checkIns,reflections,history,inbox,...rest}=s;return rest;};
+  const gameplayState=(s:Session)=>{const {last,checkIns,reflections,history,inbox,remaining,...rest}=s;return rest;};
   const unchecked=await state();assert.equal(unchecked.checkIns,undefined);
   // Reflection is caller-owned, replaceable and never changes play, including terminal sessions.
-  const reflectState=(s:Session)=>{const {last,reflections,history,inbox,...rest}=s;return rest;};
+  // The remaining clock ticks with wall time between reads, so it is excluded: reflection must not change play, not the clock.
+  const reflectState=(s:Session)=>{const {last,reflections,history,inbox,remaining,...rest}=s;return rest;};
   async function reflection(){
     const before=await state();
     for(const invalid of [{},{appreciation:'  ',repeat:''},{appreciation:'x'.repeat(1001)},{repeat:'x'.repeat(1001)},{appreciation:null},{repeat:3}])await action(w,'reflection',invalid,400);
@@ -67,9 +68,9 @@ try {
   assert.deepEqual(checked.checkIns,{[wifeId]:{minutes:1,energy:'medium',mood:'connection'},[husbandId]:{minutes:1440,energy:'high',mood:'playful'}});
   assert.deepEqual((await h(`/sessions/${id}`)).session.checkIns,checked.checkIns);
   assert.deepEqual((await h('/state')).sessions.find((s:Session)=>s.id===id).checkIns,checked.checkIns);
-  await action(w,'mission',{key:randomUUID(),title:'Still held',text:'Check-in is not approval'},409);
-  // Reward creation is gameplay and must remain blocked until both approve.
-  await action(w,'reward',{key:randomUUID(),title:'Tea',description:'A shared cup',cost:0},409);
+  // The agreement flow was removed (commit d606a49): without pauses, gameplay is open with no approvals.
+  await action(w,'mission',{key:randomUUID(),title:'Still held',text:'Check-in is not approval'});
+  await action(w,'reward',{key:randomUUID(),title:'Tea',description:'A shared cup',cost:0});
   // A misplaced gameplay guard must not block communication or let it resume the clock.
   const before=await state(),message={key:randomUUID(),text:'Let us review at our own pace'};
   const messages=await Promise.all([action(w,'message',message),action(w,'message',message)]);
@@ -88,7 +89,8 @@ try {
   for(const response of [sessionResponse,stateResponse])for(const secret of ['Hidden title','Hidden invitation text','Private draft title','Private draft body'])assert.ok(!JSON.stringify(response).includes(secret),`Response leaked ${secret}`);
   for(const view of [sessionResponse.session,stateResponse.sessions.find((s:Session)=>s.id===id)]){
     const placeholder=view.missions.find((m:any)=>m.id===surprise.id);
-    assert.equal(placeholder.category,'Conversation');
+    // Delivered but unrevealed stubs no longer carry the category: the husband must reveal to learn what it is.
+    assert.equal(placeholder.category,undefined);
     for(const key of ['title','text','points','completionStyle','completion','adjustment'])assert.equal(placeholder[key],undefined,key);
     assert.deepEqual(view.sequence,[surprise.id,earlier.id]);
     assert.equal(currentMission(view,'husband')?.id,surprise.id);
@@ -109,6 +111,18 @@ try {
   const declinedSurprise=(await action(w,'mission',{key:randomUUID(),title:'Declined surprise',text:'Hidden',surprise:true,category:'Care'})).mission;
   await action(w,'deliver',{mission:declinedSurprise.id});await action(h,'refuse',{mission:declinedSurprise.id});
   assert.equal((await h(`/sessions/${id}`)).session.missions.find((m:any)=>m.id===declinedSurprise.id).title,undefined);
+  // Sealed envelope: a queued non-secret surprise shows him only its status and reveal time, while she sees the schedule.
+  const sealed=(await action(w,'mission',{key:randomUUID(),title:'Sealed title',text:'Sealed body',points:4,surprise:true,category:'Care'})).mission;
+  const revealsAt=Date.now()+3600000;
+  await action(w,'queue',{mission:sealed.id,scheduledAt:revealsAt});
+  const sealedView=(await h(`/sessions/${id}`)).session.missions.find((m:any)=>m.id===sealed.id);
+  const {revision:sealedRevision,...sealedFields}=sealedView;
+  assert.equal(typeof sealedRevision,'number');
+  assert.deepEqual(sealedFields,{id:sealed.id,status:'queued',surprise:true,sealed:true,revealsAt});
+  assert.ok(!JSON.stringify((await h('/state')).sessions).includes('Sealed title'));
+  assert.equal((await state()).missions.find(m=>m.id===sealed.id)?.scheduledAt,revealsAt);
+  await action(w,'cancel',{mission:sealed.id});
+  assert.equal((await h(`/sessions/${id}`)).session.missions.some((m:any)=>m.id===sealed.id),false);
   await action(w,'sequence',{missions:[]});
   await action(h,'persona',{persona:'playful'},403);
   await action(w,'persona',{persona:'unknown'},400);
@@ -296,16 +310,12 @@ try {
   const staleSurprise=(await action(w,'mission',{key:randomUUID(),title:'Stale surprise',text:'Private stale details',surprise:true,category:'Care'})).mission;
   await action(w,'deliver',{mission:staleSurprise.id});
   const stale=await create();await action(w,'deliver',{mission:stale.id});await action(h,'adjust',{mission:stale.id,key:randomUUID(),reason:'adjust'});
-  await action(w,'revise',{terms:'Revised boundaries require independent approvals'});
-  await action(w,'sequence',{missions:[]},409);
+  // The agreement flow was removed (commit d606a49): revise is a no-op, so unfinished invitations stay live.
+  await action(w,'revise',{terms:'Revised boundaries are a no-op'});
   await action(h,'message',{key:randomUUID(),text:'Discussing the new terms'});
-  const reviewHold=await state();assert.deepEqual(reviewHold.approvals,[]);assert.equal(reviewHold.missions.find(v=>v.id===stale.id)!.status,'cancelled');
+  const reviewHold=await state();assert.deepEqual(reviewHold.approvals,[]);assert.equal(reviewHold.missions.find(v=>v.id===stale.id)!.status,'adjustment');
   await action(h,'checkin',{minutes:30,energy:'medium',mood:'connection'});
   assert.deepEqual(gameplayState(await state()),gameplayState(reviewHold));
-  await action(w,'replace',{mission:stale.id,key:randomUUID(),title:'Old revision',text:'Must not replace'},409);
-  await approve();
-  await action(h,'reveal',{mission:staleSurprise.id},409);
-  await action(w,'replace',{mission:stale.id,key:randomUUID(),title:'Old revision',text:'Still must not replace'},409);
   const race=await create();await action(w,'deliver',{mission:race.id});await action(h,'adjust',{mission:race.id,key:randomUUID(),reason:'adjust'});
   const raceBody={mission:race.id,title:'Only one',text:'One replacement only',points:0};
   const results=await Promise.all([1,2].map(()=>w(`/sessions/${id}/replace`,{...raceBody,key:randomUUID()},[200,409])));
@@ -340,7 +350,7 @@ try {
   id=(await w('/sessions',{terms:'Rewards test',minutes:30})).session.id;
   assert.equal((await state()).rewards,undefined);assert.equal((await state()).rewardRequests,undefined);assert.equal((await state()).points,0);
   const rewardBody={key:randomUUID(),title:'Shared tea',description:'A quiet cup',cost:4};
-  await action(w,'reward',rewardBody,409);await approve();
+  await approve();
   await action(h,'reward',{...rewardBody,key:randomUUID()},403);
   for(const cost of [-1,1.5,'4',null])await action(w,'reward',{...rewardBody,key:randomUUID(),cost},400);
   const created=(await action(w,'reward',rewardBody)).reward;
@@ -401,15 +411,13 @@ try {
   assert.equal((await state()).rewards,undefined);assert.equal((await state()).rewardRequests,undefined);assert.equal((await state()).points,0);
   console.log('PASS rewards: roles, validation, snapshots, holds, archive, retries, five unique approvals and competing deductions');
   await approve();
-  for(const ending of ['revision','stop','expiry'] as const){
+  for(const ending of ['stop','expiry'] as const){
     const first=await create(),next=await create();await action(w,'sequence',{missions:[first.id,next.id],autoProgress:true});
     await action(w,'deliver',{mission:first.id});await action(h,'ack',{mission:first.id});await action(h,'complete',{mission:first.id,key:randomUUID(),expectedVersion:0});
-    if(ending==='revision')await action(w,'revise',{terms:'Fresh terms'});
-    else if(ending==='stop')await action(h,'stop');
+    if(ending==='stop')await action(h,'stop');
     else await pool.query("UPDATE sessions SET data=jsonb_set(jsonb_set(data,'{remaining}','1'::jsonb),'{last}',to_jsonb($2::bigint)) WHERE id=$1",[id,Date.now()-1000]);
     await action(w,'review',{mission:first.id,key:randomUUID(),submissionVersion:1,approve:true},409);
     assert.notEqual((await state()).missions.find(m=>m.id===next.id)?.status,'pending',ending);
-    if(ending==='revision'){await approve();await action(h,'stop');}
     if(ending!=='expiry'){id=(await w('/sessions',{terms:'Next terminal check',minutes:30})).session.id;await approve();}
   }
   console.log('PASS automatic sequence: opt-in, atomic delivery, redaction, acknowledgement, retry and no-skip guards');

@@ -15,15 +15,15 @@ Acceptance update: independent scoped re-review approved the three blocker fixes
 
 `users` stores fixed role and adulthood self-attestation, with either nickname or registered email/salted scrypt digest; `auth_sessions` stores SHA-256 cookie hashes and expiration. `private_game` has a single checked primary-key row, one unique user per role, and an optional pair ID. Every identity claim locks this row. Opposite-role completion creates `pairs` and assigns both users atomically. Concurrent duplicate-role claims roll back new user creation. Login/auth checks the selected role owner, so preexisting unrelated accounts cannot bypass the two-player limit. Logout and expiry never release a slot. A sole preexisting pair is adopted unchanged; multiple existing pairs require explicit administrative selection before startup. Legacy invitation records are retained but their API surface is removed. See PRIVATE-GAME.md for operational details.
 
-`sessions` contains a pair-owned JSONB aggregate and indexed status. A partial unique index prevents more than one nonterminal session per pair. Reads and mutations acquire `SELECT ... FOR UPDATE`, validate pair membership and advance server time before operating. A pair lock serializes new-session creation. `approvals(session_id, revision, user_id)`, `awards(mission_id)` and `request_keys(session_id, user_id, kind, key)` independently enforce unique approvals, point awards and creation/message/completion/review retries in PostgreSQL. Session JSON and these rows commit together or roll back together.
+`sessions` contains a pair-owned JSONB aggregate and indexed status. A partial unique index prevents more than one nonterminal session per pair. Reads and mutations acquire `SELECT ... FOR UPDATE`, validate pair membership and advance server time before operating. A pair lock serializes new-session creation. `awards(mission_id)` and `request_keys(session_id, user_id, kind, key)` independently enforce one-time point awards and creation/message/completion/review retries in PostgreSQL. The legacy `approvals` table is still cleared on reset but is no longer written. Session JSON and these rows commit together or roll back together.
 
 This aggregate is deliberately small-foundation architecture: it trades normalized queryability for a single auditable transactional state machine. Full history/messages are returned on state refresh; there is no pagination or archival compaction. Long/high-volume sessions increase payload, lock and write costs; normalize/paginate before scaling. Identity claims serialize on the private-game row. SSE listeners are process-local; five-second database polling remains correct across restarts or multiple processes, but no multi-node realtime/load behavior is verified.
 
 ## Consent, time and terminal state
 
-Each revision retains its exact text. Both authenticated participants approve the current integer revision; stale versions fail. Replacement terms retain prior text, clear current approvals and cancel unfinished missions. Either participant may propose revised terms or pause/stop during review. The wife owns mission drafting/delivery/review and duration extension; the husband owns acknowledgement/refusal/completion.
+Terms are stored as text when a session is created; there is no agreement revision or approval step. Either participant may pause or stop at any time. The wife owns mission drafting/delivery/review and duration extension; the husband owns acknowledgement/refusal/completion.
 
-Time is stored as remaining active milliseconds plus a backend `last` timestamp. It does not begin until first mutual approval. Before every locked read/mutation, elapsed server milliseconds are deducted **only** when started, mutually approved, unpaused and nonterminal. A boolean union of all participant pauses and agreement review gates subtraction, so overlapping suspensions never add time twice. Browser intervals are display-only. Expiry is committed even when the triggering gameplay request must fail. Stop is terminal; later locked gameplay fails; awards committed earlier stay history. Reading/marking inbox remains available after termination. No mission-specific expiry exists.
+Time is stored as remaining active milliseconds plus a backend `last` timestamp. It starts when the session is created. Before every locked read/mutation, elapsed server milliseconds are deducted **only** when started, unpaused and nonterminal. A boolean union of all participant pauses gates subtraction, so overlapping suspensions never add time twice. Browser intervals are display-only. Expiry is committed even when the triggering gameplay request must fail. Stop is terminal; later locked gameplay fails; awards committed earlier stay history. Reading/marking inbox remains available after termination. No mission-specific expiry exists.
 
 Queued missions have absolute backend schedule timestamps. Authorized reads deliver eligible missions only while active; suspension holds them until resume. Queued secret drafts are not yet visible to the husband. There is no background scheduler and no claim of notification delivery while closed.
 
@@ -36,7 +36,7 @@ husband: pending -> acknowledged -> submitted
                   -> refused        | wife: -> approved (+points once)
                   -> refused        | wife: -> revision -> submitted
 wife: unfinished -> cancelled
-agreement replacement / stop: unfinished -> cancelled
+permanent stop: unfinished -> cancelled
 ```
 
 Only drafts can be edited; queued drafts can be sent or rescheduled, not edited. Delivered terms bind to the immutable revision. Refusal has no point change. Completion requires explicit acknowledgement; state reads, disconnects and timers never acknowledge. Duplicate creation/message UUIDs return the first committed result. A committed stop wins over any later gameplay lock holder, including a concurrent reviewer.
@@ -53,7 +53,7 @@ Pause/resume/stop use native safety buttons and an independent `runSafety` path;
 - Invitation/redeem endpoints removed; both players join automatically on entry.
 - `GET /api/state`, `/api/sessions/:id`, `/api/events`
 - `POST /api/sessions` with terms and duration
-- `POST /api/sessions/:id/:op`: `approve`, `revise`, `pause`, `resume`, `stop`, `extend`, `mission`, `edit`, `queue`, `deliver`, `cancel`, `ack`, `refuse`, `complete`, `review`, `message`, `read`
+- `POST /api/sessions/:id/:op`: `pause`, `resume`, `stop`, `extend`, `mission`, `edit`, `queue`, `deliver`, `cancel`, `ack`, `refuse`, `complete`, `review`, `message`, `read` (`approve` and `revise` are accepted as no-ops for old clients)
 
 Identity and role always come from the opaque cookie session. Foreign session IDs return a generic denial. Responses omit password/session/invite hashes. The wife sees secret drafts; the husband sees them only after delivery. Recipient history and inbox contain generic event metadata; SSE contains exactly a content-free `refresh` invalidation. Event subscribers authenticate to a pair and revalidate auth on heartbeat. Logout immediately revokes API reads/mutations; an already-open stream closes on its next heartbeat (up to 15s), and its payload never contains content.
 

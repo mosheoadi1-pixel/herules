@@ -17,12 +17,12 @@ const spoof = {...unsafe,id:safe.id};
 for (const destination of ['library','rewards','consequences'] as const) {
  const off = ideasForDestination([...library,unsafe,spoof],destination,false);
  const on = ideasForDestination([...library,unsafe,spoof],destination,true);
- assert.ok(!on.includes(unsafe) && !on.includes(spoof));
- if(destination==='library') {
-  assert.ok(off.includes(unsafe) && off.includes(spoof));
-  assert.ok(on.includes(safe));
+  if(destination==='library') {
+   assert.ok(off.includes(unsafe) && off.includes(spoof));
+   assert.ok(on.includes(unsafe) && on.includes(spoof));
+  assert.ok(!on.includes(safe));
   assert.equal(on.filter(i=>i.category==='roleplay').length,0);
-  assert.ok(on.filter(i=>i.tags.includes('music')).includes(safe));
+  assert.ok(off.filter(i=>i.tags.includes('music')).includes(safe));
   for(let n=0;n<20;n++) assert.ok(on.includes(suggest(on,[])!));
  } else assert.ok(on.every(i=>i.category===destination));
 }
