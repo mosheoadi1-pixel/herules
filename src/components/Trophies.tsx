@@ -15,7 +15,7 @@ export function TrophyCase({ s, wife, open, t, date, run, action }: { s: Session
   return <details className="panel trophy-case" open={open || undefined}>
     <summary><h2>{t('ארון הגביעים','Trophy case')}</h2></summary>
     <p>{t('רגעים שנשמרו מהמשחק.','Moments kept from the game.')} <span className="small">{trophies.length}/30</span></p>
-    {!trophies.length && <p className="empty">{t('ארון הגביעים ריק עדיין.','The trophy case is empty for now.')}</p>}
+    {!trophies.length && <p className="empty soft">{t('ארון הגביעים ריק עדיין.','The trophy case is empty for now.')}</p>}
     <ol className="trophy-list">{trophies.map((entry, index) => <li key={entry.id ?? `hidden-${index}`}>
       <p className="small"><strong>{kindLabel(entry.kind, t)}</strong>{entry.author && ` · ${entry.author === 'wife' ? t('שלה','hers') : t('שלו','his')}`} · <time>{date(entry.at)}</time></p>
       {entry.hidden ? <p className="small">{t('הפריט שמור למי ששלח אותו.','This item is kept for its author.')}</p> : entry.missing ? <p className="small">{t('הפריט אינו זמין עוד.','This item is no longer available.')}</p> : <>{entry.title && <h3>{entry.title}</h3>}{entry.text && <p className="preserve">{entry.text}</p>}</>}

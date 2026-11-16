@@ -41,7 +41,7 @@ export function AuctionsPanel({ s, wife, play, ended, busy, unreconciled, now, t
       <label>{t('הצעה מינימלית (נקודות)','Minimum bid (points)')}<input name="minBid" type="number" inputMode="numeric" required min={1} max={AUCTION_LIMITS.maxBid} step={1}/></label>
       <label>{t('נסגר בעוד (שעות)','Closes in (hours)')}<input name="hours" type="number" inputMode="numeric" required min={1} max={168} step={1}/></label>
       <Button disabled={!play}>{t('פתיחת מכרז','Open auction')}</Button></fieldset></form>}
-    {!lots.length&&<p className="empty">{t('עדיין אין מכרזים.','No auctions yet.')}</p>}
+    {!lots.length&&<p className="empty soft">{t('עדיין אין מכרזים.','No auctions yet.')}</p>}
     {lots.map(lot=>{
       const top=highestBid(lot.bids),open=lot.status==='open'&&lot.closesAt>now,floor=Math.max(lot.minBid,(top??0)+1);
       return <article key={lot.id}>

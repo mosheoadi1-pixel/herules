@@ -194,6 +194,8 @@ Lots live in the session as `auctions` and settle on wall-clock time, regardless
 
 **UI/UX review (2026-11-16):** a subagent-driven review with the ui-ux-pro-max CLI produced 38 prioritized findings; the implemented fixes are listed in the ledger. Highlights: success/error feedback in the status area, the wife's review desk surfaced when items wait, six-tab navigation (Rewards & wishes; Inspiration segmented; Updates = inbox + history + trophy case), danger-sheet confirmations for both stops, chat as a polite log, numeric inputs with `inputMode`, Hebrew serif heading stack, per-day history grouping, and a hard-settle `api()` so a hung request can never jam the refresh queue.
 
+**UI/UX review round 2 (2026-11-17):** 27 further findings fixed — the punishments destination regression, garbled Hebrew labels, quick-bar/preset dedup with contextual placement, merged-tab coherence (single points line, segmented control styling, wheel-first punishments), honest feedback (Mark read gating, unread badges, fixed-toast notice), and motion/spacing/print design tokens. Details in the ledger.
+
 ## Verification
 
 ```powershell

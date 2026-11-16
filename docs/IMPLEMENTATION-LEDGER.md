@@ -178,3 +178,18 @@ Ran a full UI/UX review with two read-only subagents using the ui-ux-pro-max des
 - App robustness (root cause of UI-staleness flakes found by the suite): api() now settles via a hard timer even when a hung fetch ignores abort, so one stuck request can no longer jam the refresh queue; persona choice re-applies its library preselection.
 
 Verification: npm run build PASS; npm test exit 0 (18 suites); npm run test:browser exit 0 after updating it to the current contract (auto-opened sessions, merged tabs, sheet-confirmed stop, role-split balance copy).
+
+
+## UI/UX review round 2 - 2026-11-17
+
+Second subagent-driven review with the ui-ux-pro-max CLI on the improved UI (27 findings: 3 P0, 12 P1, 12 P2 across two reports). Implemented, all UI-only and bilingual:
+
+- P0 regression fixed: the nav merge had left the punishments destination dead - consequences ideas were unreachable and a hidden persona-preselected category filter silently constrained the punishments segment. The destination now follows the Inspiration segment; entering the library segment re-applies the persona preselect and entering punishments always clears the category filter.
+- Garbled Hebrew repaired: every wheel-* label in i18n (had been written as literal question marks) and three mixed-script 'tribute' event labels; garbled copy in the library safety notice, the away-filter empty state, the unknown-outcome banner and the reflection intro (bilingual parity); the surprise-invitation checkbox Hebrew now mirrors the English instead of implying a punishment mechanic.
+- Quick-bar follows the wife to Missions with the top five presets, and CommandPanel's duplicate preset grid is hidden via scoped CSS while the bar is visible (no duplicate accessible names; verified no browser test clicks presets).
+- Merged-tab coherence: single role-split points line (the duplicate on Wishes removed), library panel headed 'Idea library' with the count demoted, the wheel leads the punishments segment above the filters, the segmented control gained a visible caption and joined-pill styling with a strong gold selected state, derivative empty states softened (requests/auctions/trophy case) while primary empties keep their action copy.
+- Feedback integrity: 'Mark read' is disabled at zero unread with the count in its label and no fake success flash; inbox unread items carry a visible New badge instead of a color-only border; the success notice is now a fixed toast (no layout shift) and no longer nests live regions; 'Approve in one tap' unified to the canonical 'Approve and award once'; repeated Send/Delete/Run controls gained contextual aria-labels.
+- Design system: motion tokens (--t-fast/--t-med/--ease-out) applied to buttons, inputs and library cards; spacing/radius tokens added; the summary toggle glyph uses alt-content syntax so + and - stay out of accessible names; print stylesheet added; nav pills 8px apart; filter grid drops to two columns at 320px.
+- Wishes empty state role-split; review-desk 'All clear' reassurance now also shows near the hub; Glow cross-reference updated to the merged tab name; Missions empty state aligned to the invitations vocabulary.
+
+Verification: npm run build PASS; npm test exit 0 (18 suites); npm run test:browser exit 0 (with the library-heading and balance-copy expectations updated to the improved UI).

@@ -564,7 +564,7 @@ try{
   await w.getByRole('navigation').getByRole('button',{name:'Inspiration',exact:true}).click();await w.getByRole('group',{name:'Choose inspiration type'}).getByRole('button',{name:'Idea library',exact:true}).click();
   assert.equal(await w.getByLabel('Category').inputValue(),'','Reload uses the shared persona');
   console.log('PASS persona library defaults: three mappings, shared visual style, manual override through refresh, reload');
-  await w.getByRole('heading',{name:'33 ways to choose together',exact:true}).waitFor();
+  await w.getByRole('heading',{name:'Idea library',exact:true}).waitFor();
   await w.getByLabel('Category').selectOption('roleplay');assert.equal(await w.locator('.library article').count(),6);
   await w.getByLabel('Intensity').selectOption('3');assert.equal(await w.locator('.library article').count(),6);
   await w.getByLabel('Category').selectOption('');assert.equal(await w.locator('.library article').count(),33);
