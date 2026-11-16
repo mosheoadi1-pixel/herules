@@ -529,6 +529,103 @@ try {
   for(let i=0;i<29;i++)await op(w,'spark-dismiss',{idea:`spark-fake-${i}`,key:randomUUID()});
   await op(w,'spark-dismiss',{idea:'spark-one-too-many',key:randomUUID()},409,'Spark dismiss list is full');
 
+  // Season packs: wife-only fixed packs, one task a day, her plan hidden from him until delivery.
+  await op(h,'season-start',{pack:'worship-week',key:randomUUID()},403);
+  await op(w,'season-start',{pack:'nope',key:randomUUID()},404,'Season unavailable');
+  await op(w,'season-start',{pack:'worship-week',startsAt:Date.now()-1000,key:randomUUID()},400,'Schedule must be in the future');
+  await op(w,'pause',{});
+  await op(w,'season-start',{pack:'hanukkah',key:randomUUID()},409,'Pause is active');
+  await op(w,'resume',{});
+  const seasonKey=randomUUID();
+  const season=await op(w,'season-start',{pack:'service-weekend',lang:'he',key:seasonKey});
+  assert.equal(season.season.id,'service-weekend');assert.equal(season.season.days,2);
+  assert.deepEqual(await op(w,'season-start',{pack:'service-weekend',lang:'he',key:seasonKey}),season,'a committed season retry returns the original result');
+  await op(w,'season-start',{pack:'hanukkah',key:randomUUID()},409,'A season is already running');
+  s=await state();
+  const seasonMissions=s.missions.filter(m=>m.season?.id==='service-weekend');
+  assert.equal(seasonMissions.length,2);assert.ok(seasonMissions.every(m=>m.status==='queued'));
+  assert.deepEqual(s.seasonProgress,{id:'service-weekend',done:0,total:2,running:true});
+  const hisSeason=(await h(`/sessions/${id}`)).session as Session;
+  assert.equal(hisSeason.missions.some(m=>m.season),false,'undelivered season tasks are withheld from him');
+  assert.equal(JSON.stringify(hisSeason).includes('מטבח'),false,'season copy never reaches him before delivery');
+  // Simulate the pack having started: move its window and the first occurrence into the past.
+  await edit(row=>{const m=row.missions.find(x=>x.season?.id==='service-weekend'&&x.season.day===1)!;row.seasonState!.startsAt=Date.now()-2*86400000;m.scheduledAt=Date.now()-86400000;});
+  s=await state();
+  assert.equal(s.missions.find(m=>m.season?.id==='service-weekend'&&m.season.day===1)!.status,'pending');
+  const hisDeliveredSeason=(await h(`/sessions/${id}`)).session as Session;
+  assert.ok(hisDeliveredSeason.missions.some(m=>m.season?.id==='service-weekend'&&m.season.day===1),'a delivered season task is visible to him');
+  assert.equal(hisDeliveredSeason.missions.some(m=>m.season?.id==='service-weekend'&&m.season.day===2),false,'the next season task stays hidden');
+  s=await state();
+  assert.deepEqual(s.seasonProgress,{id:'service-weekend',done:1,total:2,running:true});
+  await op(h,'season-stop',{key:randomUUID()},403);
+  await op(w,'season-stop',{pack:'hanukkah',key:randomUUID()},404,'Season unavailable');
+  const stopSeasonKey=randomUUID();
+  const stoppedSeason=await op(w,'season-stop',{pack:'service-weekend',key:stopSeasonKey});
+  assert.equal(stoppedSeason.cancelled,1);
+  assert.deepEqual(await op(w,'season-stop',{pack:'service-weekend',key:stopSeasonKey}),stoppedSeason,'a committed stop retry returns the original result');
+  s=await state();
+  assert.equal(s.seasonProgress?.running,false);
+  assert.equal(s.missions.filter(m=>m.season&&m.status==='queued').length,0);
+  await op(w,'season-stop',{key:randomUUID()},409,'No season is running');
+
+  // Trophy case: wife-only curation, per-viewer resolution and hidden-content placeholders.
+  await op(h,'pin',{kind:'mission',ref:quick.id,key:randomUUID()},403);
+  await op(h,'unpin',{pin:randomUUID(),key:randomUUID()},403);
+  const trophyMission=await op(w,'mission',{title:'Trophy work',text:'A completed task worth keeping',points:1,completionStyle:'written',key:randomUUID()});
+  await op(w,'deliver',{mission:trophyMission.mission.id});
+  await op(h,'ack',{mission:trophyMission.mission.id});
+  await op(h,'complete',{mission:trophyMission.mission.id,text:'I did it carefully',expectedVersion:0,key:randomUUID()});
+  await op(w,'review',{mission:trophyMission.mission.id,approve:true,submissionVersion:1,key:randomUUID()});
+  await op(w,'reflection',{appreciation:'A good evening'});
+  const wifeId=(await w('/state')).user.id;
+  await op(w,'pin',{kind:'mission',ref:'not-a-uuid',key:randomUUID()},400);
+  await op(w,'pin',{kind:'mission',ref:randomUUID(),key:randomUUID()},404,'Pin target unavailable');
+  await op(w,'pin',{kind:'reflection',ref:randomUUID(),key:randomUUID()},404,'Pin target unavailable');
+  const emptyMission=await op(w,'mission',{title:'No report yet',text:'Waiting for a report',points:1,completionStyle:'written',key:randomUUID()});
+  await op(w,'pin',{kind:'completion',ref:emptyMission.mission.id,key:randomUUID()},409,'Completion required');
+  const pinKey=randomUUID();
+  const pinnedMission=await op(w,'pin',{kind:'mission',ref:trophyMission.mission.id,key:pinKey});
+  assert.equal(pinnedMission.pin.kind,'mission');
+  assert.deepEqual(await op(w,'pin',{kind:'mission',ref:trophyMission.mission.id,key:pinKey}),pinnedMission,'a committed pin retry returns the original result');
+  await op(w,'pin',{kind:'mission',ref:trophyMission.mission.id,key:randomUUID()},409,'Already pinned');
+  const pinnedCompletion=await op(w,'pin',{kind:'completion',ref:trophyMission.mission.id,key:randomUUID()});
+  const pinnedReflection=await op(w,'pin',{kind:'reflection',ref:wifeId,key:randomUUID()});
+  assert.ok(pinnedCompletion.pin.id&&pinnedReflection.pin.id);
+  s=await state();
+  const trophyTitles=s.trophies?.map(entry=>entry.title).filter(Boolean);
+  assert.ok(trophyTitles?.includes('Trophy work'),'the wife sees the pinned mission');
+  assert.ok(s.trophies?.some(entry=>entry.kind==='completion'&&entry.text==='I did it carefully'));
+  assert.ok(s.trophies?.some(entry=>entry.kind==='reflection'&&entry.author==='wife'&&entry.text==='A good evening'));
+  // A secret draft pinned by her is a content-free placeholder for him.
+  const hiddenPin=await op(w,'mission',{title:'Hidden trophy',text:'A private trophy text',secret:true,key:randomUUID()});
+  await op(w,'pin',{kind:'mission',ref:hiddenPin.mission.id,key:randomUUID()});
+  const hisTrophies=(await h(`/sessions/${id}`)).session as Session;
+  const hiddenEntry=hisTrophies.trophies?.find(entry=>entry.hidden);
+  assert.ok(hiddenEntry,'the withheld mission is a placeholder');
+  assert.deepEqual(Object.keys(hiddenEntry!).sort(),['at','hidden','kind']);
+  assert.equal(JSON.stringify(hisTrophies.trophies).includes('A private trophy text'),false,'hidden trophy text never reaches him');
+  assert.equal(JSON.stringify(hisTrophies.trophies).includes('Hidden trophy'),false,'hidden trophy title never reaches him');
+  assert.equal(hisTrophies.pins?.some(pin=>'ref' in pin),false,'the husband pins carry no references');
+  assert.ok(hisTrophies.trophies?.some(entry=>entry.kind==='completion'&&entry.text==='I did it carefully'),'visible trophies resolve for him');
+  const unpinKey=randomUUID();
+  const unpinned=await op(w,'unpin',{pin:pinnedReflection.pin.id,key:unpinKey});
+  assert.deepEqual(await op(w,'unpin',{pin:pinnedReflection.pin.id,key:unpinKey}),unpinned,'a committed unpin retry returns the original result');
+  await op(w,'unpin',{pin:pinnedReflection.pin.id,key:randomUUID()},404,'Pin unavailable');
+  s=await state();
+  assert.equal(s.trophies?.some(entry=>entry.kind==='reflection'),false,'the removed reflection leaves the gallery');
+
+  // The case holds thirty pins.
+  await edit(row=>{row.pins=[...(row.pins??[]),...Array.from({length:27},()=>({id:randomUUID(),kind:'mission' as const,ref:randomUUID(),at:Date.now()}))];});
+  s=await state();
+  assert.equal(s.pins?.length,30);
+  await op(w,'pin',{kind:'mission',ref:emptyMission.mission.id,key:randomUUID()},409,'Trophy case is full');
+  const fillerPin=s.pins![0].id;
+  await op(w,'unpin',{pin:fillerPin,key:randomUUID()});
+  const pinnedAfterRoom=await op(w,'pin',{kind:'mission',ref:emptyMission.mission.id,key:randomUUID()});
+  assert.ok(pinnedAfterRoom.pin.id);
+  // Leave one free slot so the post-stop curation check can add a pin.
+  await op(w,'unpin',{pin:(await state()).pins![0].id,key:randomUUID()});
+
   // Terminal sessions still reject new play, including quick commands, ratings, nights and evenings.
   await op(w,'stop',{});
   await op(w,'quick',{preset:preset.id,key:randomUUID()},409,'Session is terminal');
@@ -539,7 +636,13 @@ try {
   await op(w,'repeat-stop',{mission:daily.mission.id,key:randomUUID()},409,'Session is terminal');
   await op(h,'whisper',{text:'Too late',key:randomUUID()},409,'Session is terminal');
   await op(w,'spark-reroll',{key:randomUUID()},409,'Session is terminal');
-  console.log('PASS play flow: approvals, quick commands, keyed retries, scheduling, review points, wishlist pricing and approval, private commands, aftercare, her night, quick ratings, private notes, progress helpers, pacing, done for tonight, saved evenings, night cap, devotions, chapters, recurring missions, adoration, whispers, terminal guard');
+  await op(w,'season-start',{pack:'hanukkah',key:randomUUID()},409,'Session is terminal');
+  // Curation stays open on an ended session so the archive can be arranged after play stops.
+  const latePin=await op(w,'pin',{kind:'mission',ref:quick.id,key:randomUUID()});
+  assert.ok(latePin.pin.id);
+  await op(w,'unpin',{pin:latePin.pin.id,key:randomUUID()});
+  await op(h,'pin',{kind:'mission',ref:quick.id,key:randomUUID()},403);
+  console.log('PASS play flow: approvals, quick commands, keyed retries, scheduling, review points, wishlist pricing and approval, private commands, aftercare, her night, quick ratings, private notes, progress helpers, pacing, done for tonight, saved evenings, night cap, devotions, chapters, recurring missions, adoration, whispers, daily spark, season packs, trophy case, terminal guard');
 } finally {
   if(server)await new Promise<void>(resolve=>server!.close(()=>resolve()));
   await pool.end();await db.stop();await rm(directory,{recursive:true,force:true,maxRetries:10,retryDelay:100});

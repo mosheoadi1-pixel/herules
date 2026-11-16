@@ -154,6 +154,30 @@ The importer and library accept `worship`, `devotion`, `training`, `dresscode`, 
 
 `adore` (husband, keyed) accepts `{ mission, adoration: 'loved' | 'liked' | 'ok' }` on an **approved** mission. It stores his private `adoration` and `adoredAt` on the mission, overwrites his previous value, never touches the wife's `rating`, awards no points and writes no notice or history line. It is allowed during either personal pause and rejected on terminal sessions; a pending, queued or otherwise unapproved mission returns 409. The wife's `/api/state` gains a derived `adorationTally` `{ loved, liked, ok }` over approved missions; the husband's response never contains the tally. The husband's view of each mission retains its own `adoration` value only. Tests live in `tests/play-flow.ts`.
 
+### Daily Spark contract
+
+`/api/state` derives `spark` for the wife only from the built-in library plus every imported idea, shaped by her own check-in energy and mood. Exactly one idea is offered per UTC day and nothing is pushed or stored as a mission. The session keeps only the day's `rerolls` count and a `dismissed` list of idea ids.
+
+`spark-reroll` (wife, keyed) advances to another eligible idea. The daily cap is ten (`SPARK_REROLLS`); the counter resets when the UTC day changes, and the eleventh reroll returns 409 `Daily spark reroll limit reached`. `spark-dismiss` (wife, keyed) records an idea id so it is never offered again; the list holds at most thirty (`SPARK_DISMISSED`) and a full list returns 409 `Spark dismiss list is full`. Dismissing the same idea twice is idempotent and never duplicates the entry.
+
+Both operations are planning aids, not gameplay: they work during either personal pause, award no points, write no notice or history line and change no mission. Terminal sessions reject them with 409. Rewards and consequences ideas are never eligible, and the husband's state never contains `spark` because `visible()` strips it from his view. The dashboard card offers **Send as mission**, **Another spark** and **Not today**. Pure helpers live in `src/spark.ts` and are covered by `tests/spark.ts`; the server contract is covered in `tests/play-flow.ts`.
+
+### Season pack contract
+
+Content lives only in `src/seasons.ts`: four fixed bilingual packs (Worship Week, Service Weekend, Queen's Month, Hanukkah). No pack draws from the CSV, the imported ideas table or the built-in library, and `tests/seasons.ts` scans every title, description and item in both languages against the humiliation-term list.
+
+`season-start` (wife, keyed) accepts `{ pack, startsAt?, lang }`. It queues one mission per pack day at `startsAt + (day - 1) * 24h`, defaulting `startsAt` to the next UTC midnight. A start must be in the future and the whole pack must end within one year; an unknown pack is 404 and starting while a queued season task exists is 409 `A season is already running`. `season-stop` (wife, keyed) cancels every queued season task and marks the run stopped; it returns 409 `No season is running` when nothing is running and 404 when the supplied pack does not match.
+
+Both operations are gameplay actions, so either personal pause rejects them with 409. The session exposes a derived `seasonProgress` `{ id, done, total, running }`; `done` counts delivered tasks whose scheduled time falls inside the current run's window, so restarting a pack never counts an older run. Undelivered season tasks are her plan: `visible()` withholds them from the husband entirely, and he sees each occurrence only once it is delivered. The dashboard panel lists the packs, shows progress and offers a stop confirmation. Server coverage lives in `tests/play-flow.ts`.
+
+### Trophy case contract
+
+`src/trophies.ts` resolves pins per viewer. `trophyEntries()` returns entries newest first; a mission the viewer may not see becomes `{ kind, at, hidden: true }` with no id, title or text, and a reference to something that no longer exists becomes `{ id, kind, at, missing: true }`. A mission pin is authored by her and a completion pin by him; a reflection pin's author is derived from whose reflection it is.
+
+`pin` (wife, keyed) accepts `{ kind: 'mission' | 'completion' | 'reflection', ref }`. Duplicates return 409 `Already pinned`; the case holds thirty pins (`TROPHY_LIMIT`) and a full case returns 409 `Trophy case is full`. An unknown ref is 404 `Pin target unavailable`, and pinning the completion of a mission without a written report is 409 `Completion required`. `unpin` (wife, keyed) removes a pin by its own id and returns 404 `Pin unavailable` when it is gone.
+
+Both operations are curation, not gameplay: they work during either personal pause, write no points, notices or history, and stay available on terminal sessions so the archive can be arranged after play stops — every other operation still returns 409 `Session is terminal`. The session stores only `pins`; the `trophies` gallery is derived on each read. For the husband `visible()` strips `ref` from `pins` and resolves hidden references to content-free placeholders, so a secret trophy never leaks its title or text. The wife can pin a mission or its completion from the invitations list and a reflection from the closing panel; the gallery appears on the dashboard and in history. Pure helpers are covered by `tests/trophies.ts`, the server contract by `tests/play-flow.ts`.
+
 ## Verification
 
 ```powershell
