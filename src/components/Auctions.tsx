@@ -38,8 +38,8 @@ export function AuctionsPanel({ s, wife, play, ended, busy, unreconciled, now, t
     {wife&&<form onSubmit={e=>{const el=e.currentTarget,b=form(e);const hours=Number(b.hours);void run(async()=>{await action('auction',{title:b.title,description:b.description,minBid:Number(b.minBid),closesAt:Date.now()+hours*3600000});el.reset();});}}><fieldset disabled={busy||unreconciled}><legend>{t('מכרז חדש','New auction')}</legend>
       <label>{t('שם המכרז','Auction title')}<input name="title" required maxLength={160}/></label>
       <label>{t('תיאור המכרז','Auction description')}<textarea name="description" required maxLength={4000}/></label>
-      <label>{t('הצעה מינימלית (נקודות)','Minimum bid (points)')}<input name="minBid" type="number" required min={1} max={AUCTION_LIMITS.maxBid} step={1}/></label>
-      <label>{t('נסגר בעוד (שעות)','Closes in (hours)')}<input name="hours" type="number" required min={1} max={168} step={1}/></label>
+      <label>{t('הצעה מינימלית (נקודות)','Minimum bid (points)')}<input name="minBid" type="number" inputMode="numeric" required min={1} max={AUCTION_LIMITS.maxBid} step={1}/></label>
+      <label>{t('נסגר בעוד (שעות)','Closes in (hours)')}<input name="hours" type="number" inputMode="numeric" required min={1} max={168} step={1}/></label>
       <Button disabled={!play}>{t('פתיחת מכרז','Open auction')}</Button></fieldset></form>}
     {!lots.length&&<p className="empty">{t('עדיין אין מכרזים.','No auctions yet.')}</p>}
     {lots.map(lot=>{
@@ -52,7 +52,7 @@ export function AuctionsPanel({ s, wife, play, ended, busy, unreconciled, now, t
         <p>{wife?t('הצעה גבוהה','Highest bid'):t('ההצעה שלך','Your bid')}: {top??t('אין הצעות','No bids yet')}</p>
         <p aria-live="polite">{outcomeText(lot,wife,t)}</p>
         {!wife&&open&&<form onSubmit={e=>{const el=e.currentTarget,b=form(e);void run(async()=>{await action('auction-bid',{auction:lot.id,amount:Number(b.amount)});el.reset();});}}><fieldset disabled={busy||unreconciled||ended}>
-          <label>{t('הצעה (נקודות)','Bid (points)')}<input name="amount" type="number" required min={floor} max={AUCTION_LIMITS.maxBid} step={1}/></label>
+          <label>{t('הצעה (נקודות)','Bid (points)')}<input name="amount" type="number" inputMode="numeric" required min={floor} max={AUCTION_LIMITS.maxBid} step={1}/></label>
           <Button disabled={ended}>{t('הציעו','Bid')}</Button></fieldset></form>}
       </article>;
     })}

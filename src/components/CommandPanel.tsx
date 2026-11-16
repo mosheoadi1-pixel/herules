@@ -29,7 +29,7 @@ export function CommandPanel({ s, play, t, lang, quickAt, setQuickAt, quickBlock
             <h4>{t('תצוגה מקדימה','Preview')}</h4>
             <label>{t('כותרת','Title')}<input value={sayDraft.title} maxLength={160} onChange={e=>setSayDraft({...sayDraft,title:e.target.value})}/></label>
             <label>{t('טקסט הפקודה','Command text')}<textarea value={sayDraft.text} maxLength={160} onChange={e=>setSayDraft({...sayDraft,text:e.target.value})}/></label>
-            <label>{t('נקודות לאישור ביצוע','Points on approval')}<input type="number" min={0} max={100} value={sayDraft.points} onChange={e=>setSayDraft({...sayDraft,points:Number(e.target.value)})}/></label>
+            <label>{t('נקודות לאישור ביצוע','Points on approval')}<input type="number" inputMode="numeric" min={0} max={100} value={sayDraft.points} onChange={e=>setSayDraft({...sayDraft,points:Number(e.target.value)})}/></label>
             <p className="small">{t('הפקודה לא נשלחת עד שתאשרי.','Nothing is sent until you confirm.')}</p>
             <div className="row"><Button className="primary" disabled={!sayReady||!!quickBlock} onClick={()=>askQuick(sayDraft.title.trim(),sayDraft.text.trim(),sayDraft.points,{title:sayDraft.title.trim(),text:sayDraft.text.trim(),points:sayDraft.points},undefined,()=>{setSayText('');setSayDraft(null);})}>{t('שליחה','Send')}</Button></div>
           </article>}
@@ -38,7 +38,7 @@ export function CommandPanel({ s, play, t, lang, quickAt, setQuickAt, quickBlock
         <form onSubmit={e=>{const el=e.currentTarget,b=form(e);void run(async()=>{await action('command-save',{title:b.title,text:b.text,points:Number(b.points)});el.reset();});}}>
           <label>{t('כותרת','Title')}<input name="title" required maxLength={160}/></label>
           <label>{t('הוראה מלאה','Full instruction')}<textarea name="text" required maxLength={4000}/></label>
-          <label>{t('נקודות לאישור ביצוע','Points on approval')}<input name="points" type="number" min={0} max={100} defaultValue={2} required/></label>
+          <label>{t('נקודות לאישור ביצוע','Points on approval')}<input name="points" type="number" inputMode="numeric" min={0} max={100} defaultValue={2} required/></label>
           <Button disabled={!play}>{t('שמירת פקודה','Save command')}</Button>
         </form></details>
       </section>;

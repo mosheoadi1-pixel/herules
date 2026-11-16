@@ -173,7 +173,7 @@ try{
     await w.getByRole('button',{name:'English',exact:true}).click();
     assert.equal(await w.getByRole('button',{name:'Save my check-in',exact:true}).isDisabled(),true);
     for(const name of ['Available minutes','Energy','Mood','Appreciation (optional)','Repeat next time (optional)'])assert.equal(await w.getByLabel(name).isDisabled(),true,`${name} disabled until reconciliation`);
-    await w.getByRole('navigation').getByRole('button',{name:'Rewards',exact:true}).click();
+    await w.getByRole('navigation').getByRole('button',{name:/Rewards & wishes|פרסים ומשאלות/,exact:true}).click();
     for(const name of ['Reward title','Reward description','Reward cost'])assert.equal(await w.getByLabel(name,{exact:true}).isDisabled(),true,`${name} disabled until reconciliation`);
     const paused=w.waitForResponse((r:any)=>r.url().endsWith('/pause')&&r.request().method()==='POST');
     await w.getByRole('button',{name:'Pause my play',exact:true}).click();assert.equal((await paused).status(),200);
@@ -318,7 +318,7 @@ try{
   await h.getByLabel('Written completion',{exact:true}).fill('Tea offered freely.');await h.getByRole('button',{name:'Submit completion',exact:true}).click();
  await w.getByRole('button',{name:'Approve and award once',exact:true}).click();
     await w.waitForFunction(async()=>{const data=await(await fetch('/api/state')).json();return data.sessions[0].missions.some((m:any)=>m.title==='A smaller tea invitation'&&m.status==='approved');});
-    await w.getByRole('navigation').getByRole('button',{name:'Rewards',exact:true}).click();
+    await w.getByRole('navigation').getByRole('button',{name:/Rewards & wishes|פרסים ומשאלות/,exact:true}).click();
     await w.getByLabel('Reward title',{exact:true}).fill('Shared tea');
     await w.getByLabel('Reward description',{exact:true}).fill('A cup together');
     await w.getByLabel('Reward cost',{exact:true}).fill('3');
@@ -343,12 +343,12 @@ try{
       const savedRewards=await w.evaluate(async()=> (await(await fetch('/api/state')).json()).sessions[0].rewards);
       assert.equal(savedRewards.filter((r:any)=>r.title==='Shared tea').length,1);
     }finally{releaseReward();releaseRefresh();await w.unroute('**/api/state',refreshHandler);await w.unroute('**/api/sessions/*/reward',rewardHandler);}
-    await h.getByRole('navigation').getByRole('button',{name:'Rewards',exact:true}).click();
+    await h.getByRole('navigation').getByRole('button',{name:/Rewards & wishes|פרסים ומשאלות/,exact:true}).click();
     await h.getByRole('button',{name:'Request reward',exact:true}).click();
     await w.getByRole('button',{name:'Approve reward',exact:true}).waitFor();
     await h.getByRole('button',{name:'Request reward',exact:true}).click();
     await w.getByRole('button',{name:'Approve reward',exact:true}).first().click();
-    await h.getByText('2 points available',{exact:true}).waitFor();
+    await h.getByText(/Your points: 2|הנקודות שלך: 2/,{exact:false}).first().waitFor();
     await w.waitForFunction(()=>[...document.querySelectorAll('button')].filter(b=>b.textContent==='Approve reward').length===1);
     await w.getByRole('button',{name:'Approve reward',exact:true}).click();
     await w.getByRole('alert').getByText('Not enough points to approve this reward. The request remains pending.',{exact:false}).waitFor();
@@ -356,13 +356,13 @@ try{
     await h.getByText('3 points · Declined',{exact:true}).waitFor();
     await pool.query("UPDATE sessions SET data=jsonb_set(data,'{history}',data->'history' || jsonb_build_array(jsonb_build_object('at',$1::bigint,'event','reward-decision','by','server'))) WHERE status='active'",[Date.now()]);
     for(const page of [w,h]){
-      await page.getByRole('navigation').getByRole('button',{name:'History',exact:true}).click();
+      await page.getByRole('navigation').getByRole('button',{name:/Updates/}).click();
       await page.locator('article').filter({hasText:'Reward request decided'}).filter({hasText:'Shared tea'}).filter({hasText:'Approved'}).waitFor();
       await page.locator('article').filter({hasText:'Reward request decided'}).filter({hasText:'Shared tea'}).filter({hasText:'Declined'}).waitFor();
       assert.equal(await page.locator('article').filter({hasText:'Reward request decided'}).filter({hasText:'Shared tea'}).filter({hasText:'A cup together'}).filter({hasText:'3 points'}).count(),2);
       await page.locator('article').filter({hasText:'Reward request decided'}).filter({hasText:'Server'}).waitFor();
       assert.equal(await page.getByText('Private tea invitation',{exact:true}).count(),0);
-      await page.getByRole('navigation').getByRole('button',{name:'Rewards',exact:true}).click();
+      await page.getByRole('navigation').getByRole('button',{name:/Rewards & wishes|פרסים ומשאלות/,exact:true}).click();
     }
     await h.getByRole('button',{name:'עברית',exact:true}).click();
     assert.equal(await h.locator('html').getAttribute('dir'),'rtl');
@@ -386,7 +386,7 @@ try{
       const mission=(await post(w,'mission',{key:crypto.randomUUID(),title:`Milestone browser ${i}`,text:'Optional',points:0})).mission;
       await post(w,'deliver',{mission:mission.id});await post(h,'ack',{mission:mission.id});await post(h,'complete',{key:crypto.randomUUID(),mission:mission.id,expectedVersion:0});await post(w,'review',{key:crypto.randomUUID(),mission:mission.id,submissionVersion:1,approve:true});
     }
-    await w.getByRole('navigation').getByRole('button',{name:'Rewards',exact:true}).click();
+    await w.getByRole('navigation').getByRole('button',{name:/Rewards & wishes|פרסים ומשאלות/,exact:true}).click();
     await w.getByText('Unique approved missions: 5/5',{exact:true}).waitFor();
     const beforeBonus=await w.evaluate(async()=> (await(await fetch('/api/state')).json()).sessions[0].missions.length);
     await w.getByRole('button',{name:'Pause my play',exact:true}).click();
@@ -404,7 +404,7 @@ try{
     try{
       await openCheckIn(h);await h.getByLabel('Available minutes',{exact:true}).fill('44');await h.getByRole('button',{name:'Save my check-in',exact:true}).click();await partnerSaved;
       await openCheckIn(w);await w.getByText('44 minutes · Energy:',{exact:false}).waitFor();
-      await w.getByRole('navigation').getByRole('button',{name:'Rewards',exact:true}).click();
+      await w.getByRole('navigation').getByRole('button',{name:/Rewards & wishes|פרסים ומשאלות/,exact:true}).click();
       await w.getByRole('button',{name:'Draft a bonus invitation',exact:true}).click();
       assert.equal(await w.getByLabel('Title',{exact:true}).isVisible(),true);
       assert.equal(await w.getByLabel('Title',{exact:true}).inputValue(),'Unsaved bonus navigation');
@@ -416,7 +416,7 @@ try{
     await w.getByRole('button',{name:'Save draft only',exact:true}).click();
     await w.getByRole('region',{name:'Current invitation',exact:true}).getByRole('button',{name:'Edit draft',exact:true}).click();
     await w.getByLabel('Mission text and boundaries').fill('Unsaved edit remains');
-    await w.getByRole('navigation').getByRole('button',{name:'Rewards',exact:true}).click();
+    await w.getByRole('navigation').getByRole('button',{name:/Rewards & wishes|פרסים ומשאלות/,exact:true}).click();
     await w.getByRole('button',{name:'Draft a bonus invitation',exact:true}).click();
     assert.equal(await w.getByText('Edit draft',{exact:true}).first().isVisible(),true);
     assert.equal(await w.getByLabel('Mission text and boundaries').inputValue(),'Unsaved edit remains');
@@ -554,14 +554,14 @@ try{
    await w.getByRole('button',{name:persona,exact:true}).click();
    await w.waitForFunction((value:string)=>document.querySelector('main')?.classList.contains(`persona-${value}`),persona.toLowerCase());
    await h.waitForFunction((value:string)=>document.querySelector('main')?.classList.contains(`persona-${value}`),persona.toLowerCase());
-   await w.getByRole('navigation').getByRole('button',{name:'Idea library',exact:true}).click();
+   await w.getByRole('navigation').getByRole('button',{name:'Inspiration',exact:true}).click();await w.getByRole('group',{name:'Choose inspiration type'}).getByRole('button',{name:'Idea library',exact:true}).click();
    assert.equal(await w.getByLabel('Category').inputValue(),category);
    await w.getByLabel('Category').selectOption('roleplay');
    await w.waitForTimeout(5200);
    assert.equal(await w.getByLabel('Category').inputValue(),'roleplay','Manual override survives ordinary refresh');
   }
   await w.reload();
-  await w.getByRole('navigation').getByRole('button',{name:'Idea library',exact:true}).click();
+  await w.getByRole('navigation').getByRole('button',{name:'Inspiration',exact:true}).click();await w.getByRole('group',{name:'Choose inspiration type'}).getByRole('button',{name:'Idea library',exact:true}).click();
   assert.equal(await w.getByLabel('Category').inputValue(),'','Reload uses the shared persona');
   console.log('PASS persona library defaults: three mappings, shared visual style, manual override through refresh, reload');
   await w.getByRole('heading',{name:'33 ways to choose together',exact:true}).waitFor();
@@ -580,8 +580,8 @@ try{
   for(const language of ['he','en']){
    const current=await w.locator('html').getAttribute('lang');if(current!==language)await w.getByRole('button',{name:language==='he'?'עברית':'English',exact:true}).click();
    assert.equal(await w.locator('html').getAttribute('dir'),language==='he'?'rtl':'ltr');
-    for(const id of ['missions','dashboard','rewards','wishes','library','punishments','messages','inbox','history']){
-     const index=['missions','dashboard','rewards','wishes','library','punishments','messages','inbox','history'].indexOf(id);await w.getByRole('navigation').getByRole('button').nth(index).click();
+    for(const id of ['missions','dashboard','rewards','inspiration','messages','updates']){
+     const index=['missions','dashboard','rewards','inspiration','messages','updates'].indexOf(id);await w.getByRole('navigation').getByRole('button').nth(index).click();
     assert.ok(await w.evaluate(()=>document.documentElement.scrollWidth<=window.innerWidth),`overflow ${width} ${language} ${id}`);
    }
   }
@@ -638,7 +638,7 @@ try{
    await w.getByRole('button',{name:kind==='mission'?'Save draft only':'Send message',exact:true}).click();
    await Promise.race([holding,new Promise((_,reject)=>setTimeout(()=>reject(new Error('Ordinary request did not reach hold fixture')),5000))]);
    const [pause]=await Promise.all([w.waitForResponse((r:any)=>r.url().endsWith('/pause')&&r.request().method()==='POST',{timeout:5000}),w.getByRole('button',{name:'Pause my play',exact:true}).click({timeout:2000})]);assert.equal(pause.status(),200);
-   const [stop]=await Promise.all([w.waitForResponse((r:any)=>r.url().endsWith('/stop')&&r.request().method()==='POST',{timeout:5000}),w.getByRole('button',{name:'Stop permanently',exact:true}).click({timeout:2000})]);assert.equal(stop.status(),200);
+   const [stop]=await Promise.all([w.waitForResponse((r:any)=>r.url().endsWith('/stop')&&r.request().method()==='POST',{timeout:5000}),w.getByRole('button',{name:'Stop permanently',exact:true}).click({timeout:2000}).then(()=>w.locator('dialog.sheet[open]').getByRole('button',{name:'Stop permanently',exact:true}).click())]);assert.equal(stop.status(),200);
    const late=w.waitForResponse((r:any)=>r.url().endsWith('/'+kind)&&r.request().method()==='POST');release();assert.equal((await late).status(),409);
    // The stop commits; the next state read opens a fresh session automatically and the ended one is archived.
    await w.waitForFunction(async()=>{const d=await(await fetch('/api/state')).json();return d.sessions.some((x:any)=>x.status==='stopped')&&d.sessions.some((x:any)=>x.status==='active');},undefined,{polling:500,timeout:30000}).catch(()=>{});

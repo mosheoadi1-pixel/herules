@@ -192,6 +192,10 @@ Lots live in the session as `auctions` and settle on wall-clock time, regardless
 
 ## Verification
 
+**UI/UX review (2026-11-16):** a subagent-driven review with the ui-ux-pro-max CLI produced 38 prioritized findings; the implemented fixes are listed in the ledger. Highlights: success/error feedback in the status area, the wife's review desk surfaced when items wait, six-tab navigation (Rewards & wishes; Inspiration segmented; Updates = inbox + history + trophy case), danger-sheet confirmations for both stops, chat as a polite log, numeric inputs with `inputMode`, Hebrew serif heading stack, per-day history grouping, and a hard-settle `api()` so a hung request can never jam the refresh queue.
+
+## Verification
+
 ```powershell
 npm.cmd test                 # library + isolated real PostgreSQL app integration
 npx.cmd tsx tests/experience.ts # focused cycles 1–4 real PostgreSQL coverage

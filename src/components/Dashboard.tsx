@@ -90,7 +90,7 @@ export function DashboardTab({ s, u, wife, ended, held, play, now, lang, t, date
      </section>
      <section className="panel evening-end"><h2>{t('סוף הערב','The end of the evening')}</h2>
        {closedNow?<p className="notice" role="status" aria-live="polite">{reopenHours<=1?t('הערב נסגר. ייפתח מחדש אוטומטית בעוד פחות משעה.','The evening is closed. It reopens automatically in less than an hour.'):t(`הערב נסגר. ייפתח מחדש אוטומטית ${reopenHours===2?'בעוד שעתיים':`בעוד ${reopenHours} שעות`}.`,`The evening is closed. It reopens automatically in ${reopenHours} hours.`)}</p>
-       :<><p>{t('כשהערב נגמר, אפשר לסגור אותו. הזמנות חד-פעמיות מתוזמנות יבוטלו; פרקים ימשיכו להימסר בבוקר. לא ניתן יהיה לשלוח דבר חדש עד שייפתח מחדש.','When the evening is over, you can close it. Scheduled one-off invitations are cancelled; chapters still arrive in the morning. Nothing new can be sent until it reopens.')}</p><Button disabled={!s||ended} onClick={askClose}>{t('סיום הערב','Done for tonight')}</Button></>}
+       :<><p>{t('כשהערב נגמר, אפשר לסגור אותו. הזמנות חד-פעמיות מתוזמנות יבוטלו; פרקים ימשיכו להימסר בבוקר. לא ניתן יהיה לשלוח דבר חדש עד שייפתח מחדש.','When the evening is over, you can close it. Scheduled one-off invitations are cancelled; chapters still arrive in the morning. Nothing new can be sent until it reopens.')}</p><Button disabled={!s||ended} onClick={askClose}>{t('סיום הערב','Finish tonight')}</Button></>}
      </section>
    </>;
    const onboardingPanel=<section className="panel onboard" aria-labelledby="onboard-title"><h2 id="onboard-title">{t('איך תרצי להתחיל?','How would you like to start?')}</h2>
@@ -160,7 +160,7 @@ export function DashboardTab({ s, u, wife, ended, held, play, now, lang, t, date
       {t(packNameHe[pack]||pack,packNameEn[pack]||pack)}
     </Button>
   ))}
-</div><p className="small dim">{t('הפרק ייכנס לתור שלך מיד. אפשר למסור אותו מיד או לתת לו לחכות לבוקר.','The chapter lands in your queue immediately. Deliver it right away or let it wait until morning.')}</p>{cliffhanger&&<p className="small dim">{t('המכתב למחר','The letter for tomorrow')}: {t(cliffhanger.he,cliffhanger.en)}</p>}</section>}
+</div><p className="small dim">{t('אלה ערכות עונה — אפשר להתחיל אותן גם מהפאנל ערכות העונה.','These are season packs — you can also start them from the Season packs panel.')}</p><p className="small dim">{t('הפרק ייכנס לתור שלך מיד. אפשר למסור אותו מיד או לתת לו לחכות לבוקר.','The chapter lands in your queue immediately. Deliver it right away or let it wait until morning.')}</p>{cliffhanger&&<p className="small dim">{t('המכתב למחר','The letter for tomorrow')}: {t(cliffhanger.he,cliffhanger.en)}</p>}</section>}
     {wife&&paceAndEnd}
     {!wife&&(s.wishRequests??[]).some(r=>r.status==='pending')&&<section className="panel"><h2>{t('בקשות משאלות','Wish requests')}</h2>
       {(s.wishRequests??[]).filter(r=>r.status==='pending').map(r=><article key={r.id}><h3>{r.title}</h3><p>{r.cost} {t('נקודות','points')}</p><div className="row"><Button className="primary" disabled={!play} onClick={()=>void run(()=>action('wish-decision',{request:r.id,approve:true}))}>{t('אישור משאלה','Approve wish')}</Button><Button disabled={!play} onClick={()=>void run(()=>action('wish-decision',{request:r.id,approve:false}))}>{t('דחיית משאלה','Decline wish')}</Button></div></article>)}
