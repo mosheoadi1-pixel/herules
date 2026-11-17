@@ -193,3 +193,10 @@ Second subagent-driven review with the ui-ux-pro-max CLI on the improved UI (27 
 - Wishes empty state role-split; review-desk 'All clear' reassurance now also shows near the hub; Glow cross-reference updated to the merged tab name; Missions empty state aligned to the invitations vocabulary.
 
 Verification: npm run build PASS; npm test exit 0 (18 suites); npm run test:browser exit 0 (with the library-heading and balance-copy expectations updated to the improved UI).
+
+
+## Restart session - 2026-11-17
+
+Replaced the "Stop permanently" control with "Restart session" (New session) per request. The server gained the restart op (top-level chain, both roles, like stop): it closes the current session (queued invitations cancelled), archives it with its full record (queen progress and awards keep deriving from all sessions), and immediately opens a fresh, clean unlimited session that carries over the balances and preferences - his points, her Glow, the persona tint and the wheel price - but never missions, history, messages, inbox, check-ins, reflections, pins or auctions. The archived row is saved before the insert so the one-live-session unique index is respected, and the fresh session records its own session-created opening; terminal sessions reject restart with 409 like every other op.
+
+The UI replaces the stop button and its danger sheet: the opener is now the danger-styled "New session" button whose sheet explains that the current session closes and is archived, the screen starts clean, and points/preferences/favorites are kept; the confirm fires runSafety('restart'). Favorites were already device-local, so they persist naturally. Updated tests/browser.ts to the renamed control and the /restart response, and added play-flow coverage: balances/persona/wheel-cost carry over, the fresh session starts with no missions and no lots and records its opening, the archived session keeps its record, and a terminal session rejects restart. npx.cmd tsx tests/play-flow.ts PASS; npm run build PASS; npm.cmd test exit 0 (18 suites); npm.cmd run test:browser exit 0.

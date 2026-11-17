@@ -53,7 +53,7 @@ try{
       await w.getByRole('button',{name:buttonName,exact:true}).click();await saved;
       for(const control of controls)assert.equal(await control.isDisabled(),true,`${kind}: edits blocked while own save response is held`);
       assert.equal(await w.getByRole('button',{name:/^(Pause my play|Release my pause)$/}).isEnabled(),true);
-      assert.equal(await w.getByRole('button',{name:'Stop permanently',exact:true}).isEnabled(),true);
+      assert.equal(await w.getByRole('button',{name:'New session',exact:true}).isEnabled(),true);
       release();
       await w.getByRole('button',{name:buttonName,exact:true}).waitFor();
       await w.waitForFunction((name:string)=>[...document.querySelectorAll('button')].some(b=>b.textContent===name&&!b.disabled),buttonName);
@@ -177,7 +177,7 @@ try{
     for(const name of ['Reward title','Reward description','Reward cost'])assert.equal(await w.getByLabel(name,{exact:true}).isDisabled(),true,`${name} disabled until reconciliation`);
     const paused=w.waitForResponse((r:any)=>r.url().endsWith('/pause')&&r.request().method()==='POST');
     await w.getByRole('button',{name:'Pause my play',exact:true}).click();assert.equal((await paused).status(),200);
-    assert.equal(await w.getByRole('button',{name:'Stop permanently',exact:true}).isEnabled(),true);
+    assert.equal(await w.getByRole('button',{name:'New session',exact:true}).isEnabled(),true);
   }finally{await w.unroute('**/api/state',failedState);}
   await w.getByRole('button',{name:'Release my pause',exact:true}).waitFor({timeout:30000});
   await w.getByRole('button',{name:'Release my pause',exact:true}).click();
@@ -333,7 +333,7 @@ try{
       await w.getByRole('button',{name:'Create reward',exact:true}).click();await rewardSaved;
       for(const name of ['Reward title','Reward description','Reward cost'])assert.equal(await w.getByLabel(name).isDisabled(),true,`${name} locked until save refresh`);
       assert.equal(await w.getByRole('button',{name:'Pause my play',exact:true}).isEnabled(),true);
-      assert.equal(await w.getByRole('button',{name:'Stop permanently',exact:true}).isEnabled(),true);
+      assert.equal(await w.getByRole('button',{name:'New session',exact:true}).isEnabled(),true);
       await w.route('**/api/state',refreshHandler);
       releaseReward();await refreshHeld;
       for(const name of ['Reward title','Reward description','Reward cost'])assert.equal(await w.getByLabel(name).isDisabled(),true,`${name} locked during authoritative refresh`);
@@ -638,7 +638,7 @@ try{
    await w.getByRole('button',{name:kind==='mission'?'Save draft only':'Send message',exact:true}).click();
    await Promise.race([holding,new Promise((_,reject)=>setTimeout(()=>reject(new Error('Ordinary request did not reach hold fixture')),5000))]);
    const [pause]=await Promise.all([w.waitForResponse((r:any)=>r.url().endsWith('/pause')&&r.request().method()==='POST',{timeout:5000}),w.getByRole('button',{name:'Pause my play',exact:true}).click({timeout:2000})]);assert.equal(pause.status(),200);
-   const [stop]=await Promise.all([w.waitForResponse((r:any)=>r.url().endsWith('/stop')&&r.request().method()==='POST',{timeout:5000}),w.getByRole('button',{name:'Stop permanently',exact:true}).click({timeout:2000}).then(()=>w.locator('dialog.sheet[open]').getByRole('button',{name:'Stop permanently',exact:true}).click())]);assert.equal(stop.status(),200);
+   const [stop]=await Promise.all([w.waitForResponse((r:any)=>r.url().endsWith('/restart')&&r.request().method()==='POST',{timeout:5000}),w.getByRole('button',{name:'New session',exact:true}).click({timeout:2000}).then(()=>w.locator('dialog.sheet[open]').getByRole('button',{name:'New session',exact:true}).click())]);assert.equal(stop.status(),200);
    const late=w.waitForResponse((r:any)=>r.url().endsWith('/'+kind)&&r.request().method()==='POST');release();assert.equal((await late).status(),409);
    // The stop commits; the next state read opens a fresh session automatically and the ended one is archived.
    await w.waitForFunction(async()=>{const d=await(await fetch('/api/state')).json();return d.sessions.some((x:any)=>x.status==='stopped')&&d.sessions.some((x:any)=>x.status==='active');},undefined,{polling:500,timeout:30000}).catch(()=>{});

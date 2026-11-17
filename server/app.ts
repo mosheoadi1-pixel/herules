@@ -325,6 +325,18 @@ export async function createApp(pool: Pool, origin: string) {
       if(['edit','queue','deliver','cancel','ack','refuse','complete','review','adjust','replace','reveal','rate','repeat-stop','adore'].includes(op)){mission=s.missions.find(m=>m.id===uuid.parse(b.mission));if(!mission)fail(404,'Mission unavailable');}
       let response:any={ok:true};
       if(op==='stop'){s.status='stopped';for(const m of s.missions)if(!['approved','refused','cancelled'].includes(m.status))m.status='cancelled';}
+      // Restart closes the current play, archives it (its record stays for queen progress and awards) and opens a fresh,
+      // clean session that carries over the balances and preferences — never missions, history or feeds.
+      else if(op==='restart'){
+        if(!u.pair_id)fail(409,'No pair');
+        s.status='stopped';for(const m of s.missions)if(!['approved','refused','cancelled'].includes(m.status))m.status='cancelled';
+        await save(c,s); // free the one-live-session slot before opening the fresh one
+        const fresh=newSession('');
+        Object.assign(fresh,{points:s.points,herPoints:s.herPoints},s.persona?{persona:s.persona}:{},s.wheelCost!==undefined?{wheelCost:s.wheelCost}:{});
+        notice(fresh,'session-created',u.id);
+        await c.query('INSERT INTO sessions VALUES($1,$2,$3,$4)',[fresh.id,u.pair_id,fresh.status,JSON.stringify(fresh)]);
+        response={ok:true,session:fresh.id};
+      }
       else if(op==='pause'){if(!s.pauses.includes(u.id))s.pauses.push(u.id);}
       else if(op==='resume'){s.pauses=s.pauses.filter(id=>id!==u.id);}
       // Curation stays open on ended sessions so the archive can be arranged after play stops.

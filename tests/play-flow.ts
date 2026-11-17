@@ -727,7 +727,31 @@ try {
   s=await state();
   assert.equal(s.auctions!.some(item=>item.status==='open'),false,'no lot stays open when the session ends');
   assert.equal(s.points,18,'no points move on terminal settlement');
-  console.log('PASS play flow: approvals, quick commands, keyed retries, scheduling, review points, wishlist pricing and approval, private commands, aftercare, her night, quick ratings, private notes, progress helpers, pacing, done for tonight, saved evenings, night cap, devotions, chapters, recurring missions, adoration, whispers, daily spark, season packs, trophy case, auctions, wheels, terminal guard');
+
+  // Restart: closes the live session, opens a clean one, and carries the balances over.
+  await w('/state');
+  const liveId=(await w('/state')).sessions.find((x:Session)=>x.status==='active')!.id;
+  {
+    const row=(await pool.query('SELECT data FROM sessions WHERE id=$1',[liveId])).rows[0].data as Session;
+    row.points=37;row.herPoints=12;row.persona='playful';row.wheelCost=4;
+    await pool.query('UPDATE sessions SET data=$1 WHERE id=$2',[JSON.stringify(row),liveId]);
+  }
+  const restarted=await w(`/sessions/${liveId}/restart`,{});
+  assert.ok(restarted.session,'restart returns the fresh session id');
+  const full=await w('/state');
+  const active=full.sessions.find((x:Session)=>x.status==='active')!,archived=full.sessions.find((x:Session)=>x.id===liveId)!;
+  assert.equal(active.id,restarted.session,'the fresh session is the live one');
+  assert.equal(active.points,37,'his points carry over');
+  assert.equal(active.herPoints,12,'her points carry over');
+  assert.equal(active.persona,'playful','the persona carries over');
+  assert.equal(active.wheelCost,4,'the wheel price carries over');
+  assert.equal(active.missions.length,0,'the fresh session starts with no missions');
+  assert.equal(active.history.some((n:{event:string})=>n.event==='session-created'),true,'the fresh session records its own opening');
+  assert.equal(active.auctions,undefined,'no lots leak into the fresh session');
+  assert.equal(archived.status,'stopped','the closed session is archived');
+  assert.equal(archived.points,37,'the archived session keeps its record');
+  await w(`/sessions/${liveId}/restart`,{},409,'Session is terminal');
+  console.log('PASS play flow: approvals, quick commands, keyed retries, scheduling, review points, wishlist pricing and approval, private commands, aftercare, her night, quick ratings, private notes, progress helpers, pacing, done for tonight, saved evenings, night cap, devotions, chapters, recurring missions, adoration, whispers, daily spark, season packs, trophy case, auctions, wheels, restart, terminal guard');
 } finally {
   if(server)await new Promise<void>(resolve=>server!.close(()=>resolve()));
   await pool.end();await db.stop();await rm(directory,{recursive:true,force:true,maxRetries:10,retryDelay:100});
