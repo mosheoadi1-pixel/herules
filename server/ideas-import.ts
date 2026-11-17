@@ -82,6 +82,8 @@ export function ideaSimilarity(a:string,b:string):number {
   return 2*commonCharacters(a,b)/total;
 }
 export function isSameIdea(a:IdeaFingerprint,b:IdeaFingerprint):boolean {
+  // Categories are distinct ideas even with identical wording.
+  if(a.category!==b.category)return false;
   const threshold=sameMetadata(a,b)?SAME_METADATA_SIMILARITY_THRESHOLD:SEMANTIC_SIMILARITY_THRESHOLD;
   return (!!a.nhe&&!!b.nhe&&ideaSimilarity(a.nhe,b.nhe)>=threshold)||
     (!!a.nen&&!!b.nen&&ideaSimilarity(a.nen,b.nen)>=threshold);
