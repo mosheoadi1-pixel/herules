@@ -42,13 +42,16 @@ export const SEMANTIC_SIMILARITY_THRESHOLD=0.86;
 export const SAME_METADATA_SIMILARITY_THRESHOLD=0.70;
 type TextKey={nhe:string;nen:string};
 type IdeaMeta={category:string;minutes:number;intensity:number;tags:string[]};
-type IdeaFingerprint=TextKey&IdeaMeta&{tagSignature:string};
+type CharCounts=Map<string,number>;
+type IdeaFingerprint=TextKey&IdeaMeta&{tagSignature:string;chars:{he:CharCounts;en:CharCounts}};
 const textKey=(he:string,en:string):TextKey=>({nhe:normalizeIdeaText(he),nen:normalizeIdeaText(en)});
+const charCounts=(text:string):CharCounts=>{const counts:CharCounts=new Map();for(let i=0;i<text.length;i++){const c=text[i]!;counts.set(c,(counts.get(c)??0)+1);}return counts;};
 // A trailing comma in an imported tag is a typo, not a different idea.
 const tagKey=(tag:string):string=>tag.toLowerCase().replace(/[,;\s]+$/,'').trim();
-export const ideaFingerprint=(he:string,en:string,meta:IdeaMeta):IdeaFingerprint=>({
-  ...textKey(he,en),...meta,tagSignature:meta.tags.map(tagKey).sort().join('|')
-});
+export const ideaFingerprint=(he:string,en:string,meta:IdeaMeta):IdeaFingerprint=>{
+  const key=textKey(he,en);
+  return {...key,...meta,tagSignature:meta.tags.map(tagKey).sort().join('|'),chars:{he:charCounts(key.nhe),en:charCounts(key.nen)}};
+};
 const sameMetadata=(a:IdeaFingerprint,b:IdeaFingerprint):boolean=>
   a.category===b.category&&a.minutes===b.minutes&&a.intensity===b.intensity&&
   a.tagSignature===b.tagSignature;
@@ -81,12 +84,21 @@ export function ideaSimilarity(a:string,b:string):number {
   if(ceiling<SAME_METADATA_SIMILARITY_THRESHOLD)return ceiling;
   return 2*commonCharacters(a,b)/total;
 }
+// Matched blocks pair up equal characters, so shared-character count bounds the similarity from above.
+// Most unrelated pairs fall below the threshold here, skipping the costly block matching.
+function similarityBound(a:string,b:string,countsA:CharCounts,countsB:CharCounts):number {
+  let common=0;
+  for(const [c,n] of countsA){const m=countsB.get(c);if(m)common+=Math.min(n,m);}
+  return 2*common/(a.length+b.length);
+}
+const languageMatch=(a:string,b:string,countsA:CharCounts,countsB:CharCounts,threshold:number):boolean=>
+  !!a&&!!b&&similarityBound(a,b,countsA,countsB)>=threshold&&ideaSimilarity(a,b)>=threshold;
 export function isSameIdea(a:IdeaFingerprint,b:IdeaFingerprint):boolean {
   // Categories are distinct ideas even with identical wording.
   if(a.category!==b.category)return false;
   const threshold=sameMetadata(a,b)?SAME_METADATA_SIMILARITY_THRESHOLD:SEMANTIC_SIMILARITY_THRESHOLD;
-  return (!!a.nhe&&!!b.nhe&&ideaSimilarity(a.nhe,b.nhe)>=threshold)||
-    (!!a.nen&&!!b.nen&&ideaSimilarity(a.nen,b.nen)>=threshold);
+  return languageMatch(a.nhe,b.nhe,a.chars.he,b.chars.he,threshold)||
+    languageMatch(a.nen,b.nen,a.chars.en,b.chars.en,threshold);
 }
 
 // Built-in library texts (normalized): a CSV row matching either language of a built-in suggestion is never stored.
