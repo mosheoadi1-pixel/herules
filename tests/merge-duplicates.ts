@@ -6,7 +6,7 @@ import { readFile } from 'node:fs/promises';
 import pg from 'pg';
 import { startDatabase } from '../scripts/db/runtime.mjs';
 import { createApp } from '../server/app.ts';
-import { importIdeas, mergeDuplicateIdeas, normalizeIdeaText, ideaSimilarity } from '../server/ideas-import.ts';
+import { importIdeas, mergeDuplicateIdeas, normalizeIdeaText, ideaSimilarity, ideaFingerprint, isSameIdea } from '../server/ideas-import.ts';
 
 const directory=await mkdtemp(join(tmpdir(),'her-rules-merge-'));
 const db=await startDatabase(directory,55443),pool=new pg.Pool({connectionString:db.url});
@@ -24,6 +24,14 @@ try {
   assert.equal(normalizeIdeaText('Say "hello" — world.'),'say hello world');
   assert.equal(ideaSimilarity('fold all the laundry','fold all the laundry'),1);
   assert.ok(ideaSimilarity('קפלו את כל הכביסה בלי להתלונן','קפלו את כל הכביסה מבלי להתלונן')>0.86);
+  // Reworded copies whose wording diverges in both languages are still one idea when all metadata matches.
+  const clothespinsA='לשים אטבים על ירכיים פנימיות למספר דקות';
+  const clothespinsB='לענוד אטבי כביסה על הירכיים הפנימיות במשך 5 דקות';
+  const clothespinsEnA='Place clothespins on inner thighs for a few minutes';
+  const clothespinsEnB='Wear clothespins on your inner thighs for five minutes';
+  const meta={category:'consequences',minutes:5,intensity:3,tags:['control','touch']};
+  assert.ok(isSameIdea(ideaFingerprint(clothespinsA,clothespinsEnA,meta),ideaFingerprint(clothespinsB,clothespinsEnB,meta)));
+  assert.ok(!isSameIdea(ideaFingerprint(clothespinsA,clothespinsEnA,meta),ideaFingerprint(clothespinsB,clothespinsEnB,{...meta,minutes:15})));
   // The import guard rejects reworded or punctuation-only duplicates before they reach the table.
   assert.equal(await importIdeas(pool,a),1);
   assert.equal(await importIdeas(pool,a2),0);
@@ -45,6 +53,12 @@ try {
   await pool.query('TRUNCATE imported_ideas');
   const batch=header+'challenges,"קפלו את כל הכביסה בלי להתלונן","Fold all the laundry without complaining",5,1,a\r\nchallenges,"קפלו את כל הכביסה מבלי להתלונן","Fold all the laundry without a single complaint",5,1,b\r\n';
   assert.equal(await importIdeas(pool,batch),1);
+  // The reported paraphrase pair cannot enter the table twice, even across separate imports.
+  await pool.query('TRUNCATE imported_ideas');
+  const rewordedA=header+'consequences,"'+clothespinsA+'","'+clothespinsEnA+'",5,3,control|touch\r\n';
+  const rewordedB=header+'consequences,"'+clothespinsB+'","'+clothespinsEnB+'",5,3,control|touch\r\n';
+  assert.equal(await importIdeas(pool,rewordedA),1);
+  assert.equal(await importIdeas(pool,rewordedB),0);
   // The current template imports duplicate-free: server-load merging has nothing to collapse.
   const csv=await readFile(new URL('../custom-tasks-template.csv',import.meta.url),'utf8');
   await pool.query('TRUNCATE imported_ideas');

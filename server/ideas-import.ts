@@ -35,8 +35,23 @@ export function normalizeIdeaText(text:string):string {
 // survive normalization but are still one idea. Ratcliff/Obershelp matching, the algorithm
 // behind Python's difflib.SequenceMatcher, catches them without needing a database extension.
 export const SEMANTIC_SIMILARITY_THRESHOLD=0.86;
+// Hebrew morphology and paraphrasing can push a genuine copy well below 0.86 in both languages
+// (e.g. "Place clothespins on inner thighs for a few minutes" / "Wear clothespins on your inner
+// thighs for five minutes" scores 0.84 in English, 0.71 in Hebrew). When every other field is
+// identical, a clearly reworded text is still the same idea and much weaker evidence suffices.
+export const SAME_METADATA_SIMILARITY_THRESHOLD=0.70;
 type TextKey={nhe:string;nen:string};
+type IdeaMeta={category:string;minutes:number;intensity:number;tags:string[]};
+type IdeaFingerprint=TextKey&IdeaMeta&{tagSignature:string};
 const textKey=(he:string,en:string):TextKey=>({nhe:normalizeIdeaText(he),nen:normalizeIdeaText(en)});
+// A trailing comma in an imported tag is a typo, not a different idea.
+const tagKey=(tag:string):string=>tag.toLowerCase().replace(/[,;\s]+$/,'').trim();
+export const ideaFingerprint=(he:string,en:string,meta:IdeaMeta):IdeaFingerprint=>({
+  ...textKey(he,en),...meta,tagSignature:meta.tags.map(tagKey).sort().join('|')
+});
+const sameMetadata=(a:IdeaFingerprint,b:IdeaFingerprint):boolean=>
+  a.category===b.category&&a.minutes===b.minutes&&a.intensity===b.intensity&&
+  a.tagSignature===b.tagSignature;
 function longestBlock(a:string,b:string):{i:number;j:number;size:number} {
   let bestI=0,bestJ=0,best=0;
   const previous=new Int32Array(b.length+1);
@@ -59,20 +74,24 @@ export function ideaSimilarity(a:string,b:string):number {
   if(a===b)return 1;
   if(!a||!b)return 0;
   const total=a.length+b.length;
-  // 2*min/(a+b) is the highest score any pair of these lengths could reach.
+  // 2*min/(a+b) is the highest score any pair of these lengths could reach. Short-circuit
+  // only below the lowest threshold in use: returning the ceiling above that would turn an
+  // upper bound into a false positive at the relaxed same-metadata threshold.
   const ceiling=2*Math.min(a.length,b.length)/total;
-  if(ceiling<SEMANTIC_SIMILARITY_THRESHOLD)return ceiling;
+  if(ceiling<SAME_METADATA_SIMILARITY_THRESHOLD)return ceiling;
   return 2*commonCharacters(a,b)/total;
 }
-const isSameIdea=(a:TextKey,b:TextKey):boolean=>
-  (!!a.nhe&&!!b.nhe&&ideaSimilarity(a.nhe,b.nhe)>=SEMANTIC_SIMILARITY_THRESHOLD)||
-  (!!a.nen&&!!b.nen&&ideaSimilarity(a.nen,b.nen)>=SEMANTIC_SIMILARITY_THRESHOLD);
+export function isSameIdea(a:IdeaFingerprint,b:IdeaFingerprint):boolean {
+  const threshold=sameMetadata(a,b)?SAME_METADATA_SIMILARITY_THRESHOLD:SEMANTIC_SIMILARITY_THRESHOLD;
+  return (!!a.nhe&&!!b.nhe&&ideaSimilarity(a.nhe,b.nhe)>=threshold)||
+    (!!a.nen&&!!b.nen&&ideaSimilarity(a.nen,b.nen)>=threshold);
+}
 
 // Built-in library texts (normalized): a CSV row matching either language of a built-in suggestion is never stored.
 const builtinTexts=new Set(library.flatMap(idea=>[idea.he,idea.en].map(text=>normalizeIdeaText(text.trim()))));
 
-type IdeaRow={id:string;category:string;he:string;en:string;minutes:number;intensity:number;tags:string[]};
-type StoredIdea={id:string;key:TextKey;tags:string[]};
+type IdeaRow=IdeaMeta&{id:string;he:string;en:string};
+type StoredIdea=IdeaFingerprint&{id:string};
 const sortedTags=(groups:string[][]):string[]=>[...new Set(groups.flat())].sort();
 
 /**
@@ -88,14 +107,13 @@ export async function mergeDuplicateIdeas(pool:Pool|PoolClient):Promise<number> 
     if(owned)await client.query('BEGIN');
     await client.query('SELECT pg_advisory_xact_lock(731904)');
     const rows=(await client.query('SELECT id,category,he,en,minutes,intensity,tags FROM imported_ideas ORDER BY id')).rows as IdeaRow[];
-    const keys=rows.map(row=>textKey(row.he,row.en));
+    const fingerprints=rows.map(row=>ideaFingerprint(row.he,row.en,row));
     const parent=rows.map((_,index)=>index);
     const find=(index:number):number=>{while(parent[index]!==index){parent[index]=parent[parent[index]]!;index=parent[index]!;}return index;};
     const union=(a:number,b:number)=>{a=find(a);b=find(b);if(a!==b)parent[Math.max(a,b)]=Math.min(a,b);};
-    // Compare within a category only, as categories are distinct ideas even with identical wording.
     for(let index=0;index<rows.length;index++) {
       for(let other=0;other<index;other++) {
-        if(rows[other]!.category===rows[index]!.category&&isSameIdea(keys[other]!,keys[index]!))union(other,index);
+        if(isSameIdea(fingerprints[other]!,fingerprints[index]!))union(other,index);
       }
     }
     const clusters=new Map<number,number[]>();
@@ -133,18 +151,19 @@ export async function importIdeas(pool:Pool|PoolClient,csv:string):Promise<numbe
     await client.query(await readFile(new URL('../db/004-imported-ideas.sql',import.meta.url),'utf8'));
     // Existing ideas are the baseline; within-batch additions join them so two reworded
     // records in one CSV cannot both enter the table.
-    const stored=(await client.query('SELECT id,category,he,en,tags FROM imported_ideas')).rows as {id:string;category:string;he:string;en:string;tags:string[]}[];
+    const stored=(await client.query('SELECT id,category,he,en,minutes,intensity,tags FROM imported_ideas')).rows as IdeaRow[];
     const byCategory=new Map<string,StoredIdea[]>();
     for(const row of stored) {
-      const entry:StoredIdea={id:row.id,key:textKey(row.he,row.en),tags:row.tags};
+      const entry:StoredIdea={...ideaFingerprint(row.he,row.en,row),id:row.id};
       const list=byCategory.get(row.category)??[];
       list.push(entry);byCategory.set(row.category,list);
     }
     for(const idea of ideas) {
       const key=textKey(idea.he,idea.en);
       if(builtinTexts.has(key.nhe)||builtinTexts.has(key.nen))continue;
+      const fingerprint:StoredIdea={...ideaFingerprint(idea.he,idea.en,idea),id:''};
       const list=byCategory.get(idea.category)??[];
-      const duplicate=list.find(entry=>isSameIdea(key,entry.key));
+      const duplicate=list.find(entry=>isSameIdea(fingerprint,entry));
       if(duplicate) {
         const tags=sortedTags([duplicate.tags,idea.tags]);
         if(tags.join('|')!==duplicate.tags.join('|'))await client.query('UPDATE imported_ideas SET tags=$2 WHERE id=$1',[duplicate.id,tags]);
@@ -153,7 +172,7 @@ export async function importIdeas(pool:Pool|PoolClient,csv:string):Promise<numbe
       const id='csv-'+createHash('sha256').update(JSON.stringify(idea)).digest('hex');
       const result=await client.query('INSERT INTO imported_ideas(id,category,he,en,minutes,intensity,tags) VALUES($1,$2,$3,$4,$5,$6,$7) ON CONFLICT(id) DO NOTHING',[id,idea.category,idea.he,idea.en,idea.minutes,idea.intensity,idea.tags]);
       inserted+=result.rowCount!;
-      list.push({id,key,tags:idea.tags});byCategory.set(idea.category,list);
+      list.push({...fingerprint,id});byCategory.set(idea.category,list);
     }
     if(owned)await client.query('COMMIT');return inserted;
   } catch(error){if(owned)await client.query('ROLLBACK');throw error;}finally{if(owned)client.release();}
