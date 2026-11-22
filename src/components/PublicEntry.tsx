@@ -3,9 +3,62 @@ import type { FormEvent } from 'react';
 import { api } from '../api';
 import { form } from '../app-shared';
 import { publicCopy } from '../i18n';
+import { VERIFICATION_CONSENT_VERSION } from '../verification-consent';
 
 type PublicUser = { id: string; nickname: string; role: string; gender: string; status: string };
-const errorKeys: Record<string,string> = {'provider not configured':'errProvider','Sign-in expired; start again':'errExpired','Already exists':'errTaken','Invalid or missing input':'errInvalid'};
+const errorKeys: Record<string,string> = {'provider not configured':'errProvider','Sign-in expired; start again':'errExpired','Already exists':'errTaken','Invalid or missing input':'errInvalid','verification not configured':'errVerifyNotConfigured','Consent required':'errConsent','Unsupported image type':'errMedia','Image too large':'errMedia','Too many verification attempts; try again tomorrow':'errAttempts'};
+type Verification = { status: string; consented: boolean; verification: { status: string } | null };
+const maxImageBytes = 5 * 1024 * 1024;
+const readImage = (file: File) => new Promise<string>((resolve, reject) => {
+  if (!['image/jpeg', 'image/png'].includes(file.type)) return reject(new Error('Unsupported image type'));
+  if (file.size > maxImageBytes) return reject(new Error('Image too large'));
+  const reader = new FileReader();
+  reader.onload = () => resolve(String(reader.result));
+  reader.onerror = () => reject(new Error('Unsupported image type'));
+  reader.readAsDataURL(file);
+});
+function VerificationPanel({ t, errorText, onVerified }: { t: (key: string) => string; errorText: (e: any) => string; onVerified: () => void }) {
+  const [state, setState] = useState<Verification | null>(null), [method, setMethod] = useState<'id_document' | 'camera_age'>('id_document'), [files, setFiles] = useState<File[]>([]), [busy, setBusy] = useState(false), [error, setError] = useState('');
+  const load = () => api('/public/verification').then(setState).catch(e => setError(errorText(e)));
+  useEffect(() => { void load(); }, []);
+  const consent = () => {
+    setBusy(true);
+    setError('');
+    void api('/public/consent', { kind: 'verification', textVersion: VERIFICATION_CONSENT_VERSION }).then(load).catch(e => setError(errorText(e))).finally(() => setBusy(false));
+  };
+  const submit = (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    setBusy(true);
+    setError('');
+    void Promise.all(files.map(readImage))
+      .then(media => api('/public/verification', { method, media }))
+      .then(data => { setState({ status: data.status, consented: true, verification: data.verification }); if (data.status === 'verified') onVerified(); })
+      .catch(e => setError(errorText(e)))
+      .finally(() => setBusy(false));
+  };
+  if (!state) return error ? <p className="error" role="alert">{error}</p> : null;
+  if (!state.consented) return <section>
+    <h3>{t('consentTitle')}</h3>
+    <p>{t('consentText')}</p>
+    <button type="button" className="primary" disabled={busy} onClick={consent}>{t('consentAccept')}</button>
+    {error && <p className="error" role="alert">{error}</p>}
+  </section>;
+  const status = state.verification?.status;
+  const message = status === 'failed' ? t('verifyFailed') : status === 'review' ? t('verifyReview') : status === 'purged' ? t('verifyPurged') : status === 'pending' ? t('verifyPending') : '';
+  return <section>
+    <h3>{t('verifyTitle')}</h3>
+    <p>{t('verifyIntro')}</p>
+    <form onSubmit={submit}>
+      <fieldset disabled={busy || status === 'review'}>
+        <label>{t('methodLabel')}<select value={method} onChange={e => setMethod(e.target.value as 'id_document' | 'camera_age')}><option value="id_document">{t('methodId')}</option><option value="camera_age">{t('methodCamera')}</option></select></label>
+        <label>{t('filesLabel')}<input type="file" accept="image/jpeg,image/png" multiple capture={method === 'camera_age' ? 'user' : undefined} onChange={e => setFiles(Array.from(e.target.files ?? []).slice(0, 3))}/></label>
+        <button className="primary" disabled={!files.length}>{t('verifySubmit')}</button>
+      </fieldset>
+    </form>
+    {message && <p role="status">{message}</p>}
+    {error && <p className="error" role="alert">{error}</p>}
+  </section>;
+}
 
 export function PublicEntry({ lang }: { lang: 'he' | 'en' }) {
   const t = (key: string) => publicCopy[key]?.[lang === 'he' ? 0 : 1] || key;
@@ -40,6 +93,7 @@ export function PublicEntry({ lang }: { lang: 'he' | 'en' }) {
   if (user) return <section className="panel auth">
     <h2>{t('signedIn')}</h2>
     <p><bdi>{user.nickname}</bdi> · {t(user.status)}</p>
+    {user.status === 'pending_verification' && <VerificationPanel t={t} errorText={errorText} onVerified={() => setUser(current => current ? { ...current, status: 'verified' } : current)}/>}
     <button type="button" className="quiet" disabled={busy} onClick={signOut}>{t('signOut')}</button>
   </section>;
   if (pending) return <section className="panel auth">

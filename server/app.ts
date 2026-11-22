@@ -2,6 +2,7 @@ import express, { type Request, type Response, type NextFunction } from 'express
 import { randomBytes, randomUUID, createHash, scrypt as scryptCallback, timingSafeEqual } from 'node:crypto';
 import { promisify } from 'node:util';
 import { readFile } from 'node:fs/promises';
+import { join } from 'node:path';
 import type { Pool, PoolClient } from 'pg';
 import { z } from 'zod';
 import { quickPresets } from '../src/quick.ts';
@@ -17,6 +18,8 @@ import { TROPHY_LIMIT, trophyEntries, type TrophyEntry, type TrophyPin, type Tro
 import { AUCTION_LIMITS, highestBid, settleAuction, type AuctionOutcome } from '../src/auctions.ts';
 import { hrMode } from './mode.ts';
 import { pkcePair, randomKey, type PublicIdentityProvider, type PublicProvider } from './public-auth.ts';
+import { VERIFICATION_CONSENT_VERSION } from '../src/verification-consent.ts';
+import { VERIFICATION_ATTEMPTS_PER_DAY, VERIFICATION_MEDIA_MAX_ITEMS, decodeImage, discardMedia, hasVerificationConsent, purgeExpiredVerificationMedia, retentionMs, reviewerIds, storeMedia, verificationDirectory, type PublicVerifier, type PublicVerifierResult } from './public-verification.ts';
 const scrypt = promisify(scryptCallback);
 const hash = (v: string) => createHash('sha256').update(v).digest('hex');
 const text = z.string().trim().min(1).max(4000);
@@ -145,7 +148,7 @@ function runNight(s: Session, mood: 'soft'|'playful'|'strict', lang: 'he'|'en', 
   const counts=s.moodCounts??={soft:0,playful:0,strict:0};counts[mood]++;
   return night;
 }
-export async function createApp(pool: Pool, origin: string, providers: Partial<Record<PublicProvider, PublicIdentityProvider>> = {}) {
+export async function createApp(pool: Pool, origin: string, providers: Partial<Record<PublicProvider, PublicIdentityProvider>> = {}, verifier?: PublicVerifier) {
   const mode = hrMode();
   const configured = new URL(origin);
   if (configured.origin !== origin || (process.env.NODE_ENV === 'production' && configured.protocol !== 'https:')) throw new Error('APP_ORIGIN must be an exact origin; production requires HTTPS');
@@ -155,6 +158,7 @@ export async function createApp(pool: Pool, origin: string, providers: Partial<R
   await pool.query(await readFile(new URL('../db/004-imported-ideas.sql', import.meta.url), 'utf8'));
   await pool.query(await readFile(new URL('../db/005-devotions.sql', import.meta.url), 'utf8'));
   await pool.query(await readFile(new URL('../db/006-public-accounts.sql', import.meta.url), 'utf8'));
+  await pool.query(await readFile(new URL('../db/007-public-verification.sql', import.meta.url), 'utf8'));
   const app = express(); app.disable('x-powered-by');
   app.set('trust proxy',process.env.TRUST_PROXY?.split(',').map(v=>v.trim())||false);
   app.use((req, res, next) => {
@@ -166,7 +170,8 @@ export async function createApp(pool: Pool, origin: string, providers: Partial<R
     if (req.method !== 'GET' && req.method !== 'HEAD' && req.headers.origin !== origin && !sameAddress) return res.status(403).json({ error: 'Origin rejected', expectedOrigin: origin });
     next();
   });
-  app.use(express.json({ limit: '16kb' }));
+  const jsonBody = express.json({ limit: '16kb' }), mediaBody = express.json({ limit: '24mb' });
+  app.use((req, res, next) => (mode === 'public' && req.method === 'POST' && req.path === '/api/public/verification' ? mediaBody : jsonBody)(req, res, next));
   app.use('/api',(req,res,next)=>{if(req.method==='POST'&&(!req.body||typeof req.body!=='object'||Array.isArray(req.body)))return res.status(400).json({error:'A JSON object is required'});next();});
   async function transaction<T>(fn: (c: PoolClient) => Promise<T>) {
     const c = await pool.connect();
@@ -291,12 +296,106 @@ export async function createApp(pool: Pool, origin: string, providers: Partial<R
       await publicLogin(res, id);
       res.json({ user: publicUser(row) });
     });
-    app.get('/api/public/me', async (req,res) => {
+    const signedPublic = async (req: Request) => {
       const r = await pool.query('SELECT u.id,u.nickname,u.role,u.gender,u.verified_at FROM public_users u JOIN public_sessions s ON s.public_user_id=u.id WHERE s.hash=$1 AND s.expires>now()', [hash(publicTokenOf(req))]);
-      if (!r.rows[0]) fail(401,'Please sign in');
-      res.json({ user: publicUser(r.rows[0]) });
-    });
+      return r.rows[0] ?? fail(401,'Please sign in');
+    };
+    app.get('/api/public/me', async (req,res) => { res.json({ user: publicUser(await signedPublic(req)) }); });
     app.post('/api/public/logout', async (req,res) => { await pool.query('DELETE FROM public_sessions WHERE hash=$1',[hash(publicTokenOf(req))]); res.clearCookie('hr_public_session',{ path:'/' }); res.json({ok:true}); });
+    const verificationDir = verificationDirectory();
+    const verificationRetention = retentionMs();
+    const verificationView = (row: any) => row ? { id: row.id, method: row.method, status: row.status, reason: row.reason ?? null, createdAt: row.created_at, decidedAt: row.decided_at ?? null } : null;
+    const reviewer = async (req: Request) => {
+      await rate(req,'public-admin',120);
+      const user = await signedPublic(req);
+      if (!reviewerIds().includes(user.id)) fail(403,'Reviewer role required');
+      return user;
+    };
+    const purge = () => purgeExpiredVerificationMedia(pool, new Date(), verificationDir).catch(error => console.error('Verification media purge failed', error.code || error.name));
+    await purge();
+    setInterval(purge, 3600000).unref();
+    app.post('/api/public/consent', async (req,res) => {
+      await rate(req,'public-consent',30);
+      const user = await signedPublic(req);
+      const b = z.object({ kind: z.literal('verification'), textVersion: z.literal(VERIFICATION_CONSENT_VERSION) }).parse(req.body);
+      await transaction(async c => {
+        await c.query('SELECT id FROM public_users WHERE id=$1 FOR UPDATE', [user.id]);
+        await c.query('INSERT INTO public_consents(id,public_user_id,kind,text_version,ip_hash) SELECT $1,$2,$3,$4,$5 WHERE NOT EXISTS (SELECT 1 FROM public_consents WHERE public_user_id=$2 AND kind=$3 AND text_version=$4)', [randomUUID(), user.id, b.kind, b.textVersion, hash(req.ip ?? '')]);
+      });
+      res.json({ consented: true });
+    });
+    app.get('/api/public/verification', async (req,res) => {
+      const user = await signedPublic(req);
+      const latest = (await pool.query('SELECT id,method,status,reason,created_at,decided_at FROM public_verifications WHERE public_user_id=$1 ORDER BY created_at DESC LIMIT 1', [user.id])).rows[0];
+      res.json({ status: user.verified_at ? 'verified' : 'pending_verification', consented: await hasVerificationConsent(pool, user.id), verification: verificationView(latest) });
+    });
+    app.post('/api/public/verification', async (req,res) => {
+      await rate(req,'public-verification',60);
+      const user = await signedPublic(req);
+      const adapter = verifier ?? fail(503,'verification not configured');
+      if (!(await hasVerificationConsent(pool, user.id))) fail(409,'Consent required');
+      const b = z.object({ method: z.enum(['id_document','camera_age']), media: z.array(z.string().max(7500000)).min(1).max(VERIFICATION_MEDIA_MAX_ITEMS) }).parse(req.body);
+      const images = b.media.map(decodeImage);
+      const id = randomUUID();
+      await transaction(async c => {
+        const locked = (await c.query('SELECT verified_at FROM public_users WHERE id=$1 FOR UPDATE', [user.id])).rows[0];
+        if (locked.verified_at) fail(409,'Already verified');
+        const recent = (await c.query("SELECT count(*)::int AS n FROM public_verifications WHERE public_user_id=$1 AND created_at>now()-interval '24 hours'", [user.id])).rows[0].n;
+        if (recent >= VERIFICATION_ATTEMPTS_PER_DAY) fail(429,'Too many verification attempts; try again tomorrow');
+        await c.query("INSERT INTO public_verifications(id,public_user_id,method,status) VALUES($1,$2,$3,'pending')", [id, user.id, b.method]);
+        try {
+          const paths = await storeMedia(verificationDir, id, images);
+          for (const path of paths) await c.query('INSERT INTO public_verification_media(id,verification_id,kind,storage_path) VALUES($1,$2,$3,$4)', [randomUUID(), id, b.method === 'id_document' ? 'document' : 'selfie', path]);
+        } catch (error) {
+          await discardMedia(verificationDir, id);
+          throw error;
+        }
+      });
+      let outcome: PublicVerifierResult;
+      try { outcome = await adapter.check({ method: b.method, media: images.map(image => image.bytes) }); }
+      catch { outcome = { result: 'review', reason: 'automatic check unavailable' }; }
+      const result = outcome.result === 'passed' || outcome.result === 'failed' ? outcome.result : 'review';
+      const reason = String(outcome.reason ?? '').slice(0, 300);
+      const decided = result !== 'review';
+      const row = await transaction(async c => {
+        const r = await c.query('UPDATE public_verifications SET status=$2,reason=$3,decided_at=$4,purge_after=$5 WHERE id=$1 RETURNING id,method,status,reason,created_at,decided_at', [id, result, reason, decided ? new Date() : null, decided ? new Date(Date.now() + verificationRetention) : null]);
+        if (result === 'passed') await c.query('UPDATE public_users SET verified_at=COALESCE(verified_at,now()) WHERE id=$1', [user.id]);
+        return r.rows[0];
+      });
+      res.json({ verification: verificationView(row), status: result === 'passed' ? 'verified' : 'pending_verification' });
+    });
+    app.get('/api/public/admin/reviews', async (req,res) => {
+      await reviewer(req);
+      const rows = (await pool.query("SELECT v.id,v.method,v.status,v.reason,v.created_at,v.decided_at,u.nickname FROM public_verifications v JOIN public_users u ON u.id=v.public_user_id WHERE v.status IN ('review','failed') ORDER BY v.created_at")).rows;
+      res.json({ reviews: rows.map(row => ({ ...verificationView(row), nickname: row.nickname })) });
+    });
+    app.get('/api/public/admin/reviews/:id/media', async (req,res) => {
+      const actor = await reviewer(req);
+      const id = uuid.parse(req.params.id);
+      const index = z.coerce.number().int().min(0).max(VERIFICATION_MEDIA_MAX_ITEMS - 1).parse(req.query.index ?? 0);
+      const verification = (await pool.query('SELECT status FROM public_verifications WHERE id=$1', [id])).rows[0] ?? fail(404,'Review unavailable');
+      if (verification.status === 'purged') fail(410,'Media has been deleted');
+      if (!['review','failed'].includes(verification.status)) fail(409,'Only items awaiting review have media to review');
+      const media = (await pool.query('SELECT storage_path FROM public_verification_media WHERE verification_id=$1 ORDER BY created_at,id', [id])).rows;
+      const item = media[index] ?? fail(404,'Media unavailable');
+      await pool.query('INSERT INTO public_admin_audit(id,actor_id,action,target_verification_id) VALUES($1,$2,$3,$4)', [randomUUID(), actor.id, 'media-view', id]);
+      res.sendFile(join(verificationDir, item.storage_path), (error?: Error) => { if (error && !res.headersSent) res.status(410).json({ error: 'Media has been deleted' }); });
+    });
+    app.post('/api/public/admin/reviews/:id/decision', async (req,res) => {
+      const actor = await reviewer(req);
+      const id = uuid.parse(req.params.id);
+      const b = z.object({ decision: z.enum(['approve','reject']), reason: z.string().trim().min(1).max(300) }).parse(req.body);
+      const row = await transaction(async c => {
+        const verification = (await c.query('SELECT public_user_id,status FROM public_verifications WHERE id=$1 FOR UPDATE', [id])).rows[0] ?? fail(404,'Review unavailable');
+        if (!['review','failed'].includes(verification.status)) fail(409,'Only items awaiting review can be decided');
+        const approve = b.decision === 'approve';
+        const r = await c.query('UPDATE public_verifications SET status=$2,reason=$3,reviewer_id=$4,decided_at=$5,purge_after=$6 WHERE id=$1 RETURNING id,method,status,reason,created_at,decided_at', [id, approve ? 'passed' : 'failed', b.reason, actor.id, new Date(), new Date(Date.now() + verificationRetention)]);
+        if (approve) await c.query('UPDATE public_users SET verified_at=COALESCE(verified_at,now()) WHERE id=$1', [verification.public_user_id]);
+        await c.query('INSERT INTO public_admin_audit(id,actor_id,action,target_verification_id,reason) VALUES($1,$2,$3,$4,$5)', [randomUUID(), actor.id, b.decision, id, b.reason]);
+        return r.rows[0];
+      });
+      res.json({ verification: verificationView(row) });
+    });
   }
   const listeners = new Map<string,Set<Response>>();
   const emit = (pair: string) => { for(const res of listeners.get(pair) || []) res.write('data: refresh\n\n'); };
