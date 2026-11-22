@@ -22,7 +22,7 @@ export function Proposals({ s, u, wife, play, ended, t, run, action }: Proposals
       <form onSubmit={e => { const el = e.currentTarget, b = form(e); const category = String(b.category ?? '').trim(); void run(async () => { await action('propose', { title: b.title, text: b.text, points: Number(b.points), ...(category ? { category } : {}) }); el.reset(); }); }}>
         <label>{t('כותרת','Title')}<input name="title" required maxLength={160} /></label>
         <label>{t('ההזמנה שאתה מציע','The invitation you are proposing')}<textarea name="text" required maxLength={4000} /></label>
-        <label>{t('נקודות מוצעות לאישור ביצוע','Proposed points on approved completion')}<input name="points" type="number" min={0} max={100} defaultValue={5} required /></label>
+        <label>{t('נקודות מוצעות לאישור ביצוע','Proposed points on approved completion')}<input name="points" type="number" inputMode="numeric" min={0} max={100} defaultValue={5} required /></label>
         <label>{t('קטגוריה להצגה (לא חובה)','Category to display (optional)')}<input name="category" maxLength={80} /></label>
         <Button disabled={ended}>{t('שליחת ההצעה','Send proposal')}</Button>
         <p className="small">{t('ההצעה אינה מפעילה דבר מעצמה. היא נשמרת כהצעה עד שהיא תחליט.','A proposal does nothing by itself. It stays a proposal until she decides.')}</p>

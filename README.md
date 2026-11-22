@@ -178,6 +178,27 @@ Both operations are gameplay actions, so either personal pause rejects them with
 
 Both operations are curation, not gameplay: they work during either personal pause, write no points, notices or history, and stay available on terminal sessions so the archive can be arranged after play stops — every other operation still returns 409 `Session is terminal`. The session stores only `pins`; the `trophies` gallery is derived on each read. For the husband `visible()` strips `ref` from `pins` and resolves hidden references to content-free placeholders, so a secret trophy never leaks its title or text. The wife can pin a mission or its completion from the invitations list and a reflection from the closing panel; the gallery appears on the dashboard and in history. Pure helpers are covered by `tests/trophies.ts`, the server contract by `tests/play-flow.ts`.
 
+<<<<<<< HEAD
+=======
+### Auction nights contract
+
+Lots live in the session as `auctions` and settle on wall-clock time, regardless of holds. `auction` (wife, keyed) opens a lot: `{ title, description, minBid, closesAt }` with the close inside seven days and a minimum bid of 1–100000 (`AUCTION_LIMITS`). At most five lots are open at once (409 `Too many open auctions`) and at most fifty are stored (409 `Auction list is full`). `auction-bid` (husband, keyed) must beat both the minimum (409 `Bid is below the minimum`) and the current highest bid (409 `Bid must beat the current highest bid`); a closed or due lot returns 409 `Auction is closed` and an unknown lot 404 `Auction unavailable`.
+
+`settleAuction()` in `src/auctions.ts` runs on every read and before every operation via `advance()`: a due lot charges its highest bid once — only if the balance covers it — and the charged points are burned: they are subtracted from the balance and credited to no one. Losing bids are never charged and a bid never freezes points. A lot due during either personal pause is voided without charging, and a terminal session voids every open lot; the outcome is stored on the lot as `charged`, `void` or `no-bids` and the `auction-close` history/inbox notice is content-free (no amounts, no balances). Both operations are gameplay actions, so pauses reject them with 409 and terminal sessions with 409 `Session is terminal`. The Rewards tab hosts the panel: she opens lots, he bids, and outcome wording describes the burn without naming amounts. Pure helpers are covered by `tests/auctions.ts`, the server contract by `tests/play-flow.ts`.
+
+### Wheel contract
+
+`src/wheels.ts` holds the spin economy: `WHEEL_COST_MAX` is 20 and four fixed bilingual wheels (Worship, Tease, Service, Dare) are pool rules — a required category allowlist plus an optional any-of tag filter. Rewards and consequences are in no list, so they never enter a wheel. `offeredWheels()` offers only wheels whose pool is non-empty for the current library (built-in plus imported ideas); the built-in library feeds the Tease and Dare wheels and imported ideas can feed the rest.
+
+`wheel-config` (wife, keyed) sets the per-spin price `wheelCost` (0–20). It is a preference, not play: it works during either personal pause, writes no notice, and is rejected on terminal sessions. `wheel-spin` (wife, keyed) charges the configured price from her balance before the wheel moves — 409 `Not enough points for a spin` when short — and a committed retry is not charged twice. It is a gameplay action, so pauses reject it with 409 and terminal sessions with 409 `Session is terminal`; the charge itself is content-free. The idea choice happens in the client: `pickWheelIndex()` draws with weight 2 for ideas that share a tag with her current check-in (mood plus energy) when she opts into mood weighting, and the result only offers an idea to edit — nothing is sent automatically. The wheel UI on the punishments tab offers the wheels, the mood toggle, the price setting and a paid-spin flow where a refused payment leaves the wheel still. Pure helpers are covered by `tests/wheels.ts`, the slice geometry by `tests/roulette.ts`, and the server contract by `tests/play-flow.ts`.
+
+## Verification
+
+**UI/UX review (2026-11-16):** a subagent-driven review with the ui-ux-pro-max CLI produced 38 prioritized findings; the implemented fixes are listed in the ledger. Highlights: success/error feedback in the status area, the wife's review desk surfaced when items wait, six-tab navigation (Rewards & wishes; Inspiration segmented; Updates = inbox + history + trophy case), danger-sheet confirmations for both stops, chat as a polite log, numeric inputs with `inputMode`, Hebrew serif heading stack, per-day history grouping, and a hard-settle `api()` so a hung request can never jam the refresh queue.
+
+**UI/UX review round 2 (2026-11-17):** 27 further findings fixed — the punishments destination regression, garbled Hebrew labels, quick-bar/preset dedup with contextual placement, merged-tab coherence (single points line, segmented control styling, wheel-first punishments), honest feedback (Mark read gating, unread badges, fixed-toast notice), and motion/spacing/print design tokens. Details in the ledger.
+
+>>>>>>> 20fda84e1bc17e5e83e3b399c13de9520009d69d
 ## Verification
 
 ```powershell

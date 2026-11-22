@@ -28,6 +28,54 @@ const ideaSchema=z.object({category:z.enum(categories),he:z.string().min(1).max(
 // Built-in library texts (trimmed): a row duplicating either language of a built-in suggestion is never stored.
 const builtinTexts=new Set(library.flatMap(idea=>[idea.he,idea.en].map(text=>text.trim())));
 
+// Case-, punctuation- and whitespace-insensitive text key in both languages: "Shalom." and "shalom" are one idea.
+export function normalizeIdeaText(text:string):string {
+  return text.toLowerCase().replace(/[\s\u05be\u05f3\u05f4.,!?;:"'()\-\u2013\u2014]+/g,' ').trim();
+}
+
+type IdeaRow={id:string;category:string;he:string;en:string;minutes:number;intensity:number;tags:string[]};
+/**
+ * Merge duplicate imported_ideas rows on server load.
+ * Rows in the same category whose normalized Hebrew or English text match are one idea:
+ * the first row (lowest id) survives with the union of all tags, the rest are deleted.
+ * Returns how many rows were merged away.
+ */
+export async function mergeDuplicateIdeas(pool:Pool|PoolClient):Promise<number> {
+  const owned=pool instanceof Pool;
+  const client=owned?await pool.connect():pool;
+  try {
+    if(owned)await client.query('BEGIN');
+    const rows=(await client.query('SELECT id,category,he,en,minutes,intensity,tags FROM imported_ideas ORDER BY id')).rows as IdeaRow[];
+    const parent=rows.map((_,index)=>index);
+    const find=(index:number):number=>{while(parent[index]!==index){parent[index]=parent[parent[index]];index=parent[index];}return index;};
+    const union=(a:number,b:number)=>{a=find(a);b=find(b);if(a!==b)parent[Math.max(a,b)]=Math.min(a,b);};
+    const byText=new Map<string,number>();
+    rows.forEach((row,index)=>{
+      for(const text of [row.he,row.en]) {
+        const normalized=normalizeIdeaText(text);
+        if(!normalized)continue;
+        const key=`${row.category}|${normalized}`;
+        const seen=byText.get(key);
+        if(seen===undefined)byText.set(key,index);else union(seen,index);
+      }
+    });
+    const clusters=new Map<number,number[]>();
+    rows.forEach((_,index)=>{const root=find(index);const cluster=clusters.get(root);if(cluster)cluster.push(index);else clusters.set(root,[index]);});
+    let removed=0;
+    for(const members of clusters.values()) {
+      if(members.length<2)continue;
+      const keeper=rows[members[0]!];
+      const tags=[...new Set(members.flatMap(index=>rows[index]!.tags))].sort();
+      const dropped=members.slice(1).map(index=>rows[index]!.id);
+      await client.query('DELETE FROM imported_ideas WHERE id=ANY($1)',[dropped]);
+      if(tags.join('|')!==keeper.tags.join('|'))await client.query('UPDATE imported_ideas SET tags=$2 WHERE id=$1',[keeper.id,tags]);
+      removed+=dropped.length;
+    }
+    if(owned)await client.query('COMMIT');
+    return removed;
+  } catch(error){if(owned)await client.query('ROLLBACK');throw error;}finally{if(owned)client.release();}
+}
+
 export async function importIdeas(pool:Pool|PoolClient,csv:string):Promise<number> {
   const [header,...rows]=parseCsv(csv);
   if(header?.join(',')!=='category,he,en,minutes,intensity,tags')throw new Error('Expected header: category,he,en,minutes,intensity,tags');

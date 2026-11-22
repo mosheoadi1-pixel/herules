@@ -49,9 +49,16 @@ type DashboardTabProps = {
   sayDraft: SayDraft | null; setSayDraft: Dispatch<SetStateAction<SayDraft | null>>; sayReady: boolean;
   deck: DeckItem[]; skipDeck: (id: string) => void; gardenTotal: number; useIdea: (idea: { id: string; category: string; he: string; en: string }) => void;
   askSeason: (packId: string) => void;
+<<<<<<< HEAD
 };
 
 export function DashboardTab({ s, u, wife, ended, held, play, now, lang, t, date, label, run, action, nudgeDue, dismissNudge, progress, weekly, badges, streaks, queen, digest, adorationTally, spark, ratingLabel, moodLabel, favourite, nextScheduled, notes, notesFull, awaitingReview, pendingRewards, recentApproved, needsCare, keysHintSeen, setKeysHintSeen, moodOrder, nightMood, lastMood, chooseMood, sendSteps, nightBlock, askNight, saveOpen, setSaveOpen, eveningName, setEveningName, savedFull, saveEvening, savedList, sendBlock, cap, usedNow, limitMessage, askRun, lastNight, nightApproved, nightMissions, choosePace, finishOnboarding, closedNow, windowHours, reopenHours, askClose, quickBlock, barPresets, askPreset, quickAt, setQuickAt, askQuick, sayOpen, setSayOpen, sayText, setSayText, sayDraft, setSayDraft, sayReady, deck, skipDeck, gardenTotal, useIdea, askSeason }: DashboardTabProps) {
+=======
+  askStopSeason: (packId: string) => void;
+};
+
+export function DashboardTab({ s, u, wife, ended, held, play, now, lang, t, date, label, run, action, nudgeDue, dismissNudge, progress, weekly, badges, streaks, queen, digest, adorationTally, spark, ratingLabel, moodLabel, favourite, nextScheduled, notes, notesFull, awaitingReview, pendingRewards, recentApproved, needsCare, keysHintSeen, askStopSeason, setKeysHintSeen, moodOrder, nightMood, lastMood, chooseMood, sendSteps, nightBlock, askNight, saveOpen, setSaveOpen, eveningName, setEveningName, savedFull, saveEvening, savedList, sendBlock, cap, usedNow, limitMessage, askRun, lastNight, nightApproved, nightMissions, choosePace, finishOnboarding, closedNow, windowHours, reopenHours, askClose, quickBlock, barPresets, askPreset, quickAt, setQuickAt, askQuick, sayOpen, setSayOpen, sayText, setSayText, sayDraft, setSayDraft, sayReady, deck, skipDeck, gardenTotal, useIdea, askSeason }: DashboardTabProps) {
+>>>>>>> 20fda84e1bc17e5e83e3b399c13de9520009d69d
   const StatsBox=wife?'details':'section';
    const statsPanel=<StatsBox className="panel stats" aria-label={t('התקדמות המשחק','Game progress')}>{wife?<summary><h2>{t('איך המשחק מתקדם','How the game is going')}</h2></summary>:<h2>{t('איך המשחק מתקדם','How the game is going')}</h2>}
       <div className="stat-grid">
@@ -62,8 +69,13 @@ export function DashboardTab({ s, u, wife, ended, held, play, now, lang, t, date
       </div>
       <p className="small">{t('השבוע','This week')}: {weekly.herPointsThisWeek} {t('נקודות שלה','her points')}{weekly.topRating&&<> · {t('דירוג מוביל','Top rating')}: {ratingLabel(weekly.topRating)}</>}</p>
       {progress.graceUsed&&<p className="small">{t('יום חסד נוצל כדי לשמור על הרצף','A grace day kept your streak')}</p>}
+<<<<<<< HEAD
       <p className="small" aria-label={t('רצפים','Streaks')}>{t('רצף מסירות (ימים UTC)','Devotion streak (UTC days)')}: <strong>{streaks.devotion.current}</strong> · {t('הרצף הארוך','Longest')}: {streaks.devotion.longest} · {t('רצף משימות שנשלחו','Mission streak sent')}: <strong>{streaks.mission.current}</strong> · {t('הרצף הארוך','Longest')}: {streaks.mission.longest}{streaks.mission.todayDone&&<> · {t('נשלחה משימה היום','Sent a mission today')}</>}</p>
       <div className="row" aria-label={t('אבני דרך','Milestones')}>{badges.map(b=><span key={b.at} className="badge">{b.at} {t('משימות','tasks')} · {b.reached?t('הושג','Reached'):t(`עוד ${b.at-progress.total}`,`${b.at-progress.total} to go`)}</span>)}</div>
+=======
+      <p className="small"><span className="sr-only">{t('רצפים','Streaks')}.</span>{t('רצף מסירות (ימים UTC)','Devotion streak (UTC days)')}: <strong>{streaks.devotion.current}</strong> · {t('הרצף הארוך','Longest')}: {streaks.devotion.longest} · {t('רצף משימות שנשלחו','Mission streak sent')}: <strong>{streaks.mission.current}</strong> · {t('הרצף הארוך','Longest')}: {streaks.mission.longest}{streaks.mission.todayDone&&<> · {t('נשלחה משימה היום','Sent a mission today')}</>}</p>
+      <div className="row"><span className="sr-only">{t('אבני דרך','Milestones')}</span>{badges.map(b=><span key={b.at} className="badge">{b.at} {t('משימות','tasks')} · {b.reached?t('הושג','Reached'):t(`עוד ${b.at-progress.total}`,`${b.at-progress.total} to go`)}</span>)}</div>
+>>>>>>> 20fda84e1bc17e5e83e3b399c13de9520009d69d
     </StatsBox>;
    const digestPanel=digest&&<details className="panel digest" aria-label={t('הסיכום השבועי','Weekly digest')}><summary><h2>{t('הסיכום השבועי','Weekly digest')}</h2></summary>
      {new Date(now).getDay()===0&&<p className="digest-sunday" role="status">{t('יום ראשון: זמן טוב להביט לאחור על השבוע יחד.','Sunday: a good time to look back on the week together.')}</p>}
@@ -89,7 +101,7 @@ export function DashboardTab({ s, u, wife, ended, held, play, now, lang, t, date
      </section>
      <section className="panel evening-end"><h2>{t('סוף הערב','The end of the evening')}</h2>
        {closedNow?<p className="notice" role="status" aria-live="polite">{reopenHours<=1?t('הערב נסגר. ייפתח מחדש אוטומטית בעוד פחות משעה.','The evening is closed. It reopens automatically in less than an hour.'):t(`הערב נסגר. ייפתח מחדש אוטומטית ${reopenHours===2?'בעוד שעתיים':`בעוד ${reopenHours} שעות`}.`,`The evening is closed. It reopens automatically in ${reopenHours} hours.`)}</p>
-       :<><p>{t('כשהערב נגמר, אפשר לסגור אותו. הזמנות חד-פעמיות מתוזמנות יבוטלו; פרקים ימשיכו להימסר בבוקר. לא ניתן יהיה לשלוח דבר חדש עד שייפתח מחדש.','When the evening is over, you can close it. Scheduled one-off invitations are cancelled; chapters still arrive in the morning. Nothing new can be sent until it reopens.')}</p><Button disabled={!s||ended} onClick={askClose}>{t('סיום הערב','Done for tonight')}</Button></>}
+       :<><p>{t('כשהערב נגמר, אפשר לסגור אותו. הזמנות חד-פעמיות מתוזמנות יבוטלו; פרקים ימשיכו להימסר בבוקר. לא ניתן יהיה לשלוח דבר חדש עד שייפתח מחדש.','When the evening is over, you can close it. Scheduled one-off invitations are cancelled; chapters still arrive in the morning. Nothing new can be sent until it reopens.')}</p><Button disabled={!s||ended} onClick={askClose}>{t('סיום הערב','Finish tonight')}</Button></>}
      </section>
    </>;
    const onboardingPanel=<section className="panel onboard" aria-labelledby="onboard-title"><h2 id="onboard-title">{t('איך תרצי להתחיל?','How would you like to start?')}</h2>
@@ -112,6 +124,8 @@ export function DashboardTab({ s, u, wife, ended, held, play, now, lang, t, date
   const sippedFor=s.adoration?.sippedFor;
   const canGrant=!!sippedFor&&s.adoration?.grantedFor!==sippedFor;
   const chapterOpen=s.missions.filter(m=>m.chapter&&!['approved','refused','cancelled'].includes(m.status)).length;
+  const reviewWaiting=awaitingReview.length+pendingRewards.length;
+  const reviewDesk= <section className="panel review-desk"><h2>{t('שולחן הבדיקה שלך','Your review desk')}{awaitingReview.length+pendingRewards.length>0&&<span className="badge"> {awaitingReview.length+pendingRewards.length} {t('ממתינים','waiting')}</span>}</h2> {!awaitingReview.length&&!pendingRewards.length&&<p className="empty">✓ {t('הכול מסודר. אין פריטים שממתינים לך.','All clear. Nothing is waiting for you.')}</p>} {awaitingReview.map(m=><article key={m.id}><h3>{m.title}</h3><p className="preserve">{m.completion}</p><div className="row"><Button className="primary" disabled={!play} onClick={()=>void run(()=>action('review',{mission:m.id,approve:true,submissionVersion:m.submissionVersion??0}))}>{t('אישור ונקודות פעם אחת','Approve and award once')}</Button><Button disabled={!play} onClick={()=>void run(()=>action('review',{mission:m.id,approve:false,submissionVersion:m.submissionVersion??0}))}>{t('החזרה לתיקון','Return for revision')}</Button></div></article>)} {pendingRewards.map(r=><article key={r.id}><h3>{r.title}</h3><p>{r.cost} {t('נקודות','points')}</p><div className="row"><Button className="primary" disabled={!play} onClick={()=>void run(()=>action('reward-decision',{request:r.id,approve:true}))}>{t('אישור פרס','Approve reward')}</Button><Button disabled={!play} onClick={()=>void run(()=>action('reward-decision',{request:r.id,approve:false}))}>{t('דחיית פרס','Decline reward')}</Button></div></article>)} <details className="subtle"><summary>{t('משימות שאושרו לאחרונה','Recently approved tasks')}</summary> {!recentApproved.length&&<p className="empty">{t('עדיין אין משימות שאושרו.','No approved tasks yet.')}</p>} {recentApproved.map(m=><article key={m.id}><h4>{m.title}</h4><div className="row">{(['love','like','skip'] as const).map(rating=><Button key={rating} aria-pressed={m.rating===rating} className={m.rating===rating?'primary':undefined} onClick={()=>void run(()=>action('rate',{mission:m.id,rating}))}>{ratingLabel(rating)}</Button>)}</div>{m.rating&&<p className="small">{t('הדירוג שנשמר','Saved rating')}: {ratingLabel(m.rating)}</p>}</article>)}</details> </section>
   return <>
     {wife&&s&&!ended&&s.pace===undefined&&onboardingPanel}
     {wife&&s&&quickBar}
@@ -129,8 +143,11 @@ export function DashboardTab({ s, u, wife, ended, held, play, now, lang, t, date
         <Button disabled={!play||!canGrant} onClick={()=>void run(()=>action('grant'))}>{t('מעניקה','Grant')}</Button>
         <Button disabled={!play} onClick={()=>void run(()=>action('seal'))}>{t('חותמת','Seal')}</Button>
       </div>
+      <p className="small" role="status">{(() => { const steps: string[] = []; if (waiting) steps.push(t('פותחת','Reveal')); if (ready) steps.push(t('לוגמת','Sip')); if (canGrant) steps.push(t('מעניקה','Grant')); steps.push(t('חותמת','Seal')); return steps.length ? t('זמין עכשיו: ','Available now: ')+steps.join(' · ') : ''; })()}</p>
       {s.adoration?.sealedAt&&<p className="small">{t('הפרק נחתם. אפשר לפתוח פרק חדש.','The chapter is sealed. A new one can begin.')}</p>}
     </section>}
+    {wife&&reviewWaiting>0&&reviewDesk}
+    {wife&&reviewWaiting===0&&<p className="small" role="status">✓ {t('שולחן הבדיקה פנוי','Review desk is clear')}</p>}
 
     {!wife&&<section className="panel hub" aria-label={t('המחווה היומית','The Daily Tribute')}>
       <p className="eyebrow">{t('המחווה היומית','The Daily Tribute')}</p>
@@ -155,7 +172,7 @@ export function DashboardTab({ s, u, wife, ended, held, play, now, lang, t, date
       {t(packNameHe[pack]||pack,packNameEn[pack]||pack)}
     </Button>
   ))}
-</div><p className="small dim">{t('הפרק ייכנס לתור שלך מיד. אפשר למסור אותו מיד או לתת לו לחכות לבוקר.','The chapter lands in your queue immediately. Deliver it right away or let it wait until morning.')}</p>{cliffhanger&&<p className="small dim">{t('המכתב למחר','The letter for tomorrow')}: {t(cliffhanger.he,cliffhanger.en)}</p>}</section>}
+</div><p className="small dim">{t('אלה ערכות עונה — אפשר להתחיל אותן גם מהפאנל ערכות העונה.','These are season packs — you can also start them from the Season packs panel.')}</p><p className="small dim">{t('הפרק ייכנס לתור שלך מיד. אפשר למסור אותו מיד או לתת לו לחכות לבוקר.','The chapter lands in your queue immediately. Deliver it right away or let it wait until morning.')}</p>{cliffhanger&&<p className="small dim">{t('המכתב למחר','The letter for tomorrow')}: {t(cliffhanger.he,cliffhanger.en)}</p>}</section>}
     {wife&&paceAndEnd}
     {!wife&&(s.wishRequests??[]).some(r=>r.status==='pending')&&<section className="panel"><h2>{t('בקשות משאלות','Wish requests')}</h2>
       {(s.wishRequests??[]).filter(r=>r.status==='pending').map(r=><article key={r.id}><h3>{r.title}</h3><p>{r.cost} {t('נקודות','points')}</p><div className="row"><Button className="primary" disabled={!play} onClick={()=>void run(()=>action('wish-decision',{request:r.id,approve:true}))}>{t('אישור משאלה','Approve wish')}</Button><Button disabled={!play} onClick={()=>void run(()=>action('wish-decision',{request:r.id,approve:false}))}>{t('דחיית משאלה','Decline wish')}</Button></div></article>)}
@@ -177,19 +194,16 @@ export function DashboardTab({ s, u, wife, ended, held, play, now, lang, t, date
     {wife&&<ForYou deck={deck} lang={lang} t={t} play={play} useIdea={useIdea} onSkip={skipDeck}/>}
     <Garden total={gardenTotal} t={t}/>
     {wife&&<NightCard t={t} date={date} label={label} moodLabel={moodLabel} moodOrder={moodOrder} nightMood={nightMood} lastMood={lastMood} chooseMood={chooseMood} sendSteps={sendSteps} play={play} ended={ended} nightBlock={nightBlock} askNight={askNight} saveOpen={saveOpen} setSaveOpen={setSaveOpen} eveningName={eveningName} setEveningName={setEveningName} savedFull={savedFull} saveEvening={saveEvening} savedList={savedList} sendBlock={sendBlock} cap={cap} usedNow={usedNow} limitMessage={limitMessage} askRun={askRun} run={run} action={action} favourite={favourite} nextScheduled={nextScheduled} lastNight={lastNight} nightApproved={nightApproved} nightMissions={nightMissions}/>}
+<<<<<<< HEAD
     {wife&&<SeasonPanel s={s} play={play} ended={ended} t={t} run={run} action={action} askSeason={askSeason}/>}
+=======
+    {wife&&<SeasonPanel s={s} play={play} ended={ended} t={t} run={run} action={action} askSeason={askSeason} askStopSeason={askStopSeason}/>}
+>>>>>>> 20fda84e1bc17e5e83e3b399c13de9520009d69d
     {wife?<>
-      <section className="panel"><h2>{t('שולחן הבדיקה שלך','Your review desk')}</h2>
-        {!awaitingReview.length&&!pendingRewards.length&&<p className="empty">✓ {t('הכול מסודר. אין פריטים שממתינים לך.','All clear. Nothing is waiting for you.')}</p>}
-        {awaitingReview.map(m=><article key={m.id}><h3>{m.title}</h3><p className="preserve">{m.completion}</p><div className="row"><Button className="primary" disabled={!play} onClick={()=>void run(()=>action('review',{mission:m.id,approve:true,submissionVersion:m.submissionVersion??0}))}>{t('אישור בלחיצה אחת','Approve in one tap')}</Button><Button disabled={!play} onClick={()=>void run(()=>action('review',{mission:m.id,approve:false,submissionVersion:m.submissionVersion??0}))}>{t('החזרה לתיקון','Return for revision')}</Button></div></article>)}
-        {pendingRewards.map(r=><article key={r.id}><h3>{r.title}</h3><p>{r.cost} {t('נקודות','points')}</p><div className="row"><Button className="primary" disabled={!play} onClick={()=>void run(()=>action('reward-decision',{request:r.id,approve:true}))}>{t('אישור פרס','Approve reward')}</Button><Button disabled={!play} onClick={()=>void run(()=>action('reward-decision',{request:r.id,approve:false}))}>{t('דחיית פרס','Decline reward')}</Button></div></article>)}
-        <details className="subtle"><summary>{t('משימות שאושרו לאחרונה','Recently approved tasks')}</summary>
-        {!recentApproved.length&&<p className="empty">{t('עדיין אין משימות שאושרו.','No approved tasks yet.')}</p>}
-        {recentApproved.map(m=><article key={m.id}><h4>{m.title}</h4><div className="row">{(['love','like','skip'] as const).map(rating=><Button key={rating} aria-pressed={m.rating===rating} className={m.rating===rating?'primary':undefined} onClick={()=>void run(()=>action('rate',{mission:m.id,rating}))}>{ratingLabel(rating)}</Button>)}</div>{m.rating&&<p className="small">{t('הדירוג שנשמר','Saved rating')}: {ratingLabel(m.rating)}</p>}</article>)}</details>
-      </section>
+      {reviewWaiting===0&&reviewDesk}
       <CommandPanel s={s} play={play} t={t} lang={lang} quickAt={quickAt} setQuickAt={setQuickAt} quickBlock={quickBlock} askPreset={askPreset} askQuick={askQuick} run={run} action={action} sayOpen={sayOpen} setSayOpen={setSayOpen} sayText={sayText} setSayText={setSayText} sayDraft={sayDraft} setSayDraft={setSayDraft} sayReady={sayReady}/>
       <section className="panel"><h2>{t('הזוהר שלך','Your Glow')}</h2><p className="big-number"><strong>{s?.herPoints??0}</strong> {t('זוהר','Glow')}</p><p className="small">{t('כל הערצה שאת מקבלת מוסיפה זוהר. הזוהר מגיע מהחסד שלך, לא מעבודה שלך.','Every devotion you receive adds Glow. Glow comes from your grace, not from your labor.')}</p>
-        <p className="small">{t('המשאלות מנוהלות בלשונית הפרסים.','Wishes are managed in the Rewards tab.')}</p>
+        <p className="small">{t('המשאלות מנוהלות בלשונית פרסים ומשאלות.','Wishes are managed in the Rewards & wishes tab.')}</p>
       </section>
     {wife&&queen&&<section className="panel queen-level" aria-label={t('התואר שלך','Your title')}>
       <p className="eyebrow">{t('התואר שלך','Your title')}</p>

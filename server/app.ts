@@ -15,6 +15,10 @@ import { library } from '../src/library.ts';
 import { SEASON_DAY_MS, seasonItemFor, seasonPack, seasonStartDefault } from '../src/seasons.ts';
 import { TROPHY_LIMIT, trophyEntries, type TrophyEntry, type TrophyPin, type TrophySource } from '../src/trophies.ts';
 import { AUCTION_LIMITS, highestBid, settleAuction, type AuctionOutcome } from '../src/auctions.ts';
+<<<<<<< HEAD
+=======
+import { WHEEL_COST_MAX } from '../src/wheels.ts';
+>>>>>>> 20fda84e1bc17e5e83e3b399c13de9520009d69d
 const scrypt = promisify(scryptCallback);
 const hash = (v: string) => createHash('sha256').update(v).digest('hex');
 const text = z.string().trim().min(1).max(4000);
@@ -38,7 +42,11 @@ export type RewardRequest = Reward & {rewardId:string; status:'pending'|'approve
 export type Wish = {id:string; title:string; description:string; link?:string; cost?:number; createdAt:number};
 export type WishRequest = {id:string; wish:string; title:string; cost:number; status:'pending'|'approved'|'declined'; at:number};
 export type Proposal = { id: string; by: string; title: string; text: string; points: number; category?: string; at: number; status: 'pending'|'adopted'|'declined'; missionId?: string };
+<<<<<<< HEAD
 export type Session = { id: string; status: string; terms: string; revision: number; revisions: { revision: number; terms: string }[]; approvals: string[]; pauses: string[]; remaining: number; unlimited?: boolean; last: number; started: boolean; points: number; missions: Mission[]; rewards?: Reward[]; rewardRequests?: RewardRequest[]; sequence?: string[]; autoProgress?:boolean; persona?:'strict'|'playful'|'caring'; followups?:string[]; checkIns?: Record<string,CheckIn>; reflections?: Record<string,Reflection>; messages: {id:string; by:string; text:string; at:number}[]; history: { at:number; event:string; by:string; rewardRequestId?:string; outcome?:'approved'|'declined' }[]; inbox: {id:string; at:number; event:string; readBy:string[]}[]; herPoints?: number; proposals?: Proposal[]; wishes?: Wish[]; wishRequests?: WishRequest[]; commands?: {id:string;title:string;text:string;points:number}[]; notes?: {id:string;text:string;at:number}[]; whispers?: {id:string;text:string;at:number}[]; whisperSent?: number; spark?: { day: number; rerolls: number; dismissed: string[] }; seasonState?: {id:string;startsAt:number;days:number;stoppedAt?:number}; seasonProgress?: {id:string;done:number;total:number;running:boolean}; pins?: TrophyPin[]; trophies?: TrophyEntry[]; auctions?: Auction[]; nights?: {id:string;mood:'soft'|'playful'|'strict';at:number;missionIds:string[]}[]; moodCounts?: Record<'soft'|'playful'|'strict',number>; lastCareAt?: number; pace?: 1|2|3; eveningClosedAt?: number; savedEvenings?: {id:string;name:string;mood:'soft'|'playful'|'strict';steps:{he:string;en:string;points:number;minutesFromNow:number}[];createdAt:number}[]; chapterState?: { decree?: { mood: string; season?: string }; at?: number; cliffhanger?: { he: string; en: string } }; adoration?: { sippedFor?: string; grantedFor?: string; grantedAt?: number; sealedAt?: number; waiting?: number; ready?: number; last?: { id: string; kind: string; text: string; media?: string | null; at: number } } };
+=======
+export type Session = { id: string; status: string; terms: string; revision: number; revisions: { revision: number; terms: string }[]; approvals: string[]; pauses: string[]; remaining: number; unlimited?: boolean; last: number; started: boolean; points: number; missions: Mission[]; rewards?: Reward[]; rewardRequests?: RewardRequest[]; sequence?: string[]; autoProgress?:boolean; persona?:'strict'|'playful'|'caring'; followups?:string[]; checkIns?: Record<string,CheckIn>; reflections?: Record<string,Reflection>; messages: {id:string; by:string; text:string; at:number}[]; history: { at:number; event:string; by:string; rewardRequestId?:string; outcome?:'approved'|'declined' }[]; inbox: {id:string; at:number; event:string; readBy:string[]}[]; herPoints?: number; proposals?: Proposal[]; wishes?: Wish[]; wishRequests?: WishRequest[]; commands?: {id:string;title:string;text:string;points:number}[]; notes?: {id:string;text:string;at:number}[]; whispers?: {id:string;text:string;at:number}[]; whisperSent?: number; spark?: { day: number; rerolls: number; dismissed: string[] }; seasonState?: {id:string;startsAt:number;days:number;stoppedAt?:number}; seasonProgress?: {id:string;done:number;total:number;running:boolean}; pins?: TrophyPin[]; trophies?: TrophyEntry[]; auctions?: Auction[]; wheelCost?: number; nights?: {id:string;mood:'soft'|'playful'|'strict';at:number;missionIds:string[]}[]; moodCounts?: Record<'soft'|'playful'|'strict',number>; lastCareAt?: number; pace?: 1|2|3; eveningClosedAt?: number; savedEvenings?: {id:string;name:string;mood:'soft'|'playful'|'strict';steps:{he:string;en:string;points:number;minutesFromNow:number}[];createdAt:number}[]; chapterState?: { decree?: { mood: string; season?: string }; at?: number; cliffhanger?: { he: string; en: string } }; adoration?: { sippedFor?: string; grantedFor?: string; grantedAt?: number; sealedAt?: number; waiting?: number; ready?: number; last?: { id: string; kind: string; text: string; media?: string | null; at: number } } };
+>>>>>>> 20fda84e1bc17e5e83e3b399c13de9520009d69d
 const suspended = (s: Session) => s.pauses.length > 0;
 const terminal = (s: Session) => ['stopped','expired'].includes(s.status);
 function notice(s: Session, event: string, by: string, reward?:{rewardRequestId?:string;outcome?:'approved'|'declined';missionId?:string}) {
@@ -305,10 +313,17 @@ export async function createApp(pool: Pool, origin: string) {
         }
         return {ok:true};
       }
+<<<<<<< HEAD
       const keyedRequest=['complete','review','adjust','replace','reward','reward-request','reward-decision','wish-add','wish-request','wish-decision','quick','her-night','evening-close','evening-run','sip','grant','seal','tribute-reveal','chamberlain-decree','chamberlain-compose','repeat-stop','adore','whisper','whisper-delete','spark-reroll','spark-dismiss','season-start','season-stop','pin','unpin','auction','auction-bid'].includes(op);
       let requestKey:string|undefined;
       if(keyedRequest){
         if(u.role!==(['review','replace','reward','reward-decision','wish-add','wish-request','quick','her-night','evening-close','evening-run','sip','grant','seal','tribute-reveal','chamberlain-decree','chamberlain-compose','repeat-stop','whisper-delete','spark-reroll','spark-dismiss','season-start','season-stop','pin','unpin','auction'].includes(op)?'wife':'husband'))fail(403,'Wrong role for action');
+=======
+      const keyedRequest=['complete','review','adjust','replace','reward','reward-request','reward-decision','wish-add','wish-request','wish-decision','quick','her-night','evening-close','evening-run','sip','grant','seal','tribute-reveal','chamberlain-decree','chamberlain-compose','repeat-stop','adore','whisper','whisper-delete','spark-reroll','spark-dismiss','season-start','season-stop','pin','unpin','auction','auction-bid','wheel-config','wheel-spin'].includes(op);
+      let requestKey:string|undefined;
+      if(keyedRequest){
+        if(u.role!==(['review','replace','reward','reward-decision','wish-add','wish-request','quick','her-night','evening-close','evening-run','sip','grant','seal','tribute-reveal','chamberlain-decree','chamberlain-compose','repeat-stop','whisper-delete','spark-reroll','spark-dismiss','season-start','season-stop','pin','unpin','auction','wheel-config','wheel-spin'].includes(op)?'wife':'husband'))fail(403,'Wrong role for action');
+>>>>>>> 20fda84e1bc17e5e83e3b399c13de9520009d69d
         // Newer clients always send a key; an older cached bundle still works, just without replay.
         requestKey=uuid.parse(b.key??randomUUID());
         const previous=await c.query('SELECT result FROM request_keys WHERE session_id=$1 AND user_id=$2 AND kind=$3 AND key=$4',[s.id,u.id,op,requestKey]);
@@ -324,6 +339,18 @@ export async function createApp(pool: Pool, origin: string) {
       if(['edit','queue','deliver','cancel','ack','refuse','complete','review','adjust','replace','reveal','rate','repeat-stop','adore'].includes(op)){mission=s.missions.find(m=>m.id===uuid.parse(b.mission));if(!mission)fail(404,'Mission unavailable');}
       let response:any={ok:true};
       if(op==='stop'){s.status='stopped';for(const m of s.missions)if(!['approved','refused','cancelled'].includes(m.status))m.status='cancelled';}
+      // Restart closes the current play, archives it (its record stays for queen progress and awards) and opens a fresh,
+      // clean session that carries over the balances and preferences — never missions, history or feeds.
+      else if(op==='restart'){
+        if(!u.pair_id)fail(409,'No pair');
+        s.status='stopped';for(const m of s.missions)if(!['approved','refused','cancelled'].includes(m.status))m.status='cancelled';
+        await save(c,s); // free the one-live-session slot before opening the fresh one
+        const fresh=newSession('');
+        Object.assign(fresh,{points:s.points,herPoints:s.herPoints},s.persona?{persona:s.persona}:{},s.wheelCost!==undefined?{wheelCost:s.wheelCost}:{});
+        notice(fresh,'session-created',u.id);
+        await c.query('INSERT INTO sessions VALUES($1,$2,$3,$4)',[fresh.id,u.pair_id,fresh.status,JSON.stringify(fresh)]);
+        response={ok:true,session:fresh.id};
+      }
       else if(op==='pause'){if(!s.pauses.includes(u.id))s.pauses.push(u.id);}
       else if(op==='resume'){s.pauses=s.pauses.filter(id=>id!==u.id);}
       // Curation stays open on ended sessions so the archive can be arranged after play stops.
@@ -339,6 +366,11 @@ export async function createApp(pool: Pool, origin: string) {
       else if(op==='unpin'){
         wife();const id=uuid.parse(b.pin);const pins=s.pins??[];if(!pins.some(p=>p.id===id))fail(404,'Pin unavailable');s.pins=pins.filter(p=>p.id!==id);
       }
+<<<<<<< HEAD
+=======
+      // Setting the spin price is a preference, not play: it stays available during either personal pause.
+      else if(op==='wheel-config'){wife();const data=z.object({cost:z.number().int().min(0).max(WHEEL_COST_MAX)}).parse(b);s.wheelCost=data.cost;response={wheelCost:s.wheelCost};}
+>>>>>>> 20fda84e1bc17e5e83e3b399c13de9520009d69d
       else if(op==='approve'||op==='revise'){/* Agreement flow removed; keep no-op for compatibility. */}
       else if(op==='aftercare'){husband();s.lastCareAt=Date.now();}
       else if(op==='read'){const ids=z.array(uuid).max(500).parse(b.ids);for(const n of s.inbox)if(ids.includes(n.id)&&!n.readBy.includes(u.id))n.readBy.push(u.id);}
@@ -493,6 +525,12 @@ export async function createApp(pool: Pool, origin: string) {
           lot.bids.push({amount:data.amount,at:Date.now()});response={auction:lot};
         }
         else if(op==='extend'){wife();s.remaining+=z.number().int().min(1).max(525600).parse(b.minutes)*60000;}
+<<<<<<< HEAD
+=======
+        else if(op==='wheel-spin'){
+          wife();const cost=s.wheelCost??0;if((s.herPoints??0)<cost)fail(409,'Not enough points for a spin');s.herPoints=(s.herPoints??0)-cost;response={herPoints:s.herPoints};
+        }
+>>>>>>> 20fda84e1bc17e5e83e3b399c13de9520009d69d
         else if(op==='persona'){wife();s.persona=z.enum(['strict','playful','caring']).parse(b.persona);}
         else if(op==='followup'){wife();const item=z.string().trim().min(1).max(4000).parse(b.text);const list=s.followups??=[];if(!list.includes(item))list.push(item);}
         else if(op==='reward'){
@@ -700,7 +738,11 @@ export async function createApp(pool: Pool, origin: string) {
           }
         }else fail(404,'Unknown action');
       }
+<<<<<<< HEAD
       if(op!=='read'&&!op.startsWith('note-')&&!['evening-save','evening-delete','pace','tribute-queue','tribute-reveal','sip','grant','seal','chamberlain-decree','chamberlain-compose','adore'].includes(op))notice(s,op,u.id,op==='reward-request'?{rewardRequestId:response.request.id}:op==='reward-decision'?{rewardRequestId:response.request.id,outcome:response.request.status}:(response.mission?.surprise?{missionId:response.mission.id}:mission?.surprise?{missionId:mission.id}:undefined));
+=======
+      if(op!=='read'&&!op.startsWith('note-')&&!['evening-save','evening-delete','pace','tribute-queue','tribute-reveal','sip','grant','seal','chamberlain-decree','chamberlain-compose','adore','wheel-config'].includes(op))notice(s,op,u.id,op==='reward-request'?{rewardRequestId:response.request.id}:op==='reward-decision'?{rewardRequestId:response.request.id,outcome:response.request.status}:(response.mission?.surprise?{missionId:response.mission.id}:mission?.surprise?{missionId:mission.id}:undefined));
+>>>>>>> 20fda84e1bc17e5e83e3b399c13de9520009d69d
       if(requestKey)await c.query('INSERT INTO request_keys VALUES($1,$2,$3,$4,$5)',[s.id,u.id,op,requestKey,JSON.stringify(response)]);
       s.last=Date.now();await save(c,s);return response;
     });

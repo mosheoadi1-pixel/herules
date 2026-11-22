@@ -6,7 +6,7 @@ import type { Spark } from './spark';
 
 export type State = { user: User; sessions: Session[]; serverNow: number; queenLevel?: QueenLevel; digest?: Digest; adorationTally?: { loved: number; liked: number; ok: number }; spark?: Spark };
 export type SheetStep = { title: string; text?: string; points: number; offset: string };
-export type Sheet = { title: string; intro?: string; steps?: SheetStep[]; confirm: string; onConfirm: () => void };
+export type Sheet = { title: string; intro?: string; steps?: SheetStep[]; confirm: string; danger?: boolean; onConfirm: () => void };
 export type SavedEvening = NonNullable<Session['savedEvenings']>[number];
 export type Night = NonNullable<Session['nights']>[number];
 export type Draft = { title: string; text: string; points: number; secret: boolean; completionStyle?: string; surprise?: boolean; category?: string };

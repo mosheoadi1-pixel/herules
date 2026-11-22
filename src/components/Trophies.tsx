@@ -7,7 +7,11 @@ const kindLabel = (kind: TrophyKind, t: Translate) => kind === 'mission' ? t('ה
 
 export function PinButton({ s, kind, target, t, run, action }: { s: Session; kind: TrophyKind; target: string; t: Translate; run: Run; action: Action }) {
   const pin = s.pins?.find(item => item.kind === kind && item.ref === target);
+<<<<<<< HEAD
   return <Button type="button" className={pin ? 'primary' : 'quiet'} aria-pressed={!!pin} onClick={() => void run(() => pin ? action('unpin', { pin: pin.id }) : action('pin', { kind, ref: target }))}>{pin ? t(`הסרת ${kindLabel(kind, t)} מהגביעים`, `Remove ${kindLabel(kind, t)} from trophies`) : t(`שמירת ${kindLabel(kind, t)} בגביעים`, `Keep ${kindLabel(kind, t)} in trophies`)}</Button>;
+=======
+  return <Button type="button" className={pin ? 'primary' : 'quiet'} aria-pressed={!!pin} onClick={() => void run(() => pin ? action('unpin', { pin: pin.id }) : action('pin', { kind, ref: target }))}>{pin ? t(`הסרת ${kindLabel(kind, t)} מארון הגביעים`, `Remove ${kindLabel(kind, t)} from the trophy case`) : t(`שמירת ${kindLabel(kind, t)} בארון הגביעים`, `Keep ${kindLabel(kind, t)} in the trophy case`)}</Button>;
+>>>>>>> 20fda84e1bc17e5e83e3b399c13de9520009d69d
 }
 
 export function TrophyCase({ s, wife, open, t, date, run, action }: { s: Session; wife: boolean; open: boolean; t: Translate; date: (at: number) => string; run: Run; action: Action }) {
@@ -15,7 +19,11 @@ export function TrophyCase({ s, wife, open, t, date, run, action }: { s: Session
   return <details className="panel trophy-case" open={open || undefined}>
     <summary><h2>{t('ארון הגביעים','Trophy case')}</h2></summary>
     <p>{t('רגעים שנשמרו מהמשחק.','Moments kept from the game.')} <span className="small">{trophies.length}/30</span></p>
+<<<<<<< HEAD
     {!trophies.length && <p className="empty">{t('ארון הגביעים ריק עדיין.','The trophy case is empty for now.')}</p>}
+=======
+    {!trophies.length && <p className="empty soft">{t('ארון הגביעים ריק עדיין.','The trophy case is empty for now.')}</p>}
+>>>>>>> 20fda84e1bc17e5e83e3b399c13de9520009d69d
     <ol className="trophy-list">{trophies.map((entry, index) => <li key={entry.id ?? `hidden-${index}`}>
       <p className="small"><strong>{kindLabel(entry.kind, t)}</strong>{entry.author && ` · ${entry.author === 'wife' ? t('שלה','hers') : t('שלו','his')}`} · <time>{date(entry.at)}</time></p>
       {entry.hidden ? <p className="small">{t('הפריט שמור למי ששלח אותו.','This item is kept for its author.')}</p> : entry.missing ? <p className="small">{t('הפריט אינו זמין עוד.','This item is no longer available.')}</p> : <>{entry.title && <h3>{entry.title}</h3>}{entry.text && <p className="preserve">{entry.text}</p>}</>}

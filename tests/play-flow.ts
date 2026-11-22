@@ -614,6 +614,88 @@ try {
   s=await state();
   assert.equal(s.trophies?.some(entry=>entry.kind==='reflection'),false,'the removed reflection leaves the gallery');
 
+<<<<<<< HEAD
+=======
+  // Auction nights: his bids on her lots, the highest bid charged once and burned.
+  await op(h,'auction',{title:'No',description:'No',minBid:1,closesAt:Date.now()+3600000,key:randomUUID()},403);
+  await op(w,'auction-bid',{auction:randomUUID(),amount:5,key:randomUUID()},403);
+  await op(w,'auction',{title:'Past',description:'No',minBid:1,closesAt:Date.now()-1000,key:randomUUID()},400,'Closing time must be in the future');
+  await op(w,'auction',{title:'Far',description:'No',minBid:1,closesAt:Date.now()+8*86400000,key:randomUUID()},400,'Closing time must be within seven days');
+  await op(w,'auction',{title:'Big',description:'No',minBid:100001,closesAt:Date.now()+3600000,key:randomUUID()},400);
+  const lotKey=randomUUID();
+  const lot=await op(w,'auction',{title:'Long massage',description:'One long massage, paid in points',minBid:5,closesAt:Date.now()+3600000,key:lotKey});
+  assert.equal(lot.auction.status,'open');
+  assert.deepEqual(await op(w,'auction',{title:'Long massage',description:'One long massage, paid in points',minBid:5,closesAt:Date.now()+3600000,key:lotKey}),lot,'a committed auction retry returns the original result');
+  await op(h,'auction-bid',{auction:lot.auction.id,amount:4,key:randomUUID()},409,'Bid is below the minimum');
+  await op(h,'auction-bid',{auction:randomUUID(),amount:5,key:randomUUID()},404,'Auction unavailable');
+  await edit(row=>{row.points=30;});
+  const bidKey=randomUUID();
+  const firstBid=await op(h,'auction-bid',{auction:lot.auction.id,amount:10,key:bidKey});
+  assert.equal(firstBid.auction.bids.length,1);
+  assert.deepEqual(await op(h,'auction-bid',{auction:lot.auction.id,amount:10,key:bidKey}),firstBid,'a committed bid retry returns the original result');
+  await op(h,'auction-bid',{auction:lot.auction.id,amount:10,key:randomUUID()},409,'Bid must beat the current highest bid');
+  await op(h,'auction-bid',{auction:lot.auction.id,amount:25,key:randomUUID()});
+  // A lot due during either personal pause is voided without charging.
+  await op(w,'pause',{});
+  await edit(row=>{const open=row.auctions!.find(item=>item.id===lot.auction.id)!;open.closesAt=Date.now()-1000;});
+  s=await state();
+  const voided=s.auctions!.find(item=>item.id===lot.auction.id)!;
+  assert.equal(voided.status,'void');assert.equal(voided.outcome,'void');assert.equal(voided.winningBid,undefined);
+  assert.equal(s.points,30,'a voided lot charges nothing');
+  await op(w,'resume',{});
+  // A covered highest bid is charged once and burned.
+  const paidKey=randomUUID();
+  const paid=await op(w,'auction',{title:'Paid errand',description:'One paid errand',minBid:5,closesAt:Date.now()+3600000,key:paidKey});
+  await op(h,'auction-bid',{auction:paid.auction.id,amount:12,key:randomUUID()});
+  await edit(row=>{const open=row.auctions!.find(item=>item.id===paid.auction.id)!;open.closesAt=Date.now()-1000;});
+  s=await state();
+  const settled=s.auctions!.find(item=>item.id===paid.auction.id)!;
+  assert.equal(settled.status,'closed');assert.equal(settled.outcome,'charged');assert.equal(settled.winningBid,12);
+  assert.equal(s.points,18,'the highest bid is charged once and burned');
+  await op(h,'auction-bid',{auction:paid.auction.id,amount:13,key:randomUUID()},409,'Auction is closed');
+  // A due lot with no bids closes without charging.
+  const emptyKey=randomUUID();
+  const empty=await op(w,'auction',{title:'Quiet lot',description:'No bids expected',minBid:5,closesAt:Date.now()+3600000,key:emptyKey});
+  await edit(row=>{const open=row.auctions!.find(item=>item.id===empty.auction.id)!;open.closesAt=Date.now()-1000;});
+  s=await state();
+  const noBids=s.auctions!.find(item=>item.id===empty.auction.id)!;
+  assert.equal(noBids.status,'closed');assert.equal(noBids.outcome,'no-bids');assert.equal(s.points,18);
+  // At most five open lots and at most fifty stored lots.
+  for(let i=0;i<5;i++)await op(w,'auction',{title:`Open ${i}`,description:'Filler',minBid:1,closesAt:Date.now()+3600000,key:randomUUID()});
+  await op(w,'auction',{title:'One too many',description:'Filler',minBid:1,closesAt:Date.now()+3600000,key:randomUUID()},409,'Too many open auctions');
+  await edit(row=>{for(const item of row.auctions??[])if(item.status==='open')item.status='closed';while((row.auctions??[]).length<50)row.auctions!.push({id:randomUUID(),title:'Filler',description:'',minBid:1,closesAt:Date.now()-1000,status:'void',bids:[],createdAt:Date.now()});});
+  await op(w,'auction',{title:'Full house',description:'Filler',minBid:1,closesAt:Date.now()+3600000,key:randomUUID()},409,'Auction list is full');
+  await edit(row=>{row.auctions=row.auctions!.filter(item=>item.title!=='Filler');});
+  s=await state();
+  assert.equal(s.auctions!.length,8,'the fillers are gone and the real lots remain');
+
+  // Wheel spins: she sets the price, a spin spends her points, and payment is refused short of the price.
+  await op(h,'wheel-config',{cost:5,key:randomUUID()},403);
+  await op(h,'wheel-spin',{key:randomUUID()},403);
+  await op(w,'wheel-config',{cost:-1,key:randomUUID()},400);
+  await op(w,'wheel-config',{cost:21,key:randomUUID()},400);
+  await op(w,'wheel-config',{cost:5,key:randomUUID()});
+  await edit(row=>{row.herPoints=4;});
+  await op(w,'wheel-spin',{key:randomUUID()},409,'Not enough points for a spin');
+  await edit(row=>{row.herPoints=9;});
+  await op(w,'pause',{});
+  // The price is a preference: it can be changed during either personal pause.
+  await op(w,'wheel-config',{cost:3,key:randomUUID()});
+  await op(w,'wheel-spin',{key:randomUUID()},409,'Pause is active');
+  await op(w,'resume',{});
+  const spinKey=randomUUID();
+  const spin=await op(w,'wheel-spin',{key:spinKey});
+  assert.equal(spin.herPoints,6);
+  assert.deepEqual(await op(w,'wheel-spin',{key:spinKey}),spin,'a committed spin retry is not charged twice');
+  s=await state();
+  assert.equal(s.herPoints,6);
+  await op(w,'wheel-config',{cost:0,key:randomUUID()});
+  const freeSpin=await op(w,'wheel-spin',{key:randomUUID()});
+  assert.equal(freeSpin.herPoints,6,'a free spin changes nothing');
+  s=await state();
+  assert.equal(s.wheelCost,0);
+
+>>>>>>> 20fda84e1bc17e5e83e3b399c13de9520009d69d
   // The case holds thirty pins.
   await edit(row=>{row.pins=[...(row.pins??[]),...Array.from({length:27},()=>({id:randomUUID(),kind:'mission' as const,ref:randomUUID(),at:Date.now()}))];});
   s=await state();
@@ -637,12 +719,49 @@ try {
   await op(h,'whisper',{text:'Too late',key:randomUUID()},409,'Session is terminal');
   await op(w,'spark-reroll',{key:randomUUID()},409,'Session is terminal');
   await op(w,'season-start',{pack:'hanukkah',key:randomUUID()},409,'Session is terminal');
+<<<<<<< HEAD
+=======
+  await op(w,'auction',{title:'Late lot',description:'No',minBid:1,closesAt:Date.now()+3600000,key:randomUUID()},409,'Session is terminal');
+  await op(w,'wheel-spin',{key:randomUUID()},409,'Session is terminal');
+>>>>>>> 20fda84e1bc17e5e83e3b399c13de9520009d69d
   // Curation stays open on an ended session so the archive can be arranged after play stops.
   const latePin=await op(w,'pin',{kind:'mission',ref:quick.id,key:randomUUID()});
   assert.ok(latePin.pin.id);
   await op(w,'unpin',{pin:latePin.pin.id,key:randomUUID()});
   await op(h,'pin',{kind:'mission',ref:quick.id,key:randomUUID()},403);
+<<<<<<< HEAD
   console.log('PASS play flow: approvals, quick commands, keyed retries, scheduling, review points, wishlist pricing and approval, private commands, aftercare, her night, quick ratings, private notes, progress helpers, pacing, done for tonight, saved evenings, night cap, devotions, chapters, recurring missions, adoration, whispers, daily spark, season packs, trophy case, terminal guard');
+=======
+  // Ending the session voids every open lot; charged points stay burned.
+  s=await state();
+  assert.equal(s.auctions!.some(item=>item.status==='open'),false,'no lot stays open when the session ends');
+  assert.equal(s.points,18,'no points move on terminal settlement');
+
+  // Restart: closes the live session, opens a clean one, and carries the balances over.
+  await w('/state');
+  const liveId=(await w('/state')).sessions.find((x:Session)=>x.status==='active')!.id;
+  {
+    const row=(await pool.query('SELECT data FROM sessions WHERE id=$1',[liveId])).rows[0].data as Session;
+    row.points=37;row.herPoints=12;row.persona='playful';row.wheelCost=4;
+    await pool.query('UPDATE sessions SET data=$1 WHERE id=$2',[JSON.stringify(row),liveId]);
+  }
+  const restarted=await w(`/sessions/${liveId}/restart`,{});
+  assert.ok(restarted.session,'restart returns the fresh session id');
+  const full=await w('/state');
+  const active=full.sessions.find((x:Session)=>x.status==='active')!,archived=full.sessions.find((x:Session)=>x.id===liveId)!;
+  assert.equal(active.id,restarted.session,'the fresh session is the live one');
+  assert.equal(active.points,37,'his points carry over');
+  assert.equal(active.herPoints,12,'her points carry over');
+  assert.equal(active.persona,'playful','the persona carries over');
+  assert.equal(active.wheelCost,4,'the wheel price carries over');
+  assert.equal(active.missions.length,0,'the fresh session starts with no missions');
+  assert.equal(active.history.some((n:{event:string})=>n.event==='session-created'),true,'the fresh session records its own opening');
+  assert.equal(active.auctions,undefined,'no lots leak into the fresh session');
+  assert.equal(archived.status,'stopped','the closed session is archived');
+  assert.equal(archived.points,37,'the archived session keeps its record');
+  await w(`/sessions/${liveId}/restart`,{},409,'Session is terminal');
+  console.log('PASS play flow: approvals, quick commands, keyed retries, scheduling, review points, wishlist pricing and approval, private commands, aftercare, her night, quick ratings, private notes, progress helpers, pacing, done for tonight, saved evenings, night cap, devotions, chapters, recurring missions, adoration, whispers, daily spark, season packs, trophy case, auctions, wheels, restart, terminal guard');
+>>>>>>> 20fda84e1bc17e5e83e3b399c13de9520009d69d
 } finally {
   if(server)await new Promise<void>(resolve=>server!.close(()=>resolve()));
   await pool.end();await db.stop();await rm(directory,{recursive:true,force:true,maxRetries:10,retryDelay:100});

@@ -43,7 +43,7 @@ export function Garden({ total, t }: GardenProps) {
       {Array.from({ length: shown }, (_, index) => <Flower key={index} index={index} />)}
     </svg>
     {extra > 0 && <p className="small">{t(`ועוד ${extra} פרחים שכבר פורחים.`,`…and ${extra} more flowers already blooming.`)}</p>}
-    <div className="row" aria-label={t('מאפייני הגינה','Garden features')}>
+    <div className="row"><span className="sr-only">{t('מאפייני הגינה','Garden features')}</span>
       {FEATURES.map(feature => <span key={feature.at} className="badge">{total >= feature.at ? t(feature.he, feature.en) : t(`עוד ${feature.at - total} משימות`,`${feature.at - total} tasks to go`)}</span>)}
     </div>
   </section>;
