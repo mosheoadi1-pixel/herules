@@ -15,6 +15,8 @@ import { library } from '../src/library.ts';
 import { SEASON_DAY_MS, seasonItemFor, seasonPack, seasonStartDefault } from '../src/seasons.ts';
 import { TROPHY_LIMIT, trophyEntries, type TrophyEntry, type TrophyPin, type TrophySource } from '../src/trophies.ts';
 import { AUCTION_LIMITS, highestBid, settleAuction, type AuctionOutcome } from '../src/auctions.ts';
+import { hrMode } from './mode.ts';
+import { pkcePair, randomKey, type PublicIdentityProvider, type PublicProvider } from './public-auth.ts';
 const scrypt = promisify(scryptCallback);
 const hash = (v: string) => createHash('sha256').update(v).digest('hex');
 const text = z.string().trim().min(1).max(4000);
@@ -143,7 +145,8 @@ function runNight(s: Session, mood: 'soft'|'playful'|'strict', lang: 'he'|'en', 
   const counts=s.moodCounts??={soft:0,playful:0,strict:0};counts[mood]++;
   return night;
 }
-export async function createApp(pool: Pool, origin: string) {
+export async function createApp(pool: Pool, origin: string, providers: Partial<Record<PublicProvider, PublicIdentityProvider>> = {}) {
+  const mode = hrMode();
   const configured = new URL(origin);
   if (configured.origin !== origin || (process.env.NODE_ENV === 'production' && configured.protocol !== 'https:')) throw new Error('APP_ORIGIN must be an exact origin; production requires HTTPS');
   await pool.query(await readFile(new URL('../db/001-foundation.sql', import.meta.url), 'utf8'));
@@ -151,6 +154,7 @@ export async function createApp(pool: Pool, origin: string) {
   await pool.query(await readFile(new URL('../db/003-private-game.sql', import.meta.url), 'utf8'));
   await pool.query(await readFile(new URL('../db/004-imported-ideas.sql', import.meta.url), 'utf8'));
   await pool.query(await readFile(new URL('../db/005-devotions.sql', import.meta.url), 'utf8'));
+  await pool.query(await readFile(new URL('../db/006-public-accounts.sql', import.meta.url), 'utf8'));
   const app = express(); app.disable('x-powered-by');
   app.set('trust proxy',process.env.TRUST_PROXY?.split(',').map(v=>v.trim())||false);
   app.use((req, res, next) => {
@@ -200,6 +204,7 @@ export async function createApp(pool: Pool, origin: string) {
     await pool.query("INSERT INTO auth_sessions VALUES($1,$2,now()+interval '7 days')", [hash(token), user.id]);
     res.cookie('hr_session', token, { httpOnly: true, sameSite: 'lax', secure: process.env.NODE_ENV === 'production', maxAge: 7*86400000, path: '/' });
   }
+  if (mode === 'public') app.use(['/api/register', '/api/login', '/api/guest'], (_req: Request, res: Response) => res.status(404).json({ error: 'Unknown endpoint' }));
   app.post('/api/register', async (req,res) => {
     await rate(req,'register',20);
     const b = z.object({ email:z.email().max(254).transform(v=>v.toLowerCase()), password:z.string().min(12).max(128), role:z.enum(['wife','husband']), adult:z.literal(true) }).parse(req.body);
@@ -232,6 +237,67 @@ export async function createApp(pool: Pool, origin: string) {
   });
   app.get('/api/ideas',async(req,res)=>{await auth(req);res.json({ideas:(await pool.query('SELECT * FROM imported_ideas ORDER BY id')).rows});});
   app.post('/api/logout', async (req,res) => { await pool.query('DELETE FROM auth_sessions WHERE hash=$1',[hash(tokenOf(req))]); res.clearCookie('hr_session',{ path:'/' }); res.json({ok:true}); });
+  if (mode === 'public') {
+    const providerName = z.enum(['google','apple']);
+    const callbackUrl = (name: PublicProvider) => `${origin}/api/public/auth/${name}/callback`;
+    const publicTokenOf = (req: Request) => /(?:^|;\s*)hr_public_session=([a-f0-9]{64})(?:;|$)/.exec(req.headers.cookie || '')?.[1] || '';
+    const publicUser = (row: any) => ({ id: row.id, nickname: row.nickname, role: row.role, gender: row.gender, status: row.verified_at ? 'verified' : 'pending_verification' });
+    const publicLogin = async (res: Response, userId: string) => {
+      const token = randomBytes(32).toString('hex');
+      await pool.query("INSERT INTO public_sessions VALUES($1,$2,now()+interval '7 days')", [hash(token), userId]);
+      res.cookie('hr_public_session', token, { httpOnly: true, sameSite: 'lax', secure: process.env.NODE_ENV === 'production', maxAge: 7*86400000, path: '/' });
+    };
+    app.get('/api/public/config', (_req,res) => { res.json({ mode }); });
+    app.get('/api/public/auth/:provider/start', async (req,res) => {
+      await rate(req,'public-start',60);
+      const name = providerName.parse(req.params.provider);
+      const adapter = providers[name] ?? fail(503,'provider not configured');
+      const state = randomKey(), pkce = pkcePair();
+      await pool.query('DELETE FROM public_auth_states WHERE expires_at < now()');
+      await pool.query("INSERT INTO public_auth_states(token,provider,code_verifier,expires_at) VALUES($1,$2,$3,now()+interval '10 minutes')", [state, name, pkce.verifier]);
+      res.json({ url: adapter.authorizeUrl({ state, codeChallenge: pkce.challenge, redirectUri: callbackUrl(name) }) });
+    });
+    app.get('/api/public/auth/:provider/callback', async (req,res) => {
+      await rate(req,'public-callback',60);
+      const name = providerName.parse(req.params.provider);
+      const query = z.object({ code: z.string().min(1).max(2048), state: z.string().min(1).max(128) }).parse(req.query);
+      await pool.query('DELETE FROM public_auth_states WHERE expires_at < now()');
+      const flow = (await transaction(c => c.query('DELETE FROM public_auth_states WHERE token=$1 AND expires_at > now() RETURNING provider,code_verifier', [query.state]))).rows[0];
+      if (!flow || flow.provider !== name) return fail(400,'Sign-in expired; start again');
+      const adapter = providers[name] ?? fail(503,'provider not configured');
+      const { subject } = await adapter.exchange({ code: query.code, codeVerifier: flow.code_verifier, redirectUri: callbackUrl(name) });
+      const identity = await pool.query('SELECT public_user_id FROM auth_identities WHERE provider=$1 AND provider_subject=$2', [name, subject]);
+      if (identity.rows[0]) { await publicLogin(res, identity.rows[0].public_user_id); return res.redirect('/'); }
+      const token = randomKey();
+      await pool.query("INSERT INTO public_auth_states(token,provider,code_verifier,pending_subject,expires_at) VALUES($1,$2,'',$3,now()+interval '10 minutes')", [token, name, subject]);
+      res.redirect(`/#public-pending=${token}`);
+    });
+    app.post('/api/public/register', async (req,res) => {
+      await rate(req,'public-register',20);
+      const b = z.object({
+        pendingToken: z.string().min(1).max(128),
+        nickname: z.string().trim().min(2).max(20).regex(/^[\p{L}\p{N}_ ]+$/u),
+        role: z.enum(['sub','dom']),
+        gender: z.enum(['woman','man','non_binary','other']),
+      }).parse(req.body);
+      const id = randomUUID();
+      const row = await transaction(async c => {
+        const pending = (await c.query('SELECT provider,pending_subject FROM public_auth_states WHERE token=$1 AND pending_subject IS NOT NULL AND expires_at > now() FOR UPDATE', [b.pendingToken])).rows[0] ?? fail(400,'Sign-in expired; start again');
+        const r = await c.query('INSERT INTO public_users(id,nickname,nickname_key,role,gender) VALUES($1,$2,$3,$4,$5) RETURNING id,nickname,role,gender,verified_at', [id, b.nickname, b.nickname.toLowerCase(), b.role, b.gender]);
+        await c.query('INSERT INTO auth_identities(provider,provider_subject,public_user_id) VALUES($1,$2,$3)', [pending.provider, pending.pending_subject, id]);
+        await c.query('DELETE FROM public_auth_states WHERE token=$1', [b.pendingToken]);
+        return r.rows[0];
+      });
+      await publicLogin(res, id);
+      res.json({ user: publicUser(row) });
+    });
+    app.get('/api/public/me', async (req,res) => {
+      const r = await pool.query('SELECT u.id,u.nickname,u.role,u.gender,u.verified_at FROM public_users u JOIN public_sessions s ON s.public_user_id=u.id WHERE s.hash=$1 AND s.expires>now()', [hash(publicTokenOf(req))]);
+      if (!r.rows[0]) fail(401,'Please sign in');
+      res.json({ user: publicUser(r.rows[0]) });
+    });
+    app.post('/api/public/logout', async (req,res) => { await pool.query('DELETE FROM public_sessions WHERE hash=$1',[hash(publicTokenOf(req))]); res.clearCookie('hr_public_session',{ path:'/' }); res.json({ok:true}); });
+  }
   const listeners = new Map<string,Set<Response>>();
   const emit = (pair: string) => { for(const res of listeners.get(pair) || []) res.write('data: refresh\n\n'); };
   app.get('/api/events', async (req,res) => {
@@ -284,7 +350,7 @@ export async function createApp(pool: Pool, origin: string) {
     if(ensured&&u.pair_id)emit(u.pair_id);
     // Derived per viewer on every read; the digest is never stored or pushed.
     const digest=weeklyDigest(sessions.flatMap((view:any)=>view.missions),u.role,now);
-    res.json({user:u,sessions,serverNow:Date.now(),digest,...(queen?{queenLevel:queen}:{}),...(adoration?{adorationTally:adoration}:{}),...(spark?{spark}:{})});
+    res.json({user:u,mode,sessions,serverNow:Date.now(),digest,...(queen?{queenLevel:queen}:{}),...(adoration?{adorationTally:adoration}:{}),...(spark?{spark}:{})});
   });
   app.get('/api/sessions/:id',async(req,res)=>{const u=await auth(req); const session=await transaction(async c=>{const s=await locked(c,req.params.id as string,u);await save(c,s);const view:any=visible(s,u);const queue=await adorationQueue(c,u,s.id);if(queue)view.adoration={...(view.adoration??{}),...queue};return view;});res.json({session,serverNow:Date.now()});});
   app.post('/api/sessions',async(req,res)=>{

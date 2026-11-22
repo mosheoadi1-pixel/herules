@@ -1,3 +1,4 @@
+process.env.HR_MODE='private';
 import assert from 'node:assert/strict';
 import { randomUUID, scryptSync } from 'node:crypto';
 import { mkdtemp, rm, readFile } from 'node:fs/promises';
@@ -7,6 +8,10 @@ import { startDatabase } from '../scripts/db/runtime.mjs';
 import type { User } from '../server/app.ts';
 import { request } from 'node:http';
 
+if (process.env.HR_MODE === 'public') {
+  console.log('SKIP integration: private-only suite');
+  process.exit(0);
+}
 const dir = await mkdtemp(join(tmpdir(), 'her-rules-app-'));
 const db = await startDatabase(dir, 55434);
 let server: any, pool: any;

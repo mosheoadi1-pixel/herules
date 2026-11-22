@@ -20,6 +20,7 @@ import { LibraryTab } from './components/Library';
 import { MissionsTab } from './components/Missions';
 import { RewardsTab } from './components/Rewards';
 import { WishesTab } from './components/Wishes';
+import { PublicEntry } from './components/PublicEntry';
 import './style.css';
 function App(){
  const [importedIdeas,setImportedIdeas]=useState<Idea[]>([]);
@@ -30,6 +31,7 @@ function App(){
  const [state,setState]=useState<State|null>(null),[ready,setReady]=useState(false),[error,setError]=useState(''),[online,setOnline]=useState(true),[busy,setBusy]=useState(false),[unreconciled,setUnreconciled]=useState(false),[unknownOutcome,setUnknownOutcome]=useState(()=>{try{return sessionStorage.getItem('hr-unknown-outcome')==='1';}catch{return false;}});
   const [notificationPermission,setNotificationPermission]=useState(()=>typeof Notification==='undefined'?'unsupported':Notification.permission);
   const navRef=useRef<HTMLElement>(null);
+  const [publicMode,setPublicMode]=useState(false);
  const knownNotices=useRef<Set<string>|null>(null),noticeUser=useRef('');
   const [tab,setTab]=useState('missions');
  const [now,setNow]=useState(Date.now());
@@ -47,6 +49,7 @@ function App(){
   const reconcile=()=>{generation.current++;needsRefresh.current=true;setUnreconciled(true);return refresh();};
  useEffect(()=>{mounted.current=true;void refresh();const poll=setInterval(()=>void refresh(),5000),clock=setInterval(()=>setNow(Date.now()),1000);return()=>{mounted.current=false;clearInterval(poll);clearInterval(clock);};},[]);
  useEffect(()=>{const update=()=>setNotificationPermission(typeof Notification==='undefined'?'unsupported':Notification.permission);const visible=()=>{if(document.visibilityState==='visible')update();};window.addEventListener('focus',update);document.addEventListener('visibilitychange',visible);return()=>{window.removeEventListener('focus',update);document.removeEventListener('visibilitychange',visible);};},[]);
+  useEffect(()=>{void api('/public/config').then(data=>setPublicMode(data.mode==='public')).catch(()=>{});},[]);
   useEffect(()=>{document.documentElement.lang=lang;document.documentElement.dir=lang==='he'?'rtl':'ltr';save('hr-language',lang);},[lang]);
   useEffect(()=>{if(!state?.user.id){setImportedIdeas([]);return;}let active=true;void api('/ideas').then(data=>{if(active)setImportedIdeas(data.ideas);}).catch(e=>{if(active)setError(e.message);});return()=>{active=false;};},[state?.user.id,tab]);
   useEffect(()=>{if(!state?.user.pair_id)return;const events=new EventSource('/api/events');events.onmessage=()=>void refresh();events.onerror=()=>setOnline(false);return()=>events.close();},[state?.user.pair_id]);
@@ -161,7 +164,7 @@ function App(){
  <div role="status" aria-live="polite">{unreconciled?<p className="notice">{t('ממתינים לעדכון חדש מהשרת לפני פעולות נוספות. ננסה שוב אוטומטית; פעולות הבטיחות זמינות.','Waiting for a fresh server update before further actions. Retrying automatically; safety controls remain available.')}</p>:!online&&<p className="notice">{t('החיבור אינו עדכני. הפעולות דורשות שרת; מתבצע ניסיון רענון כל חמש שניות.','Connection is stale. Actions require the server; refreshing every five seconds.')}</p>}</div>
  {unknownOutcome&&<div className="notice" role="alert"><p>{t('ייתכן שהפעולה שפג לה הזמן תושלם גם אחרי רענון. אי אפשר לקבוע אם הושלמה; ניסיון חוזר עלול ליצור כפילות. מפתחות ניסיון חוזר אינם נשמרים לאחר טעינה מחדש. בדקו בזהירות לפני המשך. פעולות בטיחות נשארות זמינות.','The timed-out action may still complete after a refresh. Its outcome is unknown; repeating it can duplicate the action. Retry keys are lost on reload. Review carefully before continuing. Safety controls remain available.')}</p><button disabled={busy||unreconciled} onClick={()=>setUnknown(false)}>{t('אני מבינ/ה את הסיכון; פתיחת פעולות','I understand the risk; unlock actions')}</button></div>}
  {error&&<p className="error" role="alert">{error}<button className="quiet" onClick={()=>setError('')}>{t('סגירה','Dismiss')}</button></p>}
-  {!ready?<p>{t('מתחברים…','Connecting…')}</p>:!u?<section className="panel auth">
+  {!ready?<p>{t('מתחברים…','Connecting…')}</p>:!u?publicMode?<PublicEntry lang={lang}/>:<section className="panel auth">
     <p className="eyebrow">YOUR PRIVATE ENTRANCE</p>
     <h2>{t('בחרו תפקיד והיכנסו','Choose a role and enter')}</h2>
     <p>{t('משחק פרטי אחד. שני תפקידים. נכנסים ומתחברים אוטומטית — בלי קוד הזמנה.','One private game. Two roles. Enter and join automatically — no invitation code.')}</p>

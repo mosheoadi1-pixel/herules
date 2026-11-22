@@ -1,3 +1,4 @@
+process.env.HR_MODE='private';
 import assert from 'node:assert/strict';
 import { createHash,randomBytes,randomUUID,scryptSync } from 'node:crypto';
 import { mkdtemp,readFile,rm } from 'node:fs/promises';

@@ -1,3 +1,4 @@
+process.env.HR_MODE='private';
 import assert from 'node:assert/strict';
 import { mkdtemp, readFile, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
