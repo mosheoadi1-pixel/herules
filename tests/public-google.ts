@@ -52,7 +52,7 @@ const provider = (fetch: ReturnType<typeof fakeGoogle>['fetch']) => createGoogle
   const pkce = pkcePair();
   const google = fakeGoogle();
   const result = await provider(google.fetch).exchange({ code: 'auth-code-abc', codeVerifier: pkce.verifier, redirectUri });
-  assert.deepEqual(result, { subject: 'google-subject-1' });
+  assert.deepEqual(result, { subject: 'google-subject-1', email: undefined, emailVerified: false }, 'no email claim means no email');
   assert.equal(google.calls.length, 2, 'one token request and one tokeninfo check');
   const token = google.calls[0];
   assert.equal(token.url, tokenUrl);
@@ -68,6 +68,18 @@ const provider = (fetch: ReturnType<typeof fakeGoogle>['fetch']) => createGoogle
   assert.equal(createHash('sha256').update(body.get('code_verifier') ?? '').digest('base64url'), pkce.challenge, 'the sent verifier matches the S256 challenge');
   assert.equal(new URL(google.calls[1].url).searchParams.get('id_token') !== null, true, 'tokeninfo receives the id_token');
   assert.ok(google.calls[1].init?.signal, 'tokeninfo request has a timeout signal');
+}
+
+{
+  const email = 'test-user@example.test';
+  const verified = await provider(fakeGoogle({ payload: claims({ email, email_verified: true }) }).fetch).exchange({ code: 'c', codeVerifier: 'v', redirectUri });
+  assert.deepEqual(verified, { subject: 'google-subject-1', email, emailVerified: true }, 'a verified email is returned');
+  const unverified = await provider(fakeGoogle({ payload: claims({ email, email_verified: false }) }).fetch).exchange({ code: 'c', codeVerifier: 'v', redirectUri });
+  assert.deepEqual(unverified, { subject: 'google-subject-1', email: undefined, emailVerified: false }, 'an unverified email is never returned as the email');
+  const stringFlag = await provider(fakeGoogle({ payload: claims({ email, email_verified: 'true' }) }).fetch).exchange({ code: 'c', codeVerifier: 'v', redirectUri });
+  assert.deepEqual(stringFlag, { subject: 'google-subject-1', email: undefined, emailVerified: false }, 'only the boolean true verifies an email');
+  const noEmail = await provider(fakeGoogle({ payload: claims({ email_verified: true }) }).fetch).exchange({ code: 'c', codeVerifier: 'v', redirectUri });
+  assert.deepEqual(noEmail, { subject: 'google-subject-1', email: undefined, emailVerified: true }, 'a verified flag without an email yields no email');
 }
 
 {

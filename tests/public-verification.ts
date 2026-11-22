@@ -50,7 +50,7 @@ const fakeVerifier:PublicVerifier={
 const fake:PublicIdentityProvider={
   name:'google',
   authorizeUrl({state,redirectUri}){return `https://accounts.example.test/auth?state=${state}&redirect_uri=${encodeURIComponent(redirectUri)}`;},
-  async exchange({code}){return {subject:code.replace(/^code:/,'')};},
+  async exchange({code}){return {subject:code.replace(/^code:/,''),emailVerified:false};},
 };
 
 async function signUp(base:string,code:string,nickname:string){

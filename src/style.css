@@ -195,6 +195,10 @@ nav button { border-radius: 999px; min-height: 44px; padding: 8px 16px; }
 nav button[aria-current="page"], nav button.active { box-shadow: none; }
 .account { background: transparent; border: 0; padding: 0; display: flex; flex-wrap: wrap; align-items: center; gap: 6px 14px; color: var(--muted); font-size: 14px; }
 .account .badge { font-size: 13px; }
+.admin-list { list-style: none; padding: 0; }
+.admin-list article { border-bottom: 1px solid var(--line); }
+.admin-case { border-top: 1px solid var(--line); margin-top: 16px; padding-top: 12px; }
+.admin-media { display: block; max-width: 100%; max-height: 70vh; border-radius: 12px; margin: 12px 0; }
 .next-step { border-radius: 18px; }
 .next-step > .row.between h2 { margin-block: 0; }
 .next-step > .row.between > button { padding-block: 6px; font-size: 13px; }

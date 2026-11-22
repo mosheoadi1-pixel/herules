@@ -19,7 +19,8 @@ import { AUCTION_LIMITS, highestBid, settleAuction, type AuctionOutcome } from '
 import { hrMode } from './mode.ts';
 import { pkcePair, randomKey, type PublicIdentityProvider, type PublicProvider } from './public-auth.ts';
 import { VERIFICATION_CONSENT_VERSION } from '../src/verification-consent.ts';
-import { VERIFICATION_ATTEMPTS_PER_DAY, VERIFICATION_MEDIA_MAX_ITEMS, decodeImage, discardMedia, hasVerificationConsent, purgeExpiredVerificationMedia, retentionMs, reviewerIds, storeMedia, verificationDirectory, type PublicVerifier, type PublicVerifierResult } from './public-verification.ts';
+import { VERIFICATION_ATTEMPTS_PER_DAY, VERIFICATION_MEDIA_MAX_ITEMS, decodeImage, discardMedia, hasVerificationConsent, purgeExpiredVerificationMedia, retentionMs, storeMedia, verificationDirectory, type PublicVerifier, type PublicVerifierResult } from './public-verification.ts';
+import { adminHashFromEnv, isPublicAdmin, publicEmailHash } from './public-admin.ts';
 const scrypt = promisify(scryptCallback);
 const hash = (v: string) => createHash('sha256').update(v).digest('hex');
 const text = z.string().trim().min(1).max(4000);
@@ -150,6 +151,7 @@ function runNight(s: Session, mood: 'soft'|'playful'|'strict', lang: 'he'|'en', 
 }
 export async function createApp(pool: Pool, origin: string, providers: Partial<Record<PublicProvider, PublicIdentityProvider>> = {}, verifier?: PublicVerifier) {
   const mode = hrMode();
+  if (mode === 'public') adminHashFromEnv();
   const configured = new URL(origin);
   if (configured.origin !== origin || (process.env.NODE_ENV === 'production' && configured.protocol !== 'https:')) throw new Error('APP_ORIGIN must be an exact origin; production requires HTTPS');
   await pool.query(await readFile(new URL('../db/001-foundation.sql', import.meta.url), 'utf8'));
@@ -159,10 +161,13 @@ export async function createApp(pool: Pool, origin: string, providers: Partial<R
   await pool.query(await readFile(new URL('../db/005-devotions.sql', import.meta.url), 'utf8'));
   await pool.query(await readFile(new URL('../db/006-public-accounts.sql', import.meta.url), 'utf8'));
   await pool.query(await readFile(new URL('../db/007-public-verification.sql', import.meta.url), 'utf8'));
+  await pool.query(await readFile(new URL('../db/008-public-admin.sql', import.meta.url), 'utf8'));
   const app = express(); app.disable('x-powered-by');
   app.set('trust proxy',process.env.TRUST_PROXY?.split(',').map(v=>v.trim())||false);
+  // Public mode shows reviewer images as blob: object URLs; private mode keeps its existing policy.
+  const imgSrc = mode === 'public' ? "'self' data: blob:" : "'self' data:";
   app.use((req, res, next) => {
-    res.set({ 'X-Content-Type-Options': 'nosniff', 'Referrer-Policy': 'no-referrer', 'X-Frame-Options': 'DENY', 'Content-Security-Policy': "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'self'; frame-ancestors 'none'; base-uri 'none'; form-action 'self'" });
+    res.set({ 'X-Content-Type-Options': 'nosniff', 'Referrer-Policy': 'no-referrer', 'X-Frame-Options': 'DENY', 'Content-Security-Policy': `default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src ${imgSrc}; connect-src 'self'; frame-ancestors 'none'; base-uri 'none'; form-action 'self'` });
     if (req.path.startsWith('/api')) res.set('Cache-Control', 'no-store');
     if(process.env.NODE_ENV==='production')res.set('Strict-Transport-Security','max-age=31536000');
     const requestOrigin = `${req.protocol}://${req.host}`;
@@ -270,11 +275,16 @@ export async function createApp(pool: Pool, origin: string, providers: Partial<R
       const flow = (await transaction(c => c.query('DELETE FROM public_auth_states WHERE token=$1 AND expires_at > now() RETURNING provider,code_verifier', [query.state]))).rows[0];
       if (!flow || flow.provider !== name) return fail(400,'Sign-in expired; start again');
       const adapter = providers[name] ?? fail(503,'provider not configured');
-      const { subject } = await adapter.exchange({ code: query.code, codeVerifier: flow.code_verifier, redirectUri: callbackUrl(name) });
+      const { subject, email, emailVerified } = await adapter.exchange({ code: query.code, codeVerifier: flow.code_verifier, redirectUri: callbackUrl(name) });
+      const emailSha = emailVerified && email ? publicEmailHash(email) : null;
       const identity = await pool.query('SELECT public_user_id FROM auth_identities WHERE provider=$1 AND provider_subject=$2', [name, subject]);
-      if (identity.rows[0]) { await publicLogin(res, identity.rows[0].public_user_id); return res.redirect('/'); }
+      if (identity.rows[0]) {
+        if (emailSha) await pool.query('UPDATE public_users SET email_sha256=$2 WHERE id=$1', [identity.rows[0].public_user_id, emailSha]);
+        await publicLogin(res, identity.rows[0].public_user_id);
+        return res.redirect('/');
+      }
       const token = randomKey();
-      await pool.query("INSERT INTO public_auth_states(token,provider,code_verifier,pending_subject,expires_at) VALUES($1,$2,'',$3,now()+interval '10 minutes')", [token, name, subject]);
+      await pool.query("INSERT INTO public_auth_states(token,provider,code_verifier,pending_subject,pending_email_sha256,expires_at) VALUES($1,$2,'',$3,$4,now()+interval '10 minutes')", [token, name, subject, emailSha]);
       res.redirect(`/#public-pending=${token}`);
     });
     app.post('/api/public/register', async (req,res) => {
@@ -287,8 +297,8 @@ export async function createApp(pool: Pool, origin: string, providers: Partial<R
       }).parse(req.body);
       const id = randomUUID();
       const row = await transaction(async c => {
-        const pending = (await c.query('SELECT provider,pending_subject FROM public_auth_states WHERE token=$1 AND pending_subject IS NOT NULL AND expires_at > now() FOR UPDATE', [b.pendingToken])).rows[0] ?? fail(400,'Sign-in expired; start again');
-        const r = await c.query('INSERT INTO public_users(id,nickname,nickname_key,role,gender) VALUES($1,$2,$3,$4,$5) RETURNING id,nickname,role,gender,verified_at', [id, b.nickname, b.nickname.toLowerCase(), b.role, b.gender]);
+        const pending = (await c.query('SELECT provider,pending_subject,pending_email_sha256 FROM public_auth_states WHERE token=$1 AND pending_subject IS NOT NULL AND expires_at > now() FOR UPDATE', [b.pendingToken])).rows[0] ?? fail(400,'Sign-in expired; start again');
+        const r = await c.query('INSERT INTO public_users(id,nickname,nickname_key,role,gender,email_sha256) VALUES($1,$2,$3,$4,$5,$6) RETURNING id,nickname,role,gender,verified_at', [id, b.nickname, b.nickname.toLowerCase(), b.role, b.gender, pending.pending_email_sha256 ?? null]);
         await c.query('INSERT INTO auth_identities(provider,provider_subject,public_user_id) VALUES($1,$2,$3)', [pending.provider, pending.pending_subject, id]);
         await c.query('DELETE FROM public_auth_states WHERE token=$1', [b.pendingToken]);
         return r.rows[0];
@@ -297,10 +307,10 @@ export async function createApp(pool: Pool, origin: string, providers: Partial<R
       res.json({ user: publicUser(row) });
     });
     const signedPublic = async (req: Request) => {
-      const r = await pool.query('SELECT u.id,u.nickname,u.role,u.gender,u.verified_at FROM public_users u JOIN public_sessions s ON s.public_user_id=u.id WHERE s.hash=$1 AND s.expires>now()', [hash(publicTokenOf(req))]);
+      const r = await pool.query('SELECT u.id,u.nickname,u.role,u.gender,u.verified_at,u.email_sha256 FROM public_users u JOIN public_sessions s ON s.public_user_id=u.id WHERE s.hash=$1 AND s.expires>now()', [hash(publicTokenOf(req))]);
       return r.rows[0] ?? fail(401,'Please sign in');
     };
-    app.get('/api/public/me', async (req,res) => { res.json({ user: publicUser(await signedPublic(req)) }); });
+    app.get('/api/public/me', async (req,res) => { const user = await signedPublic(req); res.json({ user: publicUser(user), isAdmin: isPublicAdmin(user) }); });
     app.post('/api/public/logout', async (req,res) => { await pool.query('DELETE FROM public_sessions WHERE hash=$1',[hash(publicTokenOf(req))]); res.clearCookie('hr_public_session',{ path:'/' }); res.json({ok:true}); });
     const verificationDir = verificationDirectory();
     const verificationRetention = retentionMs();
@@ -308,7 +318,7 @@ export async function createApp(pool: Pool, origin: string, providers: Partial<R
     const reviewer = async (req: Request) => {
       await rate(req,'public-admin',120);
       const user = await signedPublic(req);
-      if (!reviewerIds().includes(user.id)) fail(403,'Reviewer role required');
+      if (!isPublicAdmin(user)) fail(403,'Reviewer role required');
       return user;
     };
     const purge = () => purgeExpiredVerificationMedia(pool, new Date(), verificationDir).catch(error => console.error('Verification media purge failed', error.code || error.name));

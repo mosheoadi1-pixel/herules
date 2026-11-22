@@ -22,13 +22,18 @@ const cookieOf=(response:Response)=>/hr_public_session=[a-f0-9]{64}/.exec(respon
 const tokenOf=(response:Response)=>/#public-pending=([A-Za-z0-9_-]+)$/.exec(response.headers.get('location')??'')?.[1]??'';
 
 let lastChallenge='';
+const fixtureEmail='test-user@example.test';
+const fixtureHash=createHash('sha256').update(fixtureEmail).digest('hex');
+const emailOf=new Map<string,{email?:string;emailVerified:boolean}>();
 const fake:PublicIdentityProvider={
   name:'google',
   authorizeUrl({state,codeChallenge,redirectUri}){lastChallenge=codeChallenge;return `https://accounts.example.test/auth?state=${state}&code_challenge=${codeChallenge}&code_challenge_method=S256&redirect_uri=${encodeURIComponent(redirectUri)}`;},
   async exchange({code,codeVerifier,redirectUri}){
     assert.equal(createHash('sha256').update(codeVerifier).digest('base64url'),lastChallenge,'PKCE verifier must match the S256 challenge');
     assert.equal(redirectUri,`${origin}/api/public/auth/google/callback`);
-    return {subject:code.replace(/^code:/,'')};
+    const subject=code.replace(/^code:/,'');
+    const identity=emailOf.get(subject);
+    return {subject,email:identity?.email,emailVerified:identity?.emailVerified===true};
   },
 };
 
@@ -110,7 +115,78 @@ try {
   assert.equal(out.status,200);
   assert.equal((await get(base,'/public/me',cookie)).status,401,'logout invalidates the public session');
   assert.equal((await get(base,'/public/me',cookieOf(again))).status,200,'other public sessions are unaffected by logout');
-  console.log('PASS public-accounts: private mode unchanged, public mode gates email routes, provider flow, registration, sessions');
+  const savedAdmin={hash:process.env.ADMIN_HASH,ids:process.env.HR_ADMIN_PUBLIC_IDS};
+  try{
+    const signIn=async(app:string,subject:string)=>{const started=await (await get(app,'/public/auth/google/start')).json();return get(app,`/public/auth/google/callback?code=code:${subject}&state=${new URL(started.url).searchParams.get('state')}`);};
+    const enrol=async(app:string,subject:string,nickname:string)=>{
+      const token=tokenOf(await signIn(app,subject));
+      assert.ok(token,`${subject} gets a pending registration`);
+      const registered=await post(app,'/public/register',{pendingToken:token,nickname,role:'sub',gender:'woman'});
+      assert.equal(registered.status,200,`${subject} registers`);
+      return {id:(await registered.json()).user.id as string,cookie:cookieOf(registered)};
+    };
+    const me=async(app:string,cookie:string)=>{const response=await get(app,'/public/me',cookie);assert.equal(response.status,200);return response.json() as Promise<{user:{id:string;status:string};isAdmin:boolean}>;};
+    const hashOf=async(id:string)=>(await pool.query('SELECT email_sha256 FROM public_users WHERE id=$1',[id])).rows[0].email_sha256 as string|null;
+
+    for(const bad of ['a'.repeat(63),'A'.repeat(64),'z'.repeat(64)]){
+      process.env.ADMIN_HASH=bad;
+      await assert.rejects(createApp(pool,origin,{google:fake}),/ADMIN_HASH must be 64 lowercase hex characters/,'a malformed ADMIN_HASH fails startup');
+    }
+    process.env.ADMIN_HASH='';
+    await assert.doesNotReject(createApp(pool,origin,{google:fake}),'an empty ADMIN_HASH leaves email-based admin off');
+
+    emailOf.set('admin-subject',{email:fixtureEmail,emailVerified:true});
+    emailOf.set('unverified-subject',{email:fixtureEmail,emailVerified:false});
+    emailOf.set('late-subject',{emailVerified:false});
+    process.env.ADMIN_HASH=fixtureHash;
+    const adminBase=await listen(await createApp(pool,origin,{google:fake}));
+    const admin=await enrol(adminBase,'admin-subject','Ada Admin');
+    const unverified=await enrol(adminBase,'unverified-subject','Una Lee');
+    const late=await enrol(adminBase,'late-subject','Lale Yan');
+    assert.equal(await hashOf(admin.id),fixtureHash,'a verified email stores its hash at registration');
+    assert.equal(await hashOf(unverified.id),null,'an unverified email stores no hash');
+    assert.equal(await hashOf(late.id),null,'no verified email stores no hash');
+
+    const adminMe=await me(adminBase,admin.cookie);
+    assert.equal(adminMe.isAdmin,true,'a verified email whose hash matches ADMIN_HASH is admin');
+    assert.ok(!JSON.stringify(adminMe).includes(fixtureHash)&&!JSON.stringify(adminMe).includes(fixtureEmail),'/me never returns the hash or the email');
+    assert.equal((await get(adminBase,'/public/admin/reviews',admin.cookie)).status,200,'an admin reaches the review list');
+    assert.equal((await me(adminBase,unverified.cookie)).isAdmin,false,'an unverified email is not admin');
+    assert.equal((await me(adminBase,late.cookie)).isAdmin,false,'a user without an email is not admin');
+    const refused=await get(adminBase,'/public/admin/reviews',unverified.cookie);
+    assert.equal(refused.status,403,'a non-admin gets 403 on the review list');
+    assert.equal((await refused.json()).error,'Reviewer role required');
+
+    process.env.ADMIN_HASH='0'.repeat(63)+'1';
+    assert.equal((await me(adminBase,admin.cookie)).isAdmin,false,'a stored hash that differs from ADMIN_HASH is not admin');
+    assert.equal((await get(adminBase,'/public/admin/reviews',admin.cookie)).status,403,'the review list refuses a non-matching hash');
+    delete process.env.ADMIN_HASH;
+    assert.equal((await me(adminBase,admin.cookie)).isAdmin,false,'with ADMIN_HASH unset, email-based admin is off');
+
+    process.env.HR_ADMIN_PUBLIC_IDS=` ${unverified.id.toUpperCase()} `;
+    assert.equal((await me(adminBase,unverified.cookie)).isAdmin,true,'HR_ADMIN_PUBLIC_IDS still makes an admin');
+    assert.equal((await get(adminBase,'/public/admin/reviews',unverified.cookie)).status,200,'and that admin reaches the review list');
+    assert.equal((await me(adminBase,admin.cookie)).isAdmin,false,'listing an id does not grant admin to others');
+    delete process.env.HR_ADMIN_PUBLIC_IDS;
+
+    process.env.ADMIN_HASH=fixtureHash;
+    emailOf.set('late-subject',{email:fixtureEmail,emailVerified:true});
+    const again=await signIn(adminBase,'late-subject');
+    assert.equal(again.headers.get('location'),'/','a known subject signs in');
+    assert.equal(await hashOf(late.id),fixtureHash,'a verified sign-in stores the hash for an existing account');
+    assert.equal((await me(adminBase,cookieOf(again))).isAdmin,true,'the account is admin from its next sign-in on');
+
+    const columns=(await pool.query("SELECT column_name FROM information_schema.columns WHERE table_name='public_users'")).rows.map(row=>row.column_name);
+    assert.ok(!columns.includes('email'),'public_users has no email column');
+    const stored=(await pool.query("SELECT row_to_json(u)::text AS row FROM public_users u UNION ALL SELECT row_to_json(s)::text FROM public_auth_states s UNION ALL SELECT row_to_json(i)::text FROM auth_identities i")).rows;
+    for(const {row} of stored)assert.ok(!row.includes(fixtureEmail),'no stored row contains the plaintext email');
+    assert.ok(stored.some(({row})=>row.includes(fixtureHash)),'the hash is what gets stored');
+  } finally {
+    for(const [key,value] of [['ADMIN_HASH',savedAdmin.hash],['HR_ADMIN_PUBLIC_IDS',savedAdmin.ids]] as const){
+      if(value===undefined)delete process.env[key];else process.env[key]=value;
+    }
+  }
+  console.log('PASS public-accounts: private mode unchanged, public mode gates email routes, provider flow, registration, sessions, admin gate by email hash');
 } finally {
   if (previous===undefined) delete process.env.HR_MODE; else process.env.HR_MODE=previous;
   await Promise.all(servers.map(server=>new Promise(resolve=>server.close(resolve))));

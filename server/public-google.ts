@@ -83,7 +83,10 @@ export function createGoogleProvider({ clientId, clientSecret, fetch: fetchImpl 
       if (!claims) return fail('Google id_token check returned no claims');
       assertClaims(claims, clientId);
       if (claims.sub !== payload.sub) fail('Google id_token subject mismatch');
-      return { subject: claims.sub as string };
+      // Read from the same id_token that tokeninfo just validated. Its own email_verified is a string, so it is not used.
+      const emailVerified = payload.email_verified === true;
+      const email = emailVerified && typeof payload.email === 'string' && payload.email.trim() !== '' ? payload.email : undefined;
+      return { subject: claims.sub as string, email, emailVerified };
     },
   };
 }

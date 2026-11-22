@@ -4,9 +4,10 @@ import { api } from '../api';
 import { form } from '../app-shared';
 import { publicCopy } from '../i18n';
 import { VERIFICATION_CONSENT_VERSION } from '../verification-consent';
+import { AdminReviews } from './PublicAdmin';
 
 type PublicUser = { id: string; nickname: string; role: string; gender: string; status: string };
-const errorKeys: Record<string,string> = {'provider not configured':'errProvider','Sign-in expired; start again':'errExpired','Already exists':'errTaken','Invalid or missing input':'errInvalid','verification not configured':'errVerifyNotConfigured','Consent required':'errConsent','Unsupported image type':'errMedia','Image too large':'errMedia','Too many verification attempts; try again tomorrow':'errAttempts'};
+const errorKeys: Record<string,string> = {'provider not configured':'errProvider','Sign-in expired; start again':'errExpired','Already exists':'errTaken','Invalid or missing input':'errInvalid','verification not configured':'errVerifyNotConfigured','Consent required':'errConsent','Unsupported image type':'errMedia','Image too large':'errMedia','Too many verification attempts; try again tomorrow':'errAttempts','Reviewer role required':'errNotAdmin','Review unavailable':'errReviewGone','Only items awaiting review can be decided':'errReviewGone','Only items awaiting review have media to review':'errReviewGone','Media has been deleted':'errMediaGone','Media unavailable':'errMediaGone'};
 type Verification = { status: string; consented: boolean; verification: { status: string } | null };
 const maxImageBytes = 5 * 1024 * 1024;
 const readImage = (file: File) => new Promise<string>((resolve, reject) => {
@@ -62,15 +63,17 @@ function VerificationPanel({ t, errorText, onVerified }: { t: (key: string) => s
 
 export function PublicEntry({ lang }: { lang: 'he' | 'en' }) {
   const t = (key: string) => publicCopy[key]?.[lang === 'he' ? 0 : 1] || key;
-  const [user, setUser] = useState<PublicUser | null>(null), [pending, setPending] = useState(''), [busy, setBusy] = useState(false), [error, setError] = useState('');
+  const [user, setUser] = useState<PublicUser | null>(null), [isAdmin, setIsAdmin] = useState(false), [adminOpen, setAdminOpen] = useState(false), [pending, setPending] = useState(''), [busy, setBusy] = useState(false), [error, setError] = useState('');
   const errorText = (e: any) => (errorKeys[e.message] ? t(errorKeys[e.message]) : e.message);
+  // The server decides admin status; the browser only shows what /api/public/me reports.
+  const loadMe = () => api('/public/me').then(data => { setUser(data.user); setIsAdmin(data.isAdmin === true); }).catch(() => { setUser(null); setIsAdmin(false); });
   useEffect(() => {
     const match = /^#public-pending=([A-Za-z0-9_-]{20,128})$/.exec(location.hash);
     if (match) {
       setPending(match[1]);
       history.replaceState(null, '', '/');
     }
-    void api('/public/me').then(data => setUser(data.user)).catch(() => setUser(null));
+    void loadMe();
   }, []);
   const start = (provider: 'google' | 'apple') => {
     setBusy(true);
@@ -82,20 +85,24 @@ export function PublicEntry({ lang }: { lang: 'he' | 'en' }) {
     setBusy(true);
     setError('');
     void api('/public/register', { pendingToken: pending, nickname: b.nickname, role: b.role, gender: b.gender })
-      .then(data => { setPending(''); setUser(data.user); })
+      .then(data => { setPending(''); setUser(data.user); void loadMe(); })
       .catch(e => setError(errorText(e)))
       .finally(() => setBusy(false));
   };
   const signOut = () => {
     setBusy(true);
-    void api('/public/logout', {}).finally(() => { setUser(null); setBusy(false); });
+    void api('/public/logout', {}).finally(() => { setUser(null); setIsAdmin(false); setAdminOpen(false); setBusy(false); });
   };
-  if (user) return <section className="panel auth">
+  if (user) return <>
+  <section className="panel auth">
     <h2>{t('signedIn')}</h2>
     <p><bdi>{user.nickname}</bdi> · {t(user.status)}</p>
     {user.status === 'pending_verification' && <VerificationPanel t={t} errorText={errorText} onVerified={() => setUser(current => current ? { ...current, status: 'verified' } : current)}/>}
+    {isAdmin && <button type="button" aria-pressed={adminOpen} disabled={busy} onClick={() => setAdminOpen(open => !open)}>{t('adminOpen')}</button>}
     <button type="button" className="quiet" disabled={busy} onClick={signOut}>{t('signOut')}</button>
-  </section>;
+  </section>
+  {isAdmin && adminOpen && <AdminReviews t={t} lang={lang} errorText={errorText}/>}
+  </>;
   if (pending) return <section className="panel auth">
     <h2>{t('finish')}</h2>
     <p>{t('pendingIntro')}</p>

@@ -4,7 +4,7 @@ export type PublicProvider = 'google' | 'apple';
 export type PublicIdentityProvider = {
   name: PublicProvider;
   authorizeUrl(input: { state: string; codeChallenge: string; redirectUri: string }): string;
-  exchange(input: { code: string; codeVerifier: string; redirectUri: string }): Promise<{ subject: string }>;
+  exchange(input: { code: string; codeVerifier: string; redirectUri: string }): Promise<{ subject: string; email?: string; emailVerified: boolean }>;
 };
 
 const base64url = (value: Buffer) => value.toString('base64url');
