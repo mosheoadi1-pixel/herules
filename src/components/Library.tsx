@@ -22,7 +22,7 @@ type LibraryTabProps = {
 
 export function LibraryTab({ tab, s, t, lang, label, library, destinationIdeas, filtered, category, setCategory, intensity, setIntensity, tag, setTag, query, setQuery, noPrep, setNoPrep, away, setAway, onlyFavorites, setOnlyFavorites, favorites, setFavorites, recent, useIdea, setError, play, ended, mood, spend, configure }: LibraryTabProps) {
   return <><section className="panel">
-  <h2>{tab==='library'?t('ספריית השראה','Idea library'):t('השראת עונשים','Punishments inspiration')}</h2>
+  <h2>{tab==='library'?t('ספריית השראה','Idea library'):tab==='rewards'?t('רעיונות פרסים','Reward ideas'):t('השראת עונשים','Punishments inspiration')}</h2>
   <p className="small">{destinationIdeas.length} {t('דרכים לבחור יחד','ways to choose together')}</p>
   <p>{t('המשימות האישיות שלכם לצד ההצעות הנועזות שנשמרו. סננו לפי תג תוכן אישי להצגת התוספות מהקובץ. קובייה מציעה בלבד; את עורכת ושולחת בנפרד. עשר ההצעות האחרונות לא יוגרלו שוב.','Your supplied tasks alongside the retained bold suggestions. Filter by Custom content to see additions from your file. Dice only suggests; you edit and send separately. The last ten suggestions are excluded.')}</p>
   <p className="notice">{t('תוצאות משחק הן בחירה נפרדת ומכוונת, ולעולם אינן תגובה לסירוב, השהיה או עצירה.','Game outcomes require a separate opt-in and never follow refusal, pause or stop.')}</p>
