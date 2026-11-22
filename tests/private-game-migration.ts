@@ -45,5 +45,5 @@ try{
  console.log('PASS private-game migration: ambiguous multi-pair upgrade refuses automatic selection without deleting data');
 }finally{
  if(server){server.closeAllConnections();await new Promise<void>(r=>server!.close(()=>r()));}
- await pool.end();await db.stop();await rm(directory,{recursive:true,force:true});
+ await pool.end();await db.stop();await rm(directory,{recursive:true,force:true,maxRetries:10,retryDelay:500});
 }
