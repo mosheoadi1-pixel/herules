@@ -5,9 +5,10 @@ import { form } from '../app-shared';
 import { publicCopy } from '../i18n';
 import { VERIFICATION_CONSENT_VERSION } from '../verification-consent';
 import { AdminReviews } from './PublicAdmin';
+import { PublicRoom } from './PublicRoom';
 
 type PublicUser = { id: string; nickname: string; role: string; gender: string; status: string };
-const errorKeys: Record<string,string> = {'provider not configured':'errProvider','Sign-in expired; start again':'errExpired','Already exists':'errTaken','Invalid or missing input':'errInvalid','verification not configured':'errVerifyNotConfigured','Consent required':'errConsent','Unsupported image type':'errMedia','Image too large':'errMedia','Too many verification attempts; try again tomorrow':'errAttempts','Reviewer role required':'errNotAdmin','Review unavailable':'errReviewGone','Only items awaiting review can be decided':'errReviewGone','Only items awaiting review have media to review':'errReviewGone','Media has been deleted':'errMediaGone','Media unavailable':'errMediaGone'};
+const errorKeys: Record<string,string> = {'provider not configured':'errProvider','Sign-in expired; start again':'errExpired','Already exists':'errTaken','Invalid or missing input':'errInvalid','verification not configured':'errVerifyNotConfigured','Consent required':'errConsent','Unsupported image type':'errMedia','Image too large':'errMedia','Too many verification attempts; try again tomorrow':'errAttempts','Reviewer role required':'errNotAdmin','Review unavailable':'errReviewGone','Only items awaiting review can be decided':'errReviewGone','Only items awaiting review have media to review':'errReviewGone','Media has been deleted':'errMediaGone','Media unavailable':'errMediaGone','Verification required':'errVerification','Only doms can post in the room':'errOnlyDoms','Recipient unavailable':'errRecipient','Too many posts; try again in ten minutes':'errPosts','Message unavailable':'errRoomMessage','You cannot report your own message':'errOwnReport','Message already removed':'errRemoved','Idempotency key was used for a different message':'errKey','You cannot block yourself':'errSelf'};
 type Verification = { status: string; consented: boolean; verification: { status: string } | null };
 const maxImageBytes = 5 * 1024 * 1024;
 const readImage = (file: File) => new Promise<string>((resolve, reject) => {
@@ -102,6 +103,7 @@ export function PublicEntry({ lang }: { lang: 'he' | 'en' }) {
     <button type="button" className="quiet" disabled={busy} onClick={signOut}>{t('signOut')}</button>
   </section>
   {isAdmin && adminOpen && <AdminReviews t={t} lang={lang} errorText={errorText}/>}
+  {user.status === 'verified' && <PublicRoom t={t} lang={lang} errorText={errorText} me={user.id} role={user.role} isAdmin={isAdmin}/>}
   </>;
   if (pending) return <section className="panel auth">
     <h2>{t('finish')}</h2>

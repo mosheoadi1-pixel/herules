@@ -19,8 +19,9 @@ import { AUCTION_LIMITS, highestBid, settleAuction, type AuctionOutcome } from '
 import { hrMode } from './mode.ts';
 import { pkcePair, randomKey, type PublicIdentityProvider, type PublicProvider } from './public-auth.ts';
 import { VERIFICATION_CONSENT_VERSION } from '../src/verification-consent.ts';
-import { VERIFICATION_ATTEMPTS_PER_DAY, VERIFICATION_MEDIA_MAX_ITEMS, decodeImage, discardMedia, hasVerificationConsent, purgeExpiredVerificationMedia, retentionMs, storeMedia, verificationDirectory, type PublicVerifier, type PublicVerifierResult } from './public-verification.ts';
+import { VERIFICATION_ATTEMPTS_PER_DAY, VERIFICATION_MEDIA_MAX_ITEMS, decodeImage, discardMedia, hasVerificationConsent, purgeExpiredVerificationMedia, requireVerified, retentionMs, storeMedia, verificationDirectory, type PublicVerifier, type PublicVerifierResult } from './public-verification.ts';
 import { adminHashFromEnv, isPublicAdmin, publicEmailHash } from './public-admin.ts';
+import { ROOM_PAGE_MAX, ROOM_POSTS_PER_TEN_MINUTES, roomBody, roomHidden, roomHiddenIds, roomMessageSql, roomView } from './public-room.ts';
 const scrypt = promisify(scryptCallback);
 const hash = (v: string) => createHash('sha256').update(v).digest('hex');
 const text = z.string().trim().min(1).max(4000);
@@ -162,6 +163,7 @@ export async function createApp(pool: Pool, origin: string, providers: Partial<R
   await pool.query(await readFile(new URL('../db/006-public-accounts.sql', import.meta.url), 'utf8'));
   await pool.query(await readFile(new URL('../db/007-public-verification.sql', import.meta.url), 'utf8'));
   await pool.query(await readFile(new URL('../db/008-public-admin.sql', import.meta.url), 'utf8'));
+  await pool.query(await readFile(new URL('../db/009-public-room.sql', import.meta.url), 'utf8'));
   const app = express(); app.disable('x-powered-by');
   app.set('trust proxy',process.env.TRUST_PROXY?.split(',').map(v=>v.trim())||false);
   // Public mode shows reviewer images as blob: object URLs; private mode keeps its existing policy.
@@ -405,6 +407,134 @@ export async function createApp(pool: Pool, origin: string, providers: Partial<R
         return r.rows[0];
       });
       res.json({ verification: verificationView(row) });
+    });
+    // General room. Only verified users read or post. Doms post, optionally addressed to a verified sub; subs only read.
+    const roomUser = async (req: Request) => {
+      const user = await signedPublic(req);
+      requireVerified({ status: user.verified_at ? 'verified' : 'pending_verification' });
+      return user;
+    };
+    app.post('/api/public/room/messages', async (req,res) => {
+      await rate(req,'room-post',120);
+      const user = await roomUser(req);
+      if (user.role !== 'dom') fail(403,'Only doms can post in the room');
+      const b = z.object({ body: roomBody, targetNickname: z.string().trim().min(1).max(20).optional(), idempotencyKey: uuid.optional() }).parse(req.body);
+      const targetKey = b.targetNickname?.toLowerCase();
+      const message = await transaction(async c => {
+        // Room writes are serialised so event seq order matches commit order for SSE and polling readers.
+        await c.query("SELECT pg_advisory_xact_lock(hashtext('public-room'))");
+        if (b.idempotencyKey) {
+          const prior = (await c.query(`${roomMessageSql} WHERE m.author_id=$1 AND m.idempotency_key=$2`, [user.id, b.idempotencyKey])).rows[0];
+          if (prior) {
+            if (prior.body !== b.body || (prior.target_nickname ? prior.target_nickname.toLowerCase() : undefined) !== targetKey) fail(409,'Idempotency key was used for a different message');
+            return prior;
+          }
+        }
+        const recent = (await c.query("SELECT count(*)::int AS n FROM room_messages WHERE author_id=$1 AND created_at>now()-interval '10 minutes'", [user.id])).rows[0].n;
+        if (recent >= ROOM_POSTS_PER_TEN_MINUTES) fail(429,'Too many posts; try again in ten minutes');
+        let targetId: string | null = null;
+        if (targetKey !== undefined) {
+          const target = (await c.query("SELECT t.id FROM public_users t WHERE t.nickname_key=$1 AND t.role='sub' AND t.verified_at IS NOT NULL AND NOT EXISTS (SELECT 1 FROM room_blocks k WHERE (k.blocker_id=$2 AND k.blocked_id=t.id) OR (k.blocker_id=t.id AND k.blocked_id=$2))", [targetKey, user.id])).rows[0] ?? fail(404,'Recipient unavailable');
+          targetId = target.id as string;
+        }
+        const id = randomUUID();
+        await c.query('INSERT INTO room_messages(id,author_id,target_id,body,idempotency_key) VALUES($1,$2,$3,$4,$5)', [id, user.id, targetId, b.body, b.idempotencyKey ?? null]);
+        return (await c.query(`${roomMessageSql} WHERE m.id=$1`, [id])).rows[0];
+      });
+      res.json({ message: roomView(message) });
+    });
+    app.get('/api/public/room', async (req,res) => {
+      await rate(req,'room-read',300);
+      const user = await roomUser(req);
+      const q = z.object({ after: z.coerce.number().int().min(0).max(Number.MAX_SAFE_INTEGER).optional(), limit: z.coerce.number().int().min(1).max(ROOM_PAGE_MAX).default(50) }).parse(req.query);
+      // Without a cursor the room opens on its latest messages; with one, it returns what came after that seq.
+      const rows = q.after === undefined
+        ? (await pool.query(`SELECT * FROM (${roomMessageSql} ORDER BY m.seq DESC LIMIT $1) latest ORDER BY latest.seq`, [q.limit])).rows
+        : (await pool.query(`${roomMessageSql} WHERE m.seq>$1 ORDER BY m.seq LIMIT $2`, [q.after, q.limit])).rows;
+      const hidden = await roomHiddenIds(pool, user.id);
+      const messages = rows.filter(row => !roomHidden(row, hidden)).map(roomView);
+      const cursor = rows.length ? Number(rows[rows.length - 1].seq) : (q.after ?? 0);
+      res.json({ messages, cursor, hasMore: q.after !== undefined && rows.length === q.limit });
+    });
+    app.get('/api/public/events', async (req,res) => {
+      await rate(req,'room-events',60);
+      await roomUser(req);
+      const last = req.get('Last-Event-ID');
+      let cursor = last && /^\d{1,15}$/.test(last) ? Number(last) : Number((await pool.query('SELECT COALESCE(max(seq),0) AS seq FROM room_messages')).rows[0].seq);
+      res.set({ 'Content-Type': 'text/event-stream', Connection: 'keep-alive', 'X-Accel-Buffering': 'no' });
+      res.flushHeaders();
+      res.write('retry: 3000\n\n');
+      let closed = false, pumping = false;
+      const stop = () => { closed = true; clearInterval(timer); clearInterval(heartbeat); };
+      // Each open stream checks the table every two seconds. Re-authenticates each pass, so a sign-out ends the stream.
+      const pump = async () => {
+        if (closed || pumping) return;
+        pumping = true;
+        try {
+          const viewer = await roomUser(req);
+          const hidden = await roomHiddenIds(pool, viewer.id);
+          let rows: any[];
+          do {
+            rows = (await pool.query(`${roomMessageSql} WHERE m.seq>$1 ORDER BY m.seq LIMIT 200`, [cursor])).rows;
+            for (const row of rows) {
+              cursor = Number(row.seq);
+              if (!roomHidden(row, hidden)) res.write(`id: ${cursor}\nevent: room\ndata: ${JSON.stringify(roomView(row))}\n\n`);
+            }
+          } while (rows.length === 200 && !closed);
+        } catch { stop(); res.end(); }
+        finally { pumping = false; }
+      };
+      const timer = setInterval(() => void pump(), 2000);
+      const heartbeat = setInterval(() => { if (!closed) res.write(': heartbeat\n\n'); }, 25000);
+      res.on('close', stop);
+      void pump();
+    });
+    app.post('/api/public/room/messages/:id/report', async (req,res) => {
+      await rate(req,'room-report',60);
+      const user = await roomUser(req);
+      const id = uuid.parse(req.params.id);
+      const b = z.object({ reason: z.string().trim().min(1).max(300) }).parse(req.body);
+      const message = (await pool.query(`${roomMessageSql} WHERE m.id=$1`, [id])).rows[0];
+      if (!message || message.removed_at || roomHidden(message, await roomHiddenIds(pool, user.id))) fail(404,'Message unavailable');
+      if (message.author_id === user.id) fail(400,'You cannot report your own message');
+      // One report per user per message; a repeat is accepted and changes nothing.
+      await pool.query('INSERT INTO room_reports(id,message_id,reporter_id,reason) VALUES($1,$2,$3,$4) ON CONFLICT(message_id,reporter_id) DO NOTHING', [randomUUID(), id, user.id, b.reason]);
+      res.json({ reported: true });
+    });
+    app.post('/api/public/room/blocks', async (req,res) => {
+      await rate(req,'room-block',60);
+      const user = await roomUser(req);
+      const b = z.object({ userId: uuid.optional(), nickname: z.string().trim().min(1).max(20).optional() }).refine(v => (v.userId === undefined) !== (v.nickname === undefined), 'Give either userId or nickname').parse(req.body);
+      const target = (await pool.query(`SELECT id FROM public_users WHERE ${b.userId !== undefined ? 'id=$1' : 'nickname_key=$1'}`, [b.userId ?? b.nickname!.toLowerCase()])).rows[0] ?? fail(404,'Recipient unavailable');
+      if (target.id === user.id) fail(400,'You cannot block yourself');
+      await pool.query('INSERT INTO room_blocks(blocker_id,blocked_id) VALUES($1,$2) ON CONFLICT DO NOTHING', [user.id, target.id]);
+      res.json({ blocked: true, userId: target.id });
+    });
+    app.delete('/api/public/room/blocks/:userId', async (req,res) => {
+      await rate(req,'room-block',60);
+      const user = await roomUser(req);
+      const target = uuid.parse(req.params.userId);
+      await pool.query('DELETE FROM room_blocks WHERE blocker_id=$1 AND blocked_id=$2', [user.id, target]);
+      res.json({ blocked: false, userId: target });
+    });
+    app.post('/api/public/admin/room/messages/:id/remove', async (req,res) => {
+      const actor = await reviewer(req);
+      const id = uuid.parse(req.params.id);
+      const b = z.object({ reason: z.string().trim().min(1).max(300) }).parse(req.body);
+      const row = await transaction(async c => {
+        await c.query("SELECT pg_advisory_xact_lock(hashtext('public-room'))");
+        const message = (await c.query('SELECT removed_at FROM room_messages WHERE id=$1 FOR UPDATE', [id])).rows[0] ?? fail(404,'Message unavailable');
+        if (message.removed_at) fail(409,'Message already removed');
+        await c.query("UPDATE room_messages SET removed_at=now(),removed_by=$2,seq=nextval('room_events_seq') WHERE id=$1", [id, actor.id]);
+        await c.query('INSERT INTO public_admin_audit(id,actor_id,action,target_message_id,reason) VALUES($1,$2,$3,$4,$5)', [randomUUID(), actor.id, 'room-remove', id, b.reason]);
+        return (await c.query(`${roomMessageSql} WHERE m.id=$1`, [id])).rows[0];
+      });
+      res.json({ message: roomView(row) });
+    });
+    app.get('/api/public/admin/room/reports', async (req,res) => {
+      await reviewer(req);
+      const rows = (await pool.query('SELECT m.id, m.body, m.removed_at, a.nickname AS author_nickname, t.nickname AS target_nickname, count(r.id)::int AS report_count, array_agg(r.reason ORDER BY r.created_at) AS reasons, max(r.created_at) AS last_reported_at FROM room_messages m JOIN room_reports r ON r.message_id=m.id JOIN public_users a ON a.id=m.author_id LEFT JOIN public_users t ON t.id=m.target_id GROUP BY m.id, a.nickname, t.nickname ORDER BY count(r.id) DESC, max(r.created_at) DESC LIMIT 100')).rows;
+      res.json({ reports: rows.map(row => ({ id: row.id, body: row.removed_at ? null : row.body, removed: row.removed_at !== null, nickname: row.author_nickname, targetNickname: row.target_nickname, reportCount: row.report_count, reasons: row.reasons, lastReportedAt: row.last_reported_at })) });
     });
   }
   const listeners = new Map<string,Set<Response>>();
