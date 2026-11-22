@@ -368,7 +368,7 @@ export async function createApp(pool: Pool, origin: string, providers: Partial<R
       const reason = String(outcome.reason ?? '').slice(0, 300);
       const decided = result !== 'review';
       const row = await transaction(async c => {
-        const r = await c.query('UPDATE public_verifications SET status=$2,reason=$3,decided_at=$4,purge_after=$5 WHERE id=$1 RETURNING id,method,status,reason,created_at,decided_at', [id, result, reason, decided ? new Date() : null, decided ? new Date(Date.now() + verificationRetention) : null]);
+        const r = await c.query('UPDATE public_verifications SET status=$2,reason=$3,decided_at=$4,purge_after=$5 WHERE id=$1 RETURNING id,method,status,reason,created_at,decided_at', [id, result, reason, decided ? new Date() : null, result === 'passed' ? new Date(Date.now() + verificationRetention) : null]);
         if (result === 'passed') await c.query('UPDATE public_users SET verified_at=COALESCE(verified_at,now()) WHERE id=$1', [user.id]);
         return r.rows[0];
       });
@@ -376,7 +376,7 @@ export async function createApp(pool: Pool, origin: string, providers: Partial<R
     });
     app.get('/api/public/admin/reviews', async (req,res) => {
       await reviewer(req);
-      const rows = (await pool.query("SELECT v.id,v.method,v.status,v.reason,v.created_at,v.decided_at,u.nickname FROM public_verifications v JOIN public_users u ON u.id=v.public_user_id WHERE v.status IN ('review','failed') ORDER BY v.created_at")).rows;
+      const rows = (await pool.query("SELECT v.id,v.method,v.status,v.reason,v.created_at,v.decided_at,u.nickname FROM public_verifications v JOIN public_users u ON u.id=v.public_user_id WHERE v.status IN ('review','failed') AND v.reviewer_id IS NULL ORDER BY v.created_at")).rows;
       res.json({ reviews: rows.map(row => ({ ...verificationView(row), nickname: row.nickname })) });
     });
     app.get('/api/public/admin/reviews/:id/media', async (req,res) => {

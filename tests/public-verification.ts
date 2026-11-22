@@ -142,6 +142,8 @@ try {
   assert.equal(failed.status,'pending_verification');
   assert.equal(await isVerified(cara.id),false,'a failed check does not verify');
   const caraVerification=failed.verification.id as string;
+  assert.equal((await pool.query('SELECT purge_after FROM public_verifications WHERE id=$1',[caraVerification])).rows[0].purge_after,null,'an automatic failure has no purge timer until an admin decides');
+  assert.ok(existsSync(join(storage,caraVerification,'0.jpg')),'an automatic failure keeps its media');
 
   outcome={result:'review',reason:'needs a person'};
   const deeImages=[jpeg(96)];
@@ -203,8 +205,13 @@ try {
   assert.equal(await isVerified(cara.id),false,'reject keeps the user unverified');
   assert.equal(await statusOf(base,cara),'pending_verification');
   assert.equal((await pool.query("SELECT count(*)::int AS n FROM public_admin_audit WHERE action='reject' AND target_verification_id=$1",[caraVerification])).rows[0].n,1,'reject writes an audit row');
+  assert.ok((await pool.query('SELECT purge_after FROM public_verifications WHERE id=$1',[caraVerification])).rows[0].purge_after.getTime()>Date.now(),'an admin decision on a failed item starts the retention timer');
+  const queued=(await body(await get(base,'/public/admin/reviews',nova.cookie))).reviews.map((item:any)=>item.id);
+  assert.ok(!queued.includes(caraVerification),'a decided failed item leaves the admin queue');
+  assert.ok(!queued.includes(deeVerification),'a decided review item leaves the admin queue');
 
   await pool.query("INSERT INTO public_verifications(id,public_user_id,method,status) VALUES($1,$2,'id_document','pending')",[randomUUID(),gus.id]);
+  assert.equal(await purgeExpiredVerificationMedia(pool,new Date(),storage),0,'nothing is purged before its purge time');
   await pool.query("UPDATE public_verifications SET decided_at=now()-interval '8 days', purge_after=now()-interval '1 day' WHERE id=ANY($1::uuid[])",[[bobVerification,caraVerification]]);
   assert.equal(await purgeExpiredVerificationMedia(pool,new Date(),storage),2,'only decided items past their window are purged');
   assert.equal((await pool.query("SELECT status,purge_after FROM public_verifications WHERE id=$1",[bobVerification])).rows[0].status,'purged');
@@ -214,6 +221,14 @@ try {
   assert.ok(existsSync(join(storage,deeVerification,'0.jpg')),'a decision inside the window keeps its media');
   assert.ok(existsSync(join(storage,thrown.verification.id,'0.jpg')),'review items keep their media until decided');
   assert.equal((await pool.query("SELECT status FROM public_verifications WHERE public_user_id=$1",[gus.id])).rows[0].status,'pending','pending items are never purged');
+  const hank=await signUp(base,'hank','Hank Moss');
+  await consent(base,hank);
+  outcome={result:'failed',reason:'document unreadable'};
+  const hankVerification=(await body(await submit(base,hank,'id_document',[dataUrl('image/jpeg',jpeg())]))).verification.id as string;
+  assert.equal(await purgeExpiredVerificationMedia(pool,new Date(Date.now()+400*24*3600*1000),storage),1,'a far-future purge removes only the approved item, never an undecided failure');
+  assert.equal(existsSync(join(storage,deeVerification)),false,'the approved item is purged once its window has passed');
+  assert.ok(existsSync(join(storage,hankVerification,'0.jpg')),'an undecided automatic failure keeps its files after a far-future purge');
+  assert.equal((await pool.query('SELECT count(*)::int AS n FROM public_verification_media WHERE verification_id=$1',[hankVerification])).rows[0].n,1,'an undecided automatic failure keeps its media rows');
   assert.equal(await purgeExpiredVerificationMedia(pool,new Date(),storage),0,'a second purge does nothing');
   const afterPurge=await body(await get(base,'/public/verification',bob.cookie));
   assert.equal(afterPurge.verification.status,'purged');
