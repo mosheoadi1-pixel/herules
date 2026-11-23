@@ -18,8 +18,8 @@ import { TROPHY_LIMIT, trophyEntries, type TrophyEntry, type TrophyPin, type Tro
 import { AUCTION_LIMITS, highestBid, settleAuction, type AuctionOutcome } from '../src/auctions.ts';
 import { hrMode } from './mode.ts';
 import { pkcePair, randomKey, type PublicIdentityProvider, type PublicProvider } from './public-auth.ts';
-import { VERIFICATION_CONSENT_VERSION } from '../src/verification-consent.ts';
-import { VERIFICATION_ATTEMPTS_PER_DAY, VERIFICATION_MEDIA_MAX_ITEMS, decodeImage, discardMedia, hasVerificationConsent, purgeExpiredVerificationMedia, requireVerified, retentionMs, storeMedia, verificationDirectory, type PublicVerifier, type PublicVerifierResult } from './public-verification.ts';
+import { CAMERA_CONSENT_VERSION, VERIFICATION_CONSENT_VERSION } from '../src/verification-consent.ts';
+import { VERIFICATION_ATTEMPTS_PER_DAY, VERIFICATION_MEDIA_MAX_ITEMS, cameraLivenessSchema, decodeImage, discardMedia, hasConsentVersion, hasVerificationConsent, purgeExpiredVerificationMedia, requireVerified, retentionMs, storeMedia, verificationDirectory, type PublicVerifier, type PublicVerifierResult } from './public-verification.ts';
 import { adminHashFromEnv, isPublicAdmin, publicEmailHash } from './public-admin.ts';
 import { ROOM_PAGE_MAX, ROOM_POSTS_PER_TEN_MINUTES, roomBody, roomHidden, roomHiddenIds, roomMessageSql, roomView } from './public-room.ts';
 const scrypt = promisify(scryptCallback);
@@ -150,7 +150,8 @@ function runNight(s: Session, mood: 'soft'|'playful'|'strict', lang: 'he'|'en', 
   const counts=s.moodCounts??={soft:0,playful:0,strict:0};counts[mood]++;
   return night;
 }
-export async function createApp(pool: Pool, origin: string, providers: Partial<Record<PublicProvider, PublicIdentityProvider>> = {}, verifier?: PublicVerifier) {
+// cameraEnabled is the IDSWYFT_CAMERA_ENABLED flag (read by server/index.ts). cameraConsentVersion is a test seam; production uses the shared constant.
+export async function createApp(pool: Pool, origin: string, providers: Partial<Record<PublicProvider, PublicIdentityProvider>> = {}, verifier?: PublicVerifier, options: { cameraEnabled?: boolean; cameraConsentVersion?: string | null } = {}) {
   const mode = hrMode();
   if (mode === 'public') adminHashFromEnv();
   const configured = new URL(origin);
@@ -316,6 +317,8 @@ export async function createApp(pool: Pool, origin: string, providers: Partial<R
     app.post('/api/public/logout', async (req,res) => { await pool.query('DELETE FROM public_sessions WHERE hash=$1',[hash(publicTokenOf(req))]); res.clearCookie('hr_public_session',{ path:'/' }); res.json({ok:true}); });
     const verificationDir = verificationDirectory();
     const verificationRetention = retentionMs();
+    const cameraEnabled = options.cameraEnabled === true;
+    const cameraConsentVersion = options.cameraConsentVersion === undefined ? CAMERA_CONSENT_VERSION : options.cameraConsentVersion;
     const verificationView = (row: any) => row ? { id: row.id, method: row.method, status: row.status, reason: row.reason ?? null, createdAt: row.created_at, decidedAt: row.decided_at ?? null } : null;
     const reviewer = async (req: Request) => {
       await rate(req,'public-admin',120);
@@ -329,7 +332,8 @@ export async function createApp(pool: Pool, origin: string, providers: Partial<R
     app.post('/api/public/consent', async (req,res) => {
       await rate(req,'public-consent',30);
       const user = await signedPublic(req);
-      const b = z.object({ kind: z.literal('verification'), textVersion: z.literal(VERIFICATION_CONSENT_VERSION) }).parse(req.body);
+      const versions = [VERIFICATION_CONSENT_VERSION, ...(cameraConsentVersion ? [cameraConsentVersion] : [])] as [string, ...string[]];
+      const b = z.object({ kind: z.literal('verification'), textVersion: z.enum(versions) }).parse(req.body);
       await transaction(async c => {
         await c.query('SELECT id FROM public_users WHERE id=$1 FOR UPDATE', [user.id]);
         await c.query('INSERT INTO public_consents(id,public_user_id,kind,text_version,ip_hash) SELECT $1,$2,$3,$4,$5 WHERE NOT EXISTS (SELECT 1 FROM public_consents WHERE public_user_id=$2 AND kind=$3 AND text_version=$4)', [randomUUID(), user.id, b.kind, b.textVersion, hash(req.ip ?? '')]);
@@ -339,14 +343,20 @@ export async function createApp(pool: Pool, origin: string, providers: Partial<R
     app.get('/api/public/verification', async (req,res) => {
       const user = await signedPublic(req);
       const latest = (await pool.query('SELECT id,method,status,reason,created_at,decided_at FROM public_verifications WHERE public_user_id=$1 ORDER BY created_at DESC LIMIT 1', [user.id])).rows[0];
-      res.json({ status: user.verified_at ? 'verified' : 'pending_verification', consented: await hasVerificationConsent(pool, user.id), verification: verificationView(latest) });
+      res.json({ status: user.verified_at ? 'verified' : 'pending_verification', consented: await hasVerificationConsent(pool, user.id), cameraEnabled: cameraEnabled && cameraConsentVersion !== null, verification: verificationView(latest) });
     });
     app.post('/api/public/verification', async (req,res) => {
       await rate(req,'public-verification',60);
       const user = await signedPublic(req);
       const adapter = verifier ?? fail(503,'verification not configured');
       if (!(await hasVerificationConsent(pool, user.id))) fail(409,'Consent required');
-      const b = z.object({ method: z.enum(['id_document','camera_age']), media: z.array(z.string().max(7500000)).min(1).max(VERIFICATION_MEDIA_MAX_ITEMS) }).parse(req.body);
+      const b = z.object({ method: z.enum(['id_document','camera_age']), media: z.array(z.string().max(7500000)).min(1).max(VERIFICATION_MEDIA_MAX_ITEMS), liveness: cameraLivenessSchema.optional() }).parse(req.body);
+      const camera = cameraEnabled && b.method === 'camera_age';
+      if (camera) {
+        const cameraVersion = cameraConsentVersion ?? fail(409,'camera consent not available yet');
+        if (!(await hasConsentVersion(pool, user.id, cameraVersion))) fail(409,'Consent required');
+        if (b.media.length !== 2 || !b.liveness) fail(400,'Camera check needs a front photo, a live selfie and liveness frames');
+      }
       const images = b.media.map(decodeImage);
       const id = randomUUID();
       await transaction(async c => {
@@ -356,15 +366,19 @@ export async function createApp(pool: Pool, origin: string, providers: Partial<R
         if (recent >= VERIFICATION_ATTEMPTS_PER_DAY) fail(429,'Too many verification attempts; try again tomorrow');
         await c.query("INSERT INTO public_verifications(id,public_user_id,method,status) VALUES($1,$2,$3,'pending')", [id, user.id, b.method]);
         try {
+          // Camera checks store the front and the selfie only; the liveness frames are never written.
           const paths = await storeMedia(verificationDir, id, images);
-          for (const path of paths) await c.query('INSERT INTO public_verification_media(id,verification_id,kind,storage_path) VALUES($1,$2,$3,$4)', [randomUUID(), id, b.method === 'id_document' ? 'document' : 'selfie', path]);
+          for (const [index, path] of paths.entries()) {
+            const kind = b.method === 'id_document' || (camera && index === 0) ? 'document' : 'selfie';
+            await c.query('INSERT INTO public_verification_media(id,verification_id,kind,storage_path) VALUES($1,$2,$3,$4)', [randomUUID(), id, kind, path]);
+          }
         } catch (error) {
           await discardMedia(verificationDir, id);
           throw error;
         }
       });
       let outcome: PublicVerifierResult;
-      try { outcome = await adapter.check({ method: b.method, media: images.map(image => image.bytes) }); }
+      try { outcome = await adapter.check({ method: b.method, media: images.map(image => image.bytes), liveness: camera ? b.liveness : undefined }); }
       catch { outcome = { result: 'review', reason: 'automatic check unavailable' }; }
       const result = outcome.result === 'passed' || outcome.result === 'failed' ? outcome.result : 'review';
       const reason = String(outcome.reason ?? '').slice(0, 300);

@@ -1,13 +1,31 @@
 import { mkdir, rm, writeFile } from 'node:fs/promises';
 import { join, resolve } from 'node:path';
 import type { Pool } from 'pg';
+import { z } from 'zod';
 import { VERIFICATION_CONSENT_VERSION } from '../src/verification-consent.ts';
 
 export type PublicVerificationMethod = 'id_document' | 'camera_age';
 export type PublicVerifierResult = { result: 'passed' | 'failed' | 'review'; reason: string };
+
+export const LIVENESS_PHASES = ['turn1_start', 'turn1_peak', 'turn1_return', 'turn_start', 'turn_peak', 'turn_return'] as const;
+const FRAME_MAX_BYTES = 1024 * 1024;
+// Head-turn frames captured in the browser. Used for the automatic check only; never stored.
+export const cameraLivenessSchema = z.strictObject({
+  challenge_type: z.literal('head_turn'),
+  challenge_direction: z.enum(['left', 'right']),
+  frames: z.array(z.strictObject({
+    frame_base64: z.string().max(Math.ceil(FRAME_MAX_BYTES / 3) * 4).regex(/^[A-Za-z0-9+/]+={0,2}$/).refine(value => Buffer.from(value, 'base64').length <= FRAME_MAX_BYTES, 'Frame too large'),
+    timestamp: z.number().int().min(0).max(60000),
+    phase: z.enum(LIVENESS_PHASES),
+  })).length(6),
+  start_timestamp: z.literal(0),
+  end_timestamp: z.number().int().min(0).max(60000),
+});
+export type CameraLiveness = z.infer<typeof cameraLivenessSchema>;
+
 // The automatic check. It only decides; storage, status and audit stay in app.ts.
 export interface PublicVerifier {
-  check(input: { method: PublicVerificationMethod; media: Buffer[] }): Promise<PublicVerifierResult>;
+  check(input: { method: PublicVerificationMethod; media: Buffer[]; liveness?: CameraLiveness }): Promise<PublicVerifierResult>;
 }
 
 export const VERIFICATION_MEDIA_MAX_ITEMS = 3;
@@ -71,10 +89,12 @@ export async function discardMedia(dir: string, verificationId: string) {
   await rm(join(dir, verificationId), { recursive: true, force: true });
 }
 
-export async function hasVerificationConsent(pool: Pool, userId: string) {
-  const r = await pool.query('SELECT 1 FROM public_consents WHERE public_user_id=$1 AND kind=$2 AND text_version=$3 LIMIT 1', [userId, 'verification', VERIFICATION_CONSENT_VERSION]);
+export async function hasConsentVersion(pool: Pool, userId: string, version: string) {
+  const r = await pool.query('SELECT 1 FROM public_consents WHERE public_user_id=$1 AND kind=$2 AND text_version=$3 LIMIT 1', [userId, 'verification', version]);
   return r.rows.length > 0;
 }
+
+export const hasVerificationConsent = (pool: Pool, userId: string) => hasConsentVersion(pool, userId, VERIFICATION_CONSENT_VERSION);
 
 // Deletes files and media rows for decided verifications past their purge time. The verification row stays
 // with status 'purged' and keeps its method, decision date, reviewer and reason.

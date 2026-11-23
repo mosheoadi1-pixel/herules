@@ -9,8 +9,9 @@ if(!process.env.DATABASE_URL)throw new Error('Set DATABASE_URL; see docs/DB-SETU
 const pool=new pg.Pool({connectionString:process.env.DATABASE_URL});
 const google=googleProviderFromEnv(process.env);
 const idswyftKey=process.env.IDSWYFT_API_KEY?.trim();
-const verifier=idswyftKey?createIdswyftVerifier({apiKey:idswyftKey,baseUrl:process.env.IDSWYFT_BASE_URL||'https://api.idswyft.app',sandbox:process.env.IDSWYFT_SANDBOX==='true'}):undefined;
-const app=await createApp(pool,process.env.APP_ORIGIN||`http://localhost:${port}`,google?{google}:{},verifier);
+const cameraEnabled=process.env.IDSWYFT_CAMERA_ENABLED==='true';
+const verifier=idswyftKey?createIdswyftVerifier({apiKey:idswyftKey,baseUrl:process.env.IDSWYFT_BASE_URL||'https://api.idswyft.app',sandbox:process.env.IDSWYFT_SANDBOX==='true',cameraEnabled}):undefined;
+const app=await createApp(pool,process.env.APP_ORIGIN||`http://localhost:${port}`,google?{google}:{},verifier,{cameraEnabled});
 if(process.env.HR_RESET_GAME_ON_START==='1')await resetGame(pool);
 app.use('/legacy',express.static('legacy'));
 app.use(express.static('public',{setHeaders(res,path){if(path.endsWith('sw.js'))res.setHeader('Cache-Control','no-cache');}}));
