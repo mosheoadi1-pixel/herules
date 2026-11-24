@@ -219,7 +219,7 @@ export const publicCopy:Record<string,[string,string]>={
   playTotal:['נקודות שנצברו בחשבון','Lifetime earned points'],
   playAll:['כל המפגשים שלי','All my sessions'],
   playBackChat:['חזרה להודעות','Back to messages'],
-  playEmpty:['מפגש יופיע כאן לאחר ששני הצדדים אישרו אותו.','A session appears here once both people have agreed.'],
+  playEmpty:['המפגש יופיע כאן לאחר קבלת ההזמנה בשיחה פרטית. הסכמה למשחק ניתנת בנפרד בתוך המפגש.','A session appears here after its invitation is accepted in a private conversation. Opting in to play happens separately inside the session.'],
   playNewer:['מפגשים חדשים יותר','Newer sessions'],
   playOlder:['מפגשים קודמים','Older sessions'],
   playOpen:['פתוח למשחק','Open for play'],
