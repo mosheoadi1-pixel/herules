@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">HER RULES</string>
+    <string name="file_chooser_title">בחרו תמונה / Choose image</string>
+    <string name="ssl_error">חיבור לא מאובטח. בדקו את האינטרנט ונסו שוב. / Insecure connection. Check your connection and try again.</string>
+</resources>

@@ -1,0 +1,37 @@
+plugins {
+    id 'com.android.application'
+}
+
+android {
+    namespace 'com.herules.app'
+    compileSdk 35
+
+    defaultConfig {
+        applicationId 'com.herules.app'
+        minSdk 23
+        targetSdk 35
+        versionCode 1
+        versionName '1.0'
+
+        // Exact origin only. The server also requires APP_ORIGIN without a path or trailing slash.
+        buildConfigField 'String', 'APP_URL', '"https://herules.onrender.com"'
+        buildConfigField 'String', 'APP_HOST', '"herules.onrender.com"'
+    }
+
+    buildTypes {
+        debug {
+            debuggable true
+            applicationIdSuffix '.debug'
+            versionNameSuffix '-debug'
+        }
+        release {
+            debuggable false
+            minifyEnabled false
+        }
+    }
+
+    compileOptions {
+        sourceCompatibility JavaVersion.VERSION_17
+        targetCompatibility JavaVersion.VERSION_17
+    }
+}

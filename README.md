@@ -36,6 +36,10 @@ Database process startup/shutdown details: [docs/DB-SETUP.md](docs/DB-SETUP.md).
 
 The server accepts same-origin requests through **any address serving the game**, including localhost, 127.0.0.1, LAN IPs and domains, without adding each address to a list. Unrelated websites, missing/null origins and mismatched ports remain rejected. `APP_ORIGIN` also remains an explicitly trusted canonical origin. Development Vite host filtering permits these aliases. Restart `npm.cmd run dev` after updating the backend. For another device use the PC's reachable LAN address and app port; localhost on a phone refers to the phone. Firewalls/routing must permit access. Production aliases require HTTPS; configure `TRUST_PROXY` only for a trusted TLS proxy so Express can determine the actual external host/protocol. Cookies are per host: switching addresses does not transfer guest identity.
 
+## Android APK
+
+The `apk` branch adds a native Android WebView shell in [`android/`](android/README.md). It loads the deployed HTTPS origin `https://herules.onrender.com` and is not a local Node/PostgreSQL server. A GitHub Actions workflow builds an installable unsigned debug APK; signed release builds still require a keystore. See `android/README.md` for build steps, camera/file-upload support and sign-in limitations.
+
 ## Import ideas from CSV
 
 From PowerShell in the project directory, with the database running:

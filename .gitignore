@@ -6,3 +6,10 @@ node_modules/
 npm-debug.log*
 dist/
 test-results/
+
+# Android shell
+android/.gradle/
+android/build/
+android/app/build/
+android/local.properties
+*.apk
