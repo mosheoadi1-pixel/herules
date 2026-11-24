@@ -24,7 +24,7 @@ import { adminHashFromEnv, isPublicAdmin, publicEmailHash } from './public-admin
 import { MAIN_ROOM, ROOM_PAGE_MAX, ROOM_POSTS_PER_TEN_MINUTES, activeRoomGrant, messagingNickname, messagingVisible, refreshMessaging, roomBody, roomHiddenIds, roomId, roomMessageSql, roomView } from './public-room.ts';
 import { CONVERSATION_COOLDOWN, CONVERSATION_MESSAGES_PER_TEN_MINUTES, CONVERSATION_PAGE_MAX, conversationBody, conversationMessageSql, conversationMessageView, conversationRowSql, conversationView, visibleConversation } from './public-conversations.ts';
 import { sessionAction, sessionActionExists, sessionProposal, sessionStart, sessionTransition, sessionView, sessionVisibleSql, validSessionStart } from './public-sessions.ts';
-import { missionTransition, missionView, playAction, playSelect, playView, playVisibleSql, PLAY_MISSION_LIMIT, PLAY_PAGE_SIZE } from './public-play.ts';
+import { pairedAgreement, pairedAgreementVersion, pairedGameBody, pairedGameOps, missionTransition, missionView, playAction, playSelect, playView, playVisibleSql, PLAY_MISSION_LIMIT, PLAY_PAGE_SIZE, type PlayMissionState } from './public-play.ts';
 const scrypt = promisify(scryptCallback);
 const hash = (v: string) => createHash('sha256').update(v).digest('hex');
 const text = z.string().trim().min(1).max(4000);
@@ -48,7 +48,7 @@ export type RewardRequest = Reward & {rewardId:string; status:'pending'|'approve
 export type Wish = {id:string; title:string; description:string; link?:string; cost?:number; createdAt:number};
 export type WishRequest = {id:string; wish:string; title:string; cost:number; status:'pending'|'approved'|'declined'; at:number};
 export type Proposal = { id: string; by: string; title: string; text: string; points: number; category?: string; at: number; status: 'pending'|'adopted'|'declined'; missionId?: string };
-export type Session = { id: string; status: string; terms: string; revision: number; revisions: { revision: number; terms: string }[]; approvals: string[]; pauses: string[]; remaining: number; unlimited?: boolean; last: number; started: boolean; points: number; missions: Mission[]; rewards?: Reward[]; rewardRequests?: RewardRequest[]; sequence?: string[]; autoProgress?:boolean; persona?:'strict'|'playful'|'caring'; followups?:string[]; checkIns?: Record<string,CheckIn>; reflections?: Record<string,Reflection>; messages: {id:string; by:string; text:string; at:number}[]; history: { at:number; event:string; by:string; rewardRequestId?:string; outcome?:'approved'|'declined' }[]; inbox: {id:string; at:number; event:string; readBy:string[]}[]; herPoints?: number; proposals?: Proposal[]; wishes?: Wish[]; wishRequests?: WishRequest[]; commands?: {id:string;title:string;text:string;points:number}[]; notes?: {id:string;text:string;at:number}[]; whispers?: {id:string;text:string;at:number}[]; whisperSent?: number; spark?: { day: number; rerolls: number; dismissed: string[] }; seasonState?: {id:string;startsAt:number;days:number;stoppedAt?:number}; seasonProgress?: {id:string;done:number;total:number;running:boolean}; pins?: TrophyPin[]; trophies?: TrophyEntry[]; auctions?: Auction[]; nights?: {id:string;mood:'soft'|'playful'|'strict';at:number;missionIds:string[]}[]; moodCounts?: Record<'soft'|'playful'|'strict',number>; lastCareAt?: number; pace?: 1|2|3; eveningClosedAt?: number; savedEvenings?: {id:string;name:string;mood:'soft'|'playful'|'strict';steps:{he:string;en:string;points:number;minutesFromNow:number}[];createdAt:number}[]; chapterState?: { decree?: { mood: string; season?: string }; at?: number; cliffhanger?: { he: string; en: string } }; adoration?: { sippedFor?: string; grantedFor?: string; grantedAt?: number; sealedAt?: number; waiting?: number; ready?: number; last?: { id: string; kind: string; text: string; media?: string | null; at: number } } };
+export type Session = { id: string; status: string; terms: string; revision: number; revisions: { revision: number; terms: string; minutes?:number|null }[]; approvals: string[]; pauses: string[]; remaining: number; unlimited?: boolean; last: number; started: boolean; points: number; missions: Mission[]; rewards?: Reward[]; rewardRequests?: RewardRequest[]; sequence?: string[]; autoProgress?:boolean; persona?:'strict'|'playful'|'caring'; followups?:string[]; checkIns?: Record<string,CheckIn>; reflections?: Record<string,Reflection>; messages: {id:string; by:string; text:string; at:number}[]; history: { at:number; event:string; by:string; rewardRequestId?:string; outcome?:'approved'|'declined' }[]; inbox: {id:string; at:number; event:string; readBy:string[]}[]; herPoints?: number; proposals?: Proposal[]; wishes?: Wish[]; wishRequests?: WishRequest[]; commands?: {id:string;title:string;text:string;points:number}[]; notes?: {id:string;text:string;at:number}[]; whispers?: {id:string;text:string;at:number}[]; whisperSent?: number; spark?: { day: number; rerolls: number; dismissed: string[] }; seasonState?: {id:string;startsAt:number;days:number;stoppedAt?:number}; seasonProgress?: {id:string;done:number;total:number;running:boolean}; pins?: TrophyPin[]; trophies?: TrophyEntry[]; auctions?: Auction[]; nights?: {id:string;mood:'soft'|'playful'|'strict';at:number;missionIds:string[]}[]; moodCounts?: Record<'soft'|'playful'|'strict',number>; lastCareAt?: number; pace?: 1|2|3; eveningClosedAt?: number; savedEvenings?: {id:string;name:string;mood:'soft'|'playful'|'strict';steps:{he:string;en:string;points:number;minutesFromNow:number}[];createdAt:number}[]; chapterState?: { decree?: { mood: string; season?: string }; at?: number; cliffhanger?: { he: string; en: string } }; adoration?: { sippedFor?: string; grantedFor?: string; grantedAt?: number; sealedAt?: number; waiting?: number; ready?: number; last?: { id: string; kind: string; text: string; media?: string | null; at: number } } };
 const suspended = (s: Session) => s.pauses.length > 0;
 const terminal = (s: Session) => ['stopped','expired'].includes(s.status);
 function notice(s: Session, event: string, by: string, reward?:{rewardRequestId?:string;outcome?:'approved'|'declined';missionId?:string}) {
@@ -96,6 +96,21 @@ function advance(s: Session) {
 function newSession(terms: string, minutes?: number): Session {
   return {id:randomUUID(),status:'active',terms,revision:1,revisions:terms?[{revision:1,terms}]:[],approvals:[],pauses:[],remaining:minutes===undefined?0:minutes*60000,last:Date.now(),started:true,points:0,missions:[],messages:[],history:[],inbox:[],...(minutes===undefined?{unlimited:true}:{})};
 }
+function newPairedSession(id:string,terms:string):Session {
+  return {...newSession(terms),id,started:false,revisions:[{revision:1,terms,minutes:null}]};
+}
+function migratePairedMissions(s:Session,missions:any[],earned:number) {
+  const states:Record<PlayMissionState,string>={assigned:'pending',accepted:'acknowledged',submitted:'submitted',returned:'revision',approved:'approved',declined:'refused'};
+  s.points=earned;
+  s.herPoints=earned;
+  s.missions=missions.map(m=>{
+    const at=m.created_at.getTime();
+    return {id:m.id,revision:1,title:m.title,text:m.instructions,points:m.points,secret:false,completionStyle:'simple',
+      status:states[m.state as PlayMissionState],createdAt:at,deliveredAt:at,submissionVersion:m.version,
+      ...(m.approved_at?{approvedAt:m.approved_at.getTime()}:{}),
+      ...(m.return_reason?{returnReason:m.return_reason}:{})};
+  });
+}
 // Entering the game is its own session: whenever a pair loads state with nothing active, an unlimited session opens.
 async function ensureSession(c: PoolClient, u: User): Promise<Session | undefined> {
   const pair=u.pair_id; if (!pair) return undefined;
@@ -126,20 +141,22 @@ function trophySource(s: Session, shown: { id?: string; title?: string; text?: s
     reflection: id => s.reflections?.[id],
   };
 }
-function visible(s: Session, user: User) {
+function visible(s: Session, user: User, paired=false) {
   if(user.role==='wife')return {...s,seasonProgress:seasonProgressOf(s),trophies:trophyEntries(s.pins,user,trophySource(s,s.missions))};
   const hidden=new Set(s.missions.filter(m=>m.surprise&&!m.revealedAt).map(m=>m.id));
   // A queued non-secret surprise is sealed: he sees that something is coming and when, never its category. Secret items stay fully hidden until delivery.
   // Season packs are her plan: he sees each occurrence only once it is delivered.
   const missions:Partial<Mission>[]=s.missions.flatMap((m):Partial<Mission>[]=>{
+    if(paired&&!m.deliveredAt&&m.status!=='queued')return [];
     if(m.season&&!m.deliveredAt)return [];
     if((m.secret||m.surprise)&&!m.deliveredAt)return m.surprise&&!m.secret&&m.status==='queued'?[{id:m.id,revision:m.revision,status:'queued',surprise:true,sealed:true,revealsAt:m.scheduledAt}]:[];
     if(hidden.has(m.id))return [{id:m.id,revision:m.revision,status:m.status,surprise:true,deliveredAt:m.deliveredAt}];
-    if(m.replacementId&&hidden.has(m.replacementId)){const {replacementId,...rest}=m;return [rest];}
+    if(m.replacementId&&(hidden.has(m.replacementId)||(paired&&!s.missions.some(other=>other.id===m.replacementId&&other.deliveredAt)))){const {replacementId,...rest}=m;return [rest];}
     return [m];
   });
-  const allowed=(n:any)=>!n.missionId||!hidden.has(n.missionId);
-  return { ...s, commands:undefined, notes:undefined, whispers:undefined, whisperSent:(s.whispers??[]).length, spark:undefined, savedEvenings:undefined, chapterState:undefined, adoration:undefined, seasonProgress:seasonProgressOf(s), trophies:trophyEntries(s.pins,user,trophySource(s,missions)), pins:s.pins?.map(({ref,...pin})=>pin), missions, history:s.history.filter(allowed),inbox:s.inbox.filter(allowed), ...(s.sequence?{sequence:s.sequence.filter(id=>missions.some(m=>m.id===id))}:{}) };
+  const allowed=(n:any)=>!n.missionId||(!hidden.has(n.missionId)&&(!paired||missions.some(m=>m.id===n.missionId&&m.title!==undefined)));
+  return { ...s, commands:undefined, notes:undefined, whispers:undefined, whisperSent:(s.whispers??[]).length, spark:undefined, savedEvenings:undefined, chapterState:undefined, adoration:undefined, seasonProgress:seasonProgressOf(s), trophies:trophyEntries(s.pins,user,trophySource(s,missions)), pins:s.pins?.map(({ref,...pin})=>pin), missions, history:s.history.filter(allowed),inbox:s.inbox.filter(allowed), ...(s.sequence?{sequence:s.sequence.filter(id=>missions.some(m=>m.id===id))}:{}),
+    ...(paired?{nights:undefined,proposals:s.proposals?.map(({missionId,...p})=>missionId&&missions.some(m=>m.id===missionId&&m.title!==undefined)?{...p,missionId}:p)}:{}) };
 }
 function runNight(s: Session, mood: 'soft'|'playful'|'strict', lang: 'he'|'en', steps: z.infer<typeof nightStep>[]) {
   if(eveningClosed(s))fail(409,'Evening is closed');
@@ -172,6 +189,7 @@ export async function createApp(pool: Pool, origin: string, providers: Partial<R
   await pool.query(await readFile(new URL('../db/011-public-sessions.sql', import.meta.url), 'utf8'));
   await pool.query(await readFile(new URL('../db/012-public-messaging.sql', import.meta.url), 'utf8'));
   await pool.query(await readFile(new URL('../db/013-public-play.sql', import.meta.url), 'utf8'));
+  await pool.query(await readFile(new URL('../db/014-public-game.sql', import.meta.url), 'utf8'));
   const app = express(); app.disable('x-powered-by');
   app.set('trust proxy',process.env.TRUST_PROXY?.split(',').map(v=>v.trim())||false);
   // Public mode shows reviewer images as blob: object URLs; private mode keeps its existing policy.
@@ -916,7 +934,10 @@ export async function createApp(pool: Pool, origin: string, providers: Partial<R
         await checkSessionBudget(c, user.id);
         const updated = (await c.query(`UPDATE public_session_requests SET state=$2,counter_starts_at=COALESCE($3,counter_starts_at),
           updated_at=clock_timestamp() WHERE id=$1 RETURNING *`, [id, state, counter])).rows[0];
-        if (state === 'accepted') await c.query('INSERT INTO public_play_sessions(request_id) VALUES($1)', [id]);
+         if (state === 'accepted') {
+           await c.query('INSERT INTO public_play_sessions(request_id) VALUES($1)', [id]);
+           await c.query('INSERT INTO public_game_sessions(id,data) VALUES($1,$2)', [id,JSON.stringify(newPairedSession(id,updated.details))]);
+         }
         await recordSessionChange(c, id, user.id, state);
         const playId = (await c.query('SELECT request_id FROM public_play_sessions WHERE request_id=$1', [id])).rows[0]?.request_id;
         return sessionView({ ...updated, play_id: playId });
@@ -936,7 +957,10 @@ export async function createApp(pool: Pool, origin: string, providers: Partial<R
           AND ($1::timestamptz IS NULL OR (p.opened_at,p.request_id)<($1::timestamptz,$3::uuid))
           ORDER BY p.opened_at DESC,p.request_id DESC LIMIT $4`, [q.before ?? null,viewer.id,q.tie ?? null,PLAY_PAGE_SIZE + 1])).rows;
         const page = rows.slice(0, PLAY_PAGE_SIZE), last = page.at(-1);
-        const { points } = (await c.query('SELECT COALESCE(sum(points),0)::text AS points FROM public_play_awards WHERE recipient_id=$1', [viewer.id])).rows[0];
+         const { points } = (await c.query(`SELECT COALESCE(sum(points),0)::text AS points FROM (
+           SELECT points FROM public_play_awards WHERE recipient_id=$1
+           UNION ALL SELECT points FROM public_game_awards WHERE recipient_id=$1
+         ) AS earned`, [viewer.id])).rows[0];
         return { sessions: page.map(row => playView(row, viewer.id)), points,
           next: last && rows.length > PLAY_PAGE_SIZE ? { before: last.opened_cursor, tie: last.request_id } : null };
       }));
@@ -944,6 +968,121 @@ export async function createApp(pool: Pool, origin: string, providers: Partial<R
     const getPlay = async (c: PoolClient, id: string, viewerId: string, lock = false) =>
       (await c.query(`${playSelect} WHERE p.request_id=$1 AND ${playVisibleSql}
         ${lock ? 'FOR UPDATE OF c,r,p' : ''} FOR SHARE OF d,s`, [id, viewerId])).rows[0] ?? fail(404,'Play session unavailable');
+    async function loadPairedGame(c:PoolClient,row:any,viewerId:string) {
+      const {id,role,state}=playView(row,viewerId);
+      const u:User={id:viewerId,role:role==='dom'?'wife':'husband',pair_id:null,email:null,
+        nickname:role==='dom'?row.dom_nickname:row.sub_nickname};
+      const stored=(await c.query('SELECT data FROM public_game_sessions WHERE id=$1 FOR UPDATE',[id])).rows[0];
+      const s:Session=stored?.data??newPairedSession(id,row.details);
+      if(!stored){
+        const history=await c.query(`SELECT m.*,a.created_at AS approved_at FROM public_play_missions m
+          LEFT JOIN public_play_awards a ON a.mission_id=m.id WHERE m.session_id=$1 ORDER BY m.created_at,m.id`,[id]);
+        const earned=await c.query(`SELECT COALESCE(sum(a.points),0)::int AS points FROM public_play_awards a
+          JOIN public_play_missions m ON m.id=a.mission_id WHERE m.session_id=$1 AND a.recipient_id=$2`,[id,row.sub_id]);
+        migratePairedMissions(s,history.rows,earned.rows[0].points);
+        await c.query('INSERT INTO public_game_sessions(id,data) VALUES($1,$2)',[id,JSON.stringify(s)]);
+      }
+      if(state!=='open'&&!terminal(s)){
+        s.status='stopped';
+        for(const m of s.missions)if(!['approved','refused','cancelled'].includes(m.status))m.status='cancelled';
+      }
+      if(s.started||terminal(s))advance(s);else s.last=Date.now();
+      const save=()=>c.query('UPDATE public_game_sessions SET data=$2 WHERE id=$1',[id,JSON.stringify(s)]);
+      return {u,s,save,state,row};
+    }
+    function pairedAgreementAction(s:Session,u:User,op:string,body:unknown) {
+      if(terminal(s))fail(409,'Session is terminal');
+      if(op==='agreement-propose'){
+        if(u.role!=='wife')fail(403,'Wrong role for action');
+        const {revision,terms,minutes}=pairedAgreement.parse(body);
+        if(revision!==s.revision)fail(409,'Play agreement changed');
+        if(s.revisions.length>=100)fail(409,'Play agreement revision limit reached');
+        s.revision++;
+        s.terms=terms;
+        s.revisions.push({revision:s.revision,terms,minutes});
+        s.approvals=[];
+        s.started=false;
+        s.unlimited=minutes===null;
+        s.remaining=(minutes??0)*60000;
+        for(const m of s.missions){
+          if(m.status==='draft')m.revision=s.revision;
+          else if(!['approved','refused','cancelled'].includes(m.status))m.status='cancelled';
+        }
+        // A previous agreement cannot authorize settlement under changed terms.
+        for(const a of s.auctions??[])if(a.status==='open'){a.status='void';a.outcome='void';}
+      }else{
+        const {revision}=pairedAgreementVersion.parse(body);
+        if(revision!==s.revision)fail(409,'Play agreement changed');
+        if(op==='agreement-accept'&&!s.approvals.includes(u.id))s.approvals.push(u.id);
+        if(op==='agreement-withdraw'){
+          s.approvals=s.approvals.filter(id=>id!==u.id);
+          for(const a of s.auctions??[])if(a.status==='open'){a.status='void';a.outcome='void';}
+        }
+        s.started=s.approvals.length===2;
+      }
+      s.last=Date.now();
+      notice(s,op,u.id);
+      return {ok:true};
+    }
+    app.get('/api/public/play/:id/game',async(req,res)=>{
+      const id=uuid.parse(req.params.id).toLowerCase();
+      res.json(await transaction(async c=>{
+        await messagingLock(c);
+        const viewer=await roomUser(req,c,true);
+        await rate(req,'play-read',400,c,viewer.id);
+        const row=await getPlay(c,id,viewer.id,true);
+        const {u,s,save}=await loadPairedGame(c,row,viewer.id);
+        await save();
+        const now=Date.now(),view=visible(s,u,true);
+        if(u.role==='wife'){
+          const {waiting,ready}=(await c.query(`SELECT count(*) FILTER (WHERE delivered_at IS NULL)::int AS waiting,
+            count(*) FILTER (WHERE delivered_at IS NOT NULL AND NOT rated)::int AS ready FROM public_game_tributes
+            WHERE receiver_id=$1 AND session_id=$2`,[u.id,id])).rows[0];
+          view.adoration={...(view.adoration??{}),waiting,ready};
+        }
+        const checkIn=s.checkIns?.[u.id],spark=s.spark;
+        const shown:Partial<Mission>[]=view.missions;
+        return {user:u,mode,play:playView(row,u.id),sessions:[view],serverNow:now,
+          digest:weeklyDigest(shown.filter((m):m is Mission=>m.title!==undefined),u.role,now),
+          ...(u.role==='wife'?{
+            queenLevel:queenLevel(queenProgress(s.missions)),adorationTally:adorationTally(s.missions),
+            spark:dailySpark(library,{now,rerolls:spark?.day===Math.floor(now/86400000)?spark.rerolls:0,
+              dismissed:spark?.dismissed??[],energy:checkIn?.energy,mood:checkIn?.mood}),
+          }:{})};
+      }));
+    });
+    app.post('/api/public/play/:id/game/:op',async(req,res)=>{
+      const id=uuid.parse(req.params.id).toLowerCase(),op=pairedGameOps.parse(req.params.op);
+      const {key,body,revision}=pairedGameBody.parse(req.body);
+      const signature=JSON.stringify({op,body,revision});
+      const result=await transaction(async c=>{
+        await messagingLock(c);
+        const viewer=await roomUser(req,c,true);
+        const row=await getPlay(c,id,viewer.id,true);
+        const prior=(await c.query(`SELECT session_id,result,input=$3::jsonb AS same_input FROM public_play_request_keys
+          WHERE actor_id=$1 AND key=$2`,[viewer.id,key,signature])).rows[0];
+        if(prior){
+          if(prior.session_id!==id||!prior.same_input)fail(409,'Idempotency key was used for a different play action');
+          return prior.result;
+        }
+        if(!['pause','resume','stop','agreement-withdraw','refuse'].includes(op))await rate(req,'game-write',200,c,viewer.id);
+        const {u,s,save,state}=await loadPairedGame(c,row,viewer.id);
+        if(state==='cancelled'||state==='closed')fail(409,'Play session is read-only');
+        const outsideConsent=['reflection','pause','resume','stop','checkin','read','refuse','pin','unpin'].includes(op);
+        if(!outsideConsent&&revision!==s.revision)fail(409,'Play agreement changed');
+        if(!s.started&&!outsideConsent&&!op.startsWith('agreement-')&&!terminal(s))fail(409,'Both participants must agree to play');
+        const result=op.startsWith('agreement-')?pairedAgreementAction(s,u,op,body):
+          await gameAction(c,s,u,op,{...body,key},{dom:row.dom_id,sub:row.sub_id,save});
+        await save();
+        if(result.terminal)return result;
+        if(op==='stop')await c.query('UPDATE public_play_sessions SET stopped_at=clock_timestamp() WHERE request_id=$1',[id]);
+        await c.query('INSERT INTO public_play_request_keys(actor_id,key,session_id,input,result) VALUES($1,$2,$3,$4,$5)',
+          [viewer.id,key,id,signature,JSON.stringify(result)]);
+        return result;
+      });
+      if(result.terminal)fail(409,'Session is terminal');
+      res.json(result);
+    });
     app.get('/api/public/play/:id', async (req,res) => {
       const id = uuid.parse(req.params.id);
       res.json(await messagingRead(async c => {
@@ -971,12 +1110,14 @@ export async function createApp(pool: Pool, origin: string, providers: Partial<R
           if (prior.session_id !== id || !prior.same_input) fail(409,'Idempotency key was used for a different play action');
           return prior.result;
         }
-        if (session.state !== 'open') fail(409,'Play session is read-only');
+         if (session.state !== 'open') fail(409,'Play session is read-only');
         let response: { stopped: true } | { mission: ReturnType<typeof missionView> };
-        if (input.action === 'stop') {
-          await c.query('UPDATE public_play_sessions SET stopped_at=clock_timestamp() WHERE request_id=$1', [id]);
-          response = { stopped: true };
-        } else if (input.action === 'assign') {
+         if (input.action === 'stop') {
+           await c.query('UPDATE public_play_sessions SET stopped_at=clock_timestamp() WHERE request_id=$1', [id]);
+           response = { stopped: true };
+         } else if ((await c.query('SELECT 1 FROM public_game_sessions WHERE id=$1',[id])).rowCount) {
+           return fail(409,'Open the current play session to continue');
+         } else if (input.action === 'assign') {
           if (session.role !== 'dom') fail(403,'You cannot take this mission action');
           const counts = (await c.query(`SELECT count(*)::int AS total,
             count(*) FILTER (WHERE state NOT IN ('approved','declined'))::int AS active FROM public_play_missions WHERE session_id=$1`, [id])).rows[0];
@@ -1125,11 +1266,26 @@ export async function createApp(pool: Pool, origin: string, providers: Partial<R
   app.post('/api/sessions/:id/:op',async(req,res)=>{
     const u=await auth(req),op=req.params.op as string,b=req.body;
     const result=await transaction(async c=>{
-      const s=await locked(c,req.params.id as string,u,op!=='reflection');
-      if(op==='reflection'){
+       const s=await locked(c,req.params.id as string,u,op!=='reflection');
+       return gameAction(c,s,u,op,b);
+    });
+    if(result.terminal)fail(409,'Session is terminal');
+    if(u.pair_id)emit(u.pair_id);res.json(result);
+  });
+  // The caller owns authorization, time advancement, and the transaction.
+  // Only this function implements the game's mutations.
+  async function gameAction(c:PoolClient,s:Session,u:User,op:string,b:any,paired?:{dom:string;sub:string;save:()=>Promise<unknown>}) {
+       const persist=()=>paired?paired.save():save(c,s);
+       // Paired play records every action in its outer, actor-scoped retry ledger.
+       const priorKey=async(kind:string,key:string)=>paired?undefined:(await c.query(
+         'SELECT result FROM request_keys WHERE session_id=$1 AND user_id=$2 AND kind=$3 AND key=$4',[s.id,u.id,kind,key])).rows[0];
+       const recordKey=async(kind:string,key:string,result:unknown)=>{if(!paired)await c.query(
+         'INSERT INTO request_keys VALUES($1,$2,$3,$4,$5)',[s.id,u.id,kind,key,JSON.stringify(result)]);};
+       const tributes=paired?'public_game_tributes':'tributes';
+       if(op==='reflection'){
         const data=reflectionSchema.parse(b),previous=s.reflections?.[u.id];
         if(previous?.appreciation!==data.appreciation||previous?.repeat!==data.repeat){
-          (s.reflections??={})[u.id]=data;notice(s,op,u.id);await save(c,s);
+           (s.reflections??={})[u.id]=data;notice(s,op,u.id);await persist();
         }
         return {ok:true};
       }
@@ -1139,17 +1295,22 @@ export async function createApp(pool: Pool, origin: string, providers: Partial<R
         if(u.role!==(['review','replace','reward','reward-decision','wish-add','wish-request','quick','her-night','evening-close','evening-run','sip','grant','seal','tribute-reveal','chamberlain-decree','chamberlain-compose','repeat-stop','whisper-delete','spark-reroll','spark-dismiss','season-start','season-stop','pin','unpin','auction'].includes(op)?'wife':'husband'))fail(403,'Wrong role for action');
         // Newer clients always send a key; an older cached bundle still works, just without replay.
         requestKey=uuid.parse(b.key??randomUUID());
-        const previous=await c.query('SELECT result FROM request_keys WHERE session_id=$1 AND user_id=$2 AND kind=$3 AND key=$4',[s.id,u.id,op,requestKey]);
+         const previous=await priorKey(op,requestKey);
         // A committed retry is a read of the original result, even after return, pause or stop.
-        if(previous.rowCount){await save(c,s);return previous.rows[0].result;}
+         if(previous){await persist();return previous.result;}
       }
       // Persist expiry even when a subsequent action must be rejected. Curation stays open on ended sessions.
-      if(terminal(s)&&op!=='read'&&!['pin','unpin'].includes(op)){await save(c,s);return {terminal:true};}
+       if(terminal(s)&&op!=='read'&&!['pin','unpin'].includes(op)){await persist();return {terminal:true};}
       const wife=()=>{if(u.role!=='wife')fail(403,'Wife role required');};
       const husband=()=>{if(u.role!=='husband')fail(403,'Husband role required');};
       const gameplay=()=>{if(suspended(s))fail(409,'Pause is active');};
       let mission:Mission|undefined;
-      if(['edit','queue','deliver','cancel','ack','refuse','complete','review','adjust','replace','reveal','rate','repeat-stop','adore'].includes(op)){mission=s.missions.find(m=>m.id===uuid.parse(b.mission));if(!mission)fail(404,'Mission unavailable');}
+       if(['edit','queue','deliver','cancel','ack','refuse','complete','review','adjust','replace','reveal','rate','repeat-stop','adore'].includes(op)){
+         const id=uuid.parse(b.mission);
+         if(paired&&u.role==='husband'&&['edit','queue','deliver','cancel','rate'].includes(op))fail(403,'Wrong role for action');
+         mission=s.missions.find(m=>m.id===id&&(!paired||u.role==='wife'||!!m.deliveredAt));
+         if(!mission)fail(404,'Mission unavailable');
+       }
       let response:any={ok:true};
       if(op==='stop'){s.status='stopped';for(const m of s.missions)if(!['approved','refused','cancelled'].includes(m.status))m.status='cancelled';}
       else if(op==='pause'){if(!s.pauses.includes(u.id))s.pauses.push(u.id);}
@@ -1175,20 +1336,20 @@ export async function createApp(pool: Pool, origin: string, providers: Partial<R
       }
       else if(op==='message'){
         const key=uuid.parse(b.key);
-        const previous=await c.query('SELECT result FROM request_keys WHERE session_id=$1 AND user_id=$2 AND kind=$3 AND key=$4',[s.id,u.id,op,key]);
-        if(previous.rowCount){await save(c,s);return previous.rows[0].result;}
+         const previous=await priorKey(op,key);
+         if(previous){await persist();return previous.result;}
         const message={id:randomUUID(),by:u.id,text:text.parse(b.text),at:Date.now()};s.messages.push(message);response={message};
-        await c.query('INSERT INTO request_keys VALUES($1,$2,$3,$4,$5)',[s.id,u.id,op,key,JSON.stringify(response)]);
+         await recordKey(op,key,response);
       }
       else if(op==='propose'){
         husband();
         const key=uuid.parse(b.key);
-        const previous=await c.query('SELECT result FROM request_keys WHERE session_id=$1 AND user_id=$2 AND kind=$3 AND key=$4',[s.id,u.id,op,key]);
-        if(previous.rowCount){await save(c,s);return previous.rows[0].result;}
+         const previous=await priorKey(op,key);
+         if(previous){await persist();return previous.result;}
         const data=z.object({title:z.string().trim().min(1).max(160),text,points:z.number().int().min(0).max(100),category:z.string().trim().max(80).optional()}).parse(b);
         const list=s.proposals??=[];if(list.length>=20)fail(409,'Proposal list is full');
         const proposal:Proposal={id:randomUUID(),by:u.id,...data,at:Date.now(),status:'pending'};list.push(proposal);response={proposal};
-        await c.query('INSERT INTO request_keys VALUES($1,$2,$3,$4,$5)',[s.id,u.id,op,key,JSON.stringify(response)]);
+         await recordKey(op,key,response);
       }
       else if(op==='proposal-decide'){
         wife();
@@ -1224,17 +1385,15 @@ export async function createApp(pool: Pool, origin: string, providers: Partial<R
         if(u.role!=='husband')fail(403,'Husband role required');
         const key=z.string().uuid().parse(b.key);
         // A committed retry returns the original tribute even if the session changed state since.
-        const previous=await c.query('SELECT result FROM request_keys WHERE session_id=$1 AND user_id=$2 AND kind=$3 AND key=$4',[s.id,u.id,'tribute',key]);
-        if(previous.rowCount){await save(c,s);return previous.rows[0].result;}
+         const previous=await priorKey('tribute',key);
+         if(previous){await persist();return previous.result;}
         gameplay();
         const data=z.object({kind:z.enum(['note','voice','photo','service','greeting']),text,media:z.string().trim().max(4000).optional()}).parse(b);
-        if(!u.pair_id)fail(404,'Pair not found');
-        const pair=await c.query('SELECT wife FROM pairs WHERE id=$1',[u.pair_id]);
-        if(pair.rowCount===0)fail(404,'Pair not found');
+         const receiver=paired?.dom??(await c.query('SELECT wife FROM pairs WHERE id=$1',[u.pair_id])).rows[0]?.wife??fail(404,'Pair not found');
         const tributeId=randomUUID();
-        await c.query('INSERT INTO tributes(id,session_id,giver_id,receiver_id,kind,text,media,delivered_at,rated) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9)',[tributeId,s.id,u.id,pair.rows[0].wife,data.kind,data.text,data.media||null,null,false]);
+         await c.query(`INSERT INTO ${tributes}(id,session_id,giver_id,receiver_id,kind,text,media,delivered_at,rated) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9)`,[tributeId,s.id,u.id,receiver,data.kind,data.text,data.media||null,null,false]);
         response={ok:true,tributeId};
-        await c.query('INSERT INTO request_keys VALUES($1,$2,$3,$4,$5)',[s.id,u.id,'tribute',key,JSON.stringify(response)]);
+         await recordKey('tribute',key,response);
       }
       else if(op==='tribute-reveal'){
         if(u.role!=='wife')fail(403,'Wife role required');
@@ -1242,8 +1401,8 @@ export async function createApp(pool: Pool, origin: string, providers: Partial<R
         // One devotion is due her: reveal a specific one, or the oldest still waiting.
         // Tributes belong to the session that received them; never leak an older arc into this one.
         const delivered = b.tributeId===undefined
-          ? await c.query('UPDATE tributes SET delivered_at=now() WHERE id=(SELECT id FROM tributes WHERE receiver_id=$1 AND session_id=$2 AND delivered_at IS NULL ORDER BY created_at ASC LIMIT 1) AND receiver_id=$1 AND session_id=$2 AND delivered_at IS NULL RETURNING *',[u.id,s.id])
-          : await c.query('UPDATE tributes SET delivered_at=now() WHERE id=$1 AND receiver_id=$2 AND session_id=$3 AND delivered_at IS NULL RETURNING *',[z.string().uuid().parse(b.tributeId),u.id,s.id]);
+           ? await c.query(`UPDATE ${tributes} SET delivered_at=now() WHERE id=(SELECT id FROM ${tributes} WHERE receiver_id=$1 AND session_id=$2 AND delivered_at IS NULL ORDER BY created_at ASC LIMIT 1) AND receiver_id=$1 AND session_id=$2 AND delivered_at IS NULL RETURNING *`,[u.id,s.id])
+           : await c.query(`UPDATE ${tributes} SET delivered_at=now() WHERE id=$1 AND receiver_id=$2 AND session_id=$3 AND delivered_at IS NULL RETURNING *`,[z.string().uuid().parse(b.tributeId),u.id,s.id]);
         if(delivered.rowCount===0)fail(404,'No devotion is waiting for you');
         const tribute=delivered.rows[0];
         // Keep the words in her state so the panel can actually show what he wrote.
@@ -1254,7 +1413,7 @@ export async function createApp(pool: Pool, origin: string, providers: Partial<R
         if(u.role!=='wife')fail(403,'Wife role required');
         gameplay();
         // Claim the tribute in the same statement so a double tap cannot sip twice.
-        const latest=await c.query('UPDATE tributes SET rated=true WHERE id=(SELECT id FROM tributes WHERE receiver_id=$1 AND session_id=$2 AND delivered_at IS NOT NULL AND rated=false ORDER BY delivered_at DESC LIMIT 1) AND rated=false RETURNING id',[u.id,s.id]);
+         const latest=await c.query(`UPDATE ${tributes} SET rated=true WHERE id=(SELECT id FROM ${tributes} WHERE receiver_id=$1 AND session_id=$2 AND delivered_at IS NOT NULL AND rated=false ORDER BY delivered_at DESC LIMIT 1) AND rated=false RETURNING id`,[u.id,s.id]);
         if(latest.rowCount===0)fail(404,'No adoration to sip yet');
         s.adoration={...(s.adoration??{}),sippedFor:latest.rows[0].id};
         s.herPoints=(s.herPoints??0)+2;
@@ -1300,7 +1459,7 @@ export async function createApp(pool: Pool, origin: string, providers: Partial<R
       }
       else {
         // Stopping a repeating chain, his private adoration and her daily spark stay available during either personal pause.
-        if(!['repeat-stop','adore','spark-reroll','spark-dismiss'].includes(op))gameplay();
+         if(!['repeat-stop','adore','spark-reroll','spark-dismiss'].includes(op)&&!(paired&&op==='refuse'))gameplay();
         if(op==='auction'){
           wife();const data=z.object({title:z.string().trim().min(1).max(160),description:text,minBid:z.number().int().min(1).max(AUCTION_LIMITS.maxBid),closesAt:z.number().int()}).parse(b);
           const now=Date.now();
@@ -1344,11 +1503,11 @@ export async function createApp(pool: Pool, origin: string, providers: Partial<R
         }
         else if(op==='mission'){
           wife();const key=uuid.parse(b.key);
-          const previous=await c.query('SELECT result FROM request_keys WHERE session_id=$1 AND user_id=$2 AND kind=$3 AND key=$4',[s.id,u.id,op,key]);
-          if(previous.rowCount)return previous.rows[0].result;
+           const previous=await priorKey(op,key);
+           if(previous)return previous.result;
           const data=draftSchema.parse(b);
           const m:Mission={...data,id:randomUUID(),revision:s.revision,status:'draft',createdAt:Date.now()};s.missions.push(m);response={mission:m};
-          await c.query('INSERT INTO request_keys VALUES($1,$2,$3,$4,$5)',[s.id,u.id,op,key,JSON.stringify(response)]);
+           await recordKey(op,key,response);
         }
         else if(op==='quick'){
           wife();const data=z.object({preset:z.string().max(40).optional(),lang:z.enum(['he','en']).default('he'),title:z.string().trim().min(1).max(160).optional(),text:text.optional(),points:z.number().int().min(0).max(100).optional(),scheduledAt:z.number().int().optional()}).parse(b);
@@ -1463,7 +1622,7 @@ export async function createApp(pool: Pool, origin: string, providers: Partial<R
           state.stoppedAt=Date.now();response={cancelled};
         }
         else if(mission){
-          const m=mission;if(m.revision!==s.revision)fail(409,'Mission belongs to a previous agreement');
+           const m=mission;if(m.revision!==s.revision&&!(paired&&['rate','adore'].includes(op)))fail(409,'Mission belongs to a previous agreement');
           if(['edit','queue','deliver','cancel','review','replace','repeat-stop'].includes(op))wife();else husband();
           if(op==='edit'){if(m.status!=='draft')fail(409,'Delivered terms are immutable');const data=draftSchema.parse({...m,...b});Object.assign(m,data);}
           else if(op==='queue'){
@@ -1478,9 +1637,9 @@ export async function createApp(pool: Pool, origin: string, providers: Partial<R
           }
           else if(op==='deliver'){if(!['draft','queued'].includes(m.status))fail(409,'Draft required');m.status='pending';m.deliveredAt=Date.now();repeatSuccessor(s,m,Date.now());}
           else if(op==='cancel'){if(['approved','refused'].includes(m.status))fail(409,'Mission already final');const wasRepeating=m.status==='queued'&&!!m.repeat&&!m.repeatStopped;m.status='cancelled';if(wasRepeating)repeatSuccessor(s,m,Date.now());}
-          else if(op==='reveal'){if(!m.surprise||!m.deliveredAt||m.status!=='pending')fail(409,'Pending surprise required');if(m.revealedAt){await save(c,s);return {ok:true};}m.revealedAt=Date.now();}
+           else if(op==='reveal'){if(!m.surprise||!m.deliveredAt||m.status!=='pending')fail(409,'Pending surprise required');if(m.revealedAt){await persist();return {ok:true};}m.revealedAt=Date.now();}
           else if(op==='ack'){if(m.surprise&&!m.revealedAt)fail(409,'Reveal invitation first');if(!['pending','acknowledged'].includes(m.status))fail(409,'Pending mission required');m.status='acknowledged';m.acknowledgedAt??=Date.now();}
-          else if(op==='refuse'){if(!['pending','acknowledged','revision','adjustment','refused'].includes(m.status))fail(409,'Mission cannot be refused here');m.status='refused';}
+           else if(op==='refuse'){if(!['pending','acknowledged','revision','adjustment','refused'].includes(m.status)&&!(paired&&m.status==='submitted'))fail(409,'Mission cannot be refused here');m.status='refused';}
           else if(op==='adjust'){
             if(m.surprise&&!m.revealedAt)fail(409,'Reveal invitation first');
             if(!['pending','acknowledged','revision'].includes(m.status))fail(409,'Pending, acknowledged or returned invitation required');
@@ -1520,7 +1679,9 @@ export async function createApp(pool: Pool, origin: string, providers: Partial<R
             const approve=z.boolean().parse(b.approve),version=z.number().int().min(0).parse(b.submissionVersion);
             if(version!==(m.submissionVersion??0))fail(409,'Submission changed; review the current work');
             if(m.status!=='submitted')fail(409,'Submitted work required');
-            if(approve){const award=await c.query('INSERT INTO awards VALUES($1,$2,$3) ON CONFLICT DO NOTHING RETURNING points',[m.id,s.id,m.points]);if(award.rowCount){s.points+=m.points;s.herPoints=(s.herPoints??0)+m.points;}m.status='approved';m.approvedAt=Date.now();
+             if(approve){const award=paired
+               ?await c.query('INSERT INTO public_game_awards(mission_id,session_id,recipient_id,points) VALUES($1,$2,$3,$4) ON CONFLICT DO NOTHING RETURNING points',[m.id,s.id,paired.sub,m.points])
+               :await c.query('INSERT INTO awards VALUES($1,$2,$3) ON CONFLICT DO NOTHING RETURNING points',[m.id,s.id,m.points]);if(award.rowCount){s.points+=m.points;s.herPoints=(s.herPoints??0)+m.points;}m.status='approved';m.approvedAt=Date.now();
               const index=s.sequence?.indexOf(m.id)??-1,next=index>=0?s.missions.find(item=>item.id===s.sequence?.[index+1]):undefined;
               if(s.autoProgress===true&&next?.status==='draft'&&next.revision===s.revision){next.status='pending';next.deliveredAt=Date.now();notice(s,'mission-delivered','server',next.surprise?{missionId:next.id}:undefined);}
             }else m.status='revision';
@@ -1528,13 +1689,10 @@ export async function createApp(pool: Pool, origin: string, providers: Partial<R
           }
         }else fail(404,'Unknown action');
       }
-      if(op!=='read'&&!op.startsWith('note-')&&!['evening-save','evening-delete','pace','tribute-queue','tribute-reveal','sip','grant','seal','chamberlain-decree','chamberlain-compose','adore'].includes(op))notice(s,op,u.id,op==='reward-request'?{rewardRequestId:response.request.id}:op==='reward-decision'?{rewardRequestId:response.request.id,outcome:response.request.status}:(response.mission?.surprise?{missionId:response.mission.id}:mission?.surprise?{missionId:mission.id}:undefined));
-      if(requestKey)await c.query('INSERT INTO request_keys VALUES($1,$2,$3,$4,$5)',[s.id,u.id,op,requestKey,JSON.stringify(response)]);
-      s.last=Date.now();await save(c,s);return response;
-    });
-    if(result.terminal)fail(409,'Session is terminal');
-    if(u.pair_id)emit(u.pair_id);res.json(result);
-  });
+       if(op!=='read'&&!op.startsWith('note-')&&!['evening-save','evening-delete','pace','tribute-queue','tribute-reveal','sip','grant','seal','chamberlain-decree','chamberlain-compose','adore'].includes(op))notice(s,op,u.id,op==='reward-request'?{rewardRequestId:response.request.id}:op==='reward-decision'?{rewardRequestId:response.request.id,outcome:response.request.status}:((paired||response.mission?.surprise)&&response.mission?.id?{missionId:response.mission.id}:(paired||mission?.surprise)&&mission?{missionId:mission.id}:undefined));
+       if(requestKey)await recordKey(op,requestKey,response);
+       s.last=Date.now();await persist();return response;
+  }
   app.use('/api',(_req,res)=>res.status(404).json({error:'Unknown endpoint'}));
   app.use((error:any,_req:Request,res:Response,_next:NextFunction)=>{
     const status=error instanceof z.ZodError?400:error.code==='23505'?409:error.status||500;

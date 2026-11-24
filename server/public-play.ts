@@ -33,7 +33,7 @@ export const playFrom = `FROM public_play_sessions p JOIN public_session_request
 // Use the columns actually locked by FOR SHARE so PostgreSQL rechecks
 // verification when waiting behind a concurrent account update.
 export const playVisibleSql = `${sessionMembershipSql} AND d.verified_at IS NOT NULL AND s.verified_at IS NOT NULL`;
-export const playSelect = `SELECT p.request_id,p.stopped_at,r.title,
+export const playSelect = `SELECT p.request_id,p.stopped_at,r.title,r.details,
   to_char(p.opened_at AT TIME ZONE 'UTC','YYYY-MM-DD"T"HH24:MI:SS.US"Z"') AS opened_cursor,
   COALESCE(r.counter_starts_at,r.starts_at) AS scheduled_at,r.state AS plan_state,
   c.state AS chat_state,c.dom_id,c.sub_id,d.nickname AS dom_nickname,s.nickname AS sub_nickname ${playFrom}`;
@@ -50,3 +50,26 @@ export const missionView = (row: any) => ({
   id: row.id as string, title: row.title as string, instructions: row.instructions as string, points: row.points as number,
   state: row.state as PlayMissionState, version: row.version as number, returnReason: row.return_reason as string | null,
 });
+
+// API contract for paired gameplay. Bootstrap/login, private admin/import, and
+// arbitrary singleton operations are not delegated to the game engine.
+export const pairedGameOps = z.enum([
+  'agreement-propose','agreement-accept','agreement-withdraw','reflection','pause','resume','stop',
+  'pin','unpin','aftercare','read','checkin','message','propose','proposal-decide','rate',
+  'note-save','note-delete','pace','evening-close','evening-save','evening-delete','tribute-queue',
+  'tribute-reveal','sip','grant','seal','chamberlain-decree','chamberlain-compose','auction','auction-bid',
+  'persona','followup','reward','reward-request','reward-decision','sequence','mission','quick','her-night',
+  'evening-run','wish-add','wish-remove','wish-price','wish-request','wish-decision','command-save',
+  'command-delete','whisper','whisper-delete','spark-reroll','spark-dismiss','season-start','season-stop',
+  'edit','queue','deliver','cancel','ack','refuse','complete','review','adjust','replace','reveal',
+  'repeat-stop','adore',
+]);
+export const pairedGameBody = z.strictObject({
+  key:z.uuid(),revision:z.number().int().positive(),body:z.record(z.string(),z.unknown()),
+}).refine(input=>!/(?<!\\)(?:\\\\)*\\u0000/.test(JSON.stringify(input)));
+export const pairedAgreement = z.strictObject({
+  revision:z.number().int().positive(),
+  terms:text(4000),
+  minutes:z.number().int().min(1).max(525600).nullable(),
+});
+export const pairedAgreementVersion = pairedAgreement.pick({revision:true});

@@ -236,6 +236,11 @@ try {
   const newPlan = async (who: Member, conv: string) => (await call(listPath(conv), 200, who.cookie, proposal)).sessionRequest;
   const getPlay = (who: Member, id: string, status = 200) => call(playPath(id), status, who.cookie);
   const seedPlay = async (dom: Member, sub: Member, conv: string) => (await act(sub, (await newPlan(dom, conv)).id, 'accept')).sessionRequest.playId as string;
+  const legacyPlay = async (id:string) => { await pool.query('DELETE FROM public_game_sessions WHERE id=$1',[id]); return id; };
+  const gamePath=(id:string)=>`${playPath(id)}/game`;
+  const game=(who:Member,id:string,status=200)=>call(gamePath(id),status,who.cookie);
+  const op=(who:Member,id:string,name:string,body:object={},status=200,revision=1,key=randomUUID())=>
+    call(`${gamePath(id)}/${name}`,status,who.cookie,{key,revision,body});
   const mutate = (who: Member, id: string, body: object, status = 200) =>
     call(playPath(id), status, who.cookie, { idempotencyKey: randomUUID(), ...body });
   const missionInput = { action: 'assign', title: 'Couple-only mission', instructions: 'Couple-only instructions', points: 17 };
@@ -257,13 +262,15 @@ try {
   for (const who of [secondD, secondS, admin]) assert.deepEqual(await call('/play', 200, who.cookie), { sessions: [], points: '0', next: null });
   await call('/play', 401, privateCookie);
   await call(playPath(play), 401, privateCookie, { action: 'stop', idempotencyKey: randomUUID() });
-  const separatePlay = await seedPlay(secondD, secondS, pair2);
+  const separatePlay = await legacyPlay(await seedPlay(secondD, secondS, pair2));
   assert.deepEqual((await call('/play', 200, secondS.cookie)).sessions.map((p: { id: string }) => p.id), [separatePlay]);
   assert.deepEqual((await call('/play', 200, s.cookie)).sessions.map((p: { id: string }) => p.id), [play]);
   const overview = await getPlay(s, play);
   assert.equal(overview.session.state, 'open', 'the future scheduled time is not an opening gate');
   assert.deepEqual(overview.missions, []);
   assert.ok(!('points' in overview) && !('points' in overview.session));
+  await mutate(d,play,missionInput,409);
+  await legacyPlay(play);
   const playCursor = (await call('/room', 200, s.cookie)).cursor;
   await mutate(s, play, missionInput, 403);
   for (const input of [
@@ -325,7 +332,7 @@ try {
   await mutate(d, play, missionInput, 409);
   assert.deepEqual(await mutate(d, play, { ...missionInput, idempotencyKey: assignKey }), assigned, 'replay does not write into stopped play');
 
-  const otherPlay = await seedPlay(secondD, s, cross);
+  const otherPlay = await legacyPlay(await seedPlay(secondD, s, cross));
   const other = (await mutate(secondD, otherPlay, { ...missionInput, points: 3 })).mission;
   const otherAccepted = (await step(s, otherPlay, other, 'accept')).mission;
   const otherSubmitted = (await step(s, otherPlay, otherAccepted, 'complete')).mission;
@@ -344,7 +351,7 @@ try {
   }
   assert.equal(await total(s), '20', 'blocking does not alter points earned');
   await call(`/room/blocks/${secondD.id}`, 200, s.cookie, undefined, 'DELETE');
-  const racePlan = await seedPlay(d, s, pair);
+  const racePlan = await legacyPlay(await seedPlay(d, s, pair));
   const zero = (await mutate(d, racePlan, { ...missionInput, points: 0 })).mission;
   const zeroAccepted = (await step(s, racePlan, zero, 'accept')).mission;
   const zeroSubmitted = (await step(s, racePlan, zeroAccepted, 'complete')).mission;
@@ -402,6 +409,73 @@ try {
   assert.equal(listed.length, 24);
   assert.equal(older.points, '20');
   assert.equal(older.next, null);
+
+  const migrated=(await game(s,play)).sessions[0];
+  assert.equal(migrated.status,'stopped');
+  assert.equal(migrated.points,17);
+  assert.deepEqual(migrated.missions.map((mission:any)=>[mission.id,mission.status]),[[m.id,'approved'],[declinedMission.id,'refused']]);
+  assert.equal(await total(s),'20','legacy lifetime award is not copied');
+  await listen();
+  assert.deepEqual((await game(s,play)).sessions[0].missions,migrated.missions);
+  assert.equal((await game(s,otherPlay)).sessions[0].status,'stopped');
+
+  const rich=await seedPlay(d,s,pair);
+  for(const [who,status] of [[secondD,404],[secondS,404],[admin,404],[pending,403]] as const){
+    await game(who,rich,status);
+    await op(who,rich,'stop',{},status);
+  }
+  const draft={title:'Hidden draft title',text:'Hidden mission instructions',points:23,secret:true,surprise:true,category:'care',completionStyle:'written'};
+  await op(d,rich,'mission',draft,409);
+  await op(d,rich,'agreement-accept',{revision:1});
+  await op(d,rich,'mission',draft,409);
+  await op(s,rich,'agreement-propose',{revision:1,terms:'Cannot change',minutes:10},403);
+  await op(d,rich,'agreement-propose',{revision:1,terms:'Shared limits',minutes:10});
+  await op(s,rich,'agreement-accept',{revision:1},409);
+  await op(s,rich,'agreement-accept',{revision:2},200,2);
+  await op(d,rich,'agreement-accept',{revision:2},200,2);
+  const {mission:secret}=await op(d,rich,'mission',draft,200,2);
+  await op(d,rich,'note-save',{text:'Hidden private note'},200,2);
+  await op(s,rich,'ack',{mission:secret.id},404,2);
+  let snapshot=await game(s,rich);
+  assert.equal(snapshot.play.role,'sub');
+  assert.equal(snapshot.sessions[0].remaining<=600000,true);
+  assert.ok(!['Hidden','queenLevel','spark',secret.id].some(term=>JSON.stringify(snapshot).includes(term)));
+  assert.equal((await game(d,rich)).play.role,'dom');
+  await op(d,rich,'deliver',{mission:secret.id},200,2);
+  await op(s,rich,'ack',{mission:secret.id},409,2);
+  assert.ok(!JSON.stringify(await game(s,rich)).includes(draft.text));
+  await op(s,rich,'reveal',{mission:secret.id},200,2);
+  assert.ok(JSON.stringify(await game(s,rich)).includes(draft.text));
+  await op(s,rich,'ack',{mission:secret.id},200,2);
+  await op(s,rich,'pause');
+  await op(d,rich,'pause');
+  await op(s,rich,'resume');
+  await op(s,rich,'complete',{mission:secret.id,text:'Completion',expectedVersion:0},409,2);
+  await op(d,rich,'resume');
+  await op(s,rich,'complete',{mission:secret.id,text:'Completion',expectedVersion:0},200,2);
+  await op(s,rich,'review',{mission:secret.id,approve:true,submissionVersion:1},403,2);
+  const review={revision:2,key:randomUUID(),body:{mission:secret.id,approve:true,submissionVersion:1}};
+  const attempts=await Promise.all([review,review,{...review,key:randomUUID()}].map(body=>race(`${gamePath(rich)}/review`,d.cookie,body)));
+  assert.equal(attempts[0].status,attempts[1].status);
+  assert.notEqual(attempts[0].status,attempts[2].status);
+  assert.equal((await pool.query('SELECT count(*)::int AS n FROM public_game_awards WHERE mission_id=$1',[secret.id])).rows[0].n,1);
+  assert.equal(await total(s),'43');
+  const {reward}=await op(d,rich,'reward',{title:'Tea together',description:'A game reward',cost:20},200,2);
+  const requests=await Promise.all([1,2].map(()=>op(s,rich,'reward-request',{reward:reward.id},200,2)));
+  const decisions=await Promise.all(requests.map(({request})=>race(`${gamePath(rich)}/reward-decision`,d.cookie,
+    {revision:2,key:randomUUID(),body:{request:request.id,approve:true}})));
+  assert.deepEqual(decisions.map(r=>r.status).sort(),[200,409]);
+  assert.equal((await game(s,rich)).sessions[0].points,3);
+  assert.equal(await total(s),'43','spending from this session does not affect lifetime earnings');
+  await op(s,rich,'agreement-withdraw',{revision:2},200,2);
+  await op(d,rich,'quick',{title:'No consent',text:'No consent'},409,2);
+  await act(s,rich,'cancel');
+  await op(s,rich,'reflection',{appreciation:'Closed'},409);
+  await call('/room/blocks',200,s.cookie,{userId:d.id});
+  await game(d,rich,404);
+  await game(s,rich,404);
+  assert.equal(await total(s),'43');
+  console.log('PASS paired gameplay: consent, independent pause, roles, secret projection, concurrent awards and spending, migration, archive and isolation');
   console.log('PASS public-play: scoped lifecycle, stale and concurrent actions, backfill, paging, cross-partner awards, block/verification and no room feed payloads');
   console.log('PASS public-sessions: mode and verification gates, roles, time limits, transitions, idempotency, concurrency, rate limit, block/close, poll and SSE privacy and resume');
 } finally {
