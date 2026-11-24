@@ -13,38 +13,29 @@ export const playAction = z.discriminatedUnion('action', [
 export const PLAY_MISSION_LIMIT = 100;
 export const PLAY_PAGE_SIZE = 20;
 
-const transitions = {
-  assigned: { sub: { accept: 'accepted', decline: 'declined' }, dom: {} },
-  accepted: { sub: { complete: 'submitted', decline: 'declined' }, dom: {} },
-  submitted: { sub: { decline: 'declined' }, dom: { approve: 'approved', return: 'returned' } },
-  returned: { sub: { complete: 'submitted', decline: 'declined' }, dom: {} },
-  approved: { sub: {}, dom: {} },
-  declined: { sub: {}, dom: {} },
-} as const;
-export type PlayMissionState = keyof typeof transitions;
-type MissionAction = Exclude<z.infer<typeof playAction>['action'], 'assign' | 'stop'>;
-export function missionTransition(state: PlayMissionState, role: 'dom' | 'sub', action: MissionAction) {
-  const allowed: Partial<Record<MissionAction, PlayMissionState>> = transitions[state][role];
-  return allowed[action];
-}
+export type PlayMissionState = 'assigned'|'accepted'|'submitted'|'returned'|'approved'|'declined';
 
 export const playFrom = `FROM public_play_sessions p JOIN public_session_requests r ON r.id=p.request_id
   JOIN conversations c ON c.id=r.conversation_id JOIN public_users d ON d.id=c.dom_id JOIN public_users s ON s.id=c.sub_id`;
 // Use the columns actually locked by FOR SHARE so PostgreSQL rechecks
 // verification when waiting behind a concurrent account update.
 export const playVisibleSql = `${sessionMembershipSql} AND d.verified_at IS NOT NULL AND s.verified_at IS NOT NULL`;
-export const playSelect = `SELECT p.request_id,p.stopped_at,r.title,r.details,
+export const playSelect = `SELECT p.request_id,p.stopped_at,r.title,r.details,g.data->>'status' AS game_state,
+  CASE WHEN g.data IS NULL THEN NULL WHEN NOT (g.data->>'started')::boolean THEN 'waiting'
+    WHEN jsonb_array_length(g.data->'pauses')>0 THEN 'paused' ELSE 'active' END AS availability,
   to_char(p.opened_at AT TIME ZONE 'UTC','YYYY-MM-DD"T"HH24:MI:SS.US"Z"') AS opened_cursor,
   COALESCE(r.counter_starts_at,r.starts_at) AS scheduled_at,r.state AS plan_state,
-  c.state AS chat_state,c.dom_id,c.sub_id,d.nickname AS dom_nickname,s.nickname AS sub_nickname ${playFrom}`;
+  c.state AS chat_state,c.dom_id,c.sub_id,d.nickname AS dom_nickname,s.nickname AS sub_nickname ${playFrom}
+  LEFT JOIN public_game_sessions g ON g.id=p.request_id`;
 export const playView = (row: any, viewerId: string) => ({
   id: row.request_id as string,
   title: row.title as string,
   scheduledAt: row.scheduled_at as Date,
   role: (row.dom_id === viewerId ? 'dom' : 'sub') as 'dom' | 'sub',
   partner: (row.dom_id === viewerId ? row.sub_nickname : row.dom_nickname) as string,
-  state: (row.plan_state !== 'accepted' ? 'cancelled' : row.stopped_at ? 'stopped' : row.chat_state !== 'accepted' ? 'closed' : 'open') as
-    'cancelled' | 'stopped' | 'closed' | 'open',
+  ...(row.availability ? {availability:row.availability as 'waiting'|'paused'|'active'} : {}),
+  state: (row.plan_state !== 'accepted' ? 'cancelled' : row.stopped_at ? 'stopped' : row.chat_state !== 'accepted' ? 'closed' : row.game_state === 'expired' ? 'expired' : 'open') as
+    'cancelled' | 'stopped' | 'closed' | 'expired' | 'open',
 });
 export const missionView = (row: any) => ({
   id: row.id as string, title: row.title as string, instructions: row.instructions as string, points: row.points as number,

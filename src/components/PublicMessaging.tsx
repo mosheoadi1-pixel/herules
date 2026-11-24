@@ -120,7 +120,8 @@ export function PublicMessaging({ me, role, isAdmin, onAuthLost, ...copy }: Chat
   const [selected, setSelected] = useState<Selection | null>(() =>
     window.matchMedia('(max-width: 680px)').matches ? null : { kind: 'room', id: 'main' });
   // undefined = messaging, null = play inbox, string = a play session.
-  const [play, setPlay] = useState<string | null>();
+  const playFromHistory=()=>window.history.state?.pairedPlayer===me?window.history.state.play as string|null:undefined;
+  const [play, setPlay] = useState<string | null | undefined>(playFromHistory);
   const [search, setSearch] = useState(''), [query, setQuery] = useState('');
   const heading = useRef<HTMLHeadingElement>(null), navigation = useRef<HTMLHeadingElement>(null);
   const playHeading = useRef<HTMLHeadingElement>(null), playOpener = useRef<HTMLElement | null>(null);
@@ -145,12 +146,24 @@ export function PublicMessaging({ me, role, isAdmin, onAuthLost, ...copy }: Chat
     'people', updates.private, visibility);
   const person = selectedPerson?.value?.find(entry => entry.nickname === selected?.id);
   const title = room?.title[lang === 'he' ? 0 : 1] ?? detail?.value?.conversation.otherNickname ?? thread?.otherNickname ?? person?.nickname;
-  const choose = (value: Selection | null) => { playOpener.current = null; moveFocus.current = true; setPlay(undefined); setSelected(value); };
+  const clearPlayHistory=()=>{
+    if(window.history.state?.pairedPlayer===me){
+      const {pairedPlayer,play,...rest}=window.history.state;
+      window.history.replaceState(rest,'');
+    }
+  };
+  const choose = (value: Selection | null) => { playOpener.current = null; moveFocus.current = true; clearPlayHistory();setPlay(undefined); setSelected(value); };
   const openPlay = (id: string | null, opener?: HTMLElement) => {
     if (opener) playOpener.current = opener;
+    if(play!==id)window.history.pushState({...window.history.state,pairedPlayer:me,play:id},'');
     setPlay(id);
   };
-  const closePlay = () => { moveFocus.current = true; setPlay(undefined); };
+  const closePlay = () => { moveFocus.current = true; clearPlayHistory();setPlay(undefined); };
+  useEffect(()=>{
+    const onBack=()=>{moveFocus.current=true;setPlay(playFromHistory());};
+    window.addEventListener('popstate',onBack);
+    return ()=>window.removeEventListener('popstate',onBack);
+  },[me]);
   useLayoutEffect(() => {
     if (play !== undefined) playHeading.current?.focus();
   }, [play]);
@@ -164,7 +177,7 @@ export function PublicMessaging({ me, role, isAdmin, onAuthLost, ...copy }: Chat
   const current = (kind: Selection['kind'], id: string) => selected?.kind === kind && selected.id === id ? 'true' as const : undefined;
   const resultStatus = !people ? 'msgSearching' : people.value?.length === 0 ? 'msgNoPeople' : '';
   const orderedThreads = threads?.value && [...threads.value].sort((a, b) => Number(b.canAnswer) - Number(a.canAnswer));
-  return <section className={`public-messaging${selected || play !== undefined ? ' has-selection' : ''}`} aria-label={t('msgTitle')}>
+  return <section className={`public-messaging${selected || play !== undefined ? ' has-selection' : ''}${play!==undefined?' playing':''}`} aria-label={t('msgTitle')}>
     <aside className="msg-sidebar" aria-labelledby="msg-navigation">
       <div className="msg-sidebar-head">
         <h2 id="msg-navigation" tabIndex={-1} ref={navigation}>{t('msgTitle')}</h2>

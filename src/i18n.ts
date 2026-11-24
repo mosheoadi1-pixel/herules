@@ -216,7 +216,7 @@ export const publicCopy:Record<string,[string,string]>={
   playInbox:['המפגשים שלי','My play sessions'],
   playSession:['מפגש משותף','Play session'],
   playOpenButton:['פתיחת המפגש','Open session'],
-  playTotal:['סך הנקודות שלי','My total points'],
+  playTotal:['נקודות שנצברו בחשבון','Lifetime earned points'],
   playAll:['כל המפגשים שלי','All my sessions'],
   playBackChat:['חזרה להודעות','Back to messages'],
   playEmpty:['מפגש יופיע כאן לאחר ששני הצדדים אישרו אותו.','A session appears here once both people have agreed.'],
@@ -225,6 +225,10 @@ export const publicCopy:Record<string,[string,string]>={
   playOpen:['פתוח למשחק','Open for play'],
   playOpenNote:['אפשר להתחיל עכשיו; המועד המוסכם הוא לתיאום בלבד.','You can play now; the agreed time is for planning only.'],
   playStopped:['המשחק הופסק. אפשר לצפות בו בלבד.','Play was stopped. This session is read-only.'],
+  playExpired:['זמן המשחק הסתיים','Session time ended'],
+  playConsentNeeded:['ממתין להסכמה','Awaiting consent'],
+  playPaused:['מושהה','Paused'],
+  playActive:['פעיל','Active'],
   playClosed:['השיחה נסגרה. אפשר לצפות במפגש בלבד.','The chat was closed. This session is read-only.'],
   playCancelled:['המפגש בוטל. אפשר לצפות בו בלבד.','The plan was cancelled. This session is read-only.'],
   playCurrent:['משימה נוכחית','Current mission'],
@@ -281,4 +285,16 @@ Object.assign(labels,{quick:['נשלחה פקודה מהירה','Quick command s
 Object.assign(labels,{complete:['נשלח ביצוע לבדיקה','Completion submitted for review'],reflection:['עודכן שיתוף סיום','Closing reflection updated'],reveal:['פותח/ה','Reveal'],sip:['לוגמת','Sip'],grant:['מעניקה','Grant'],seal:['חותמת','Seal'],'adoration-streak':['ימים שהעריצו אותך','Days adored'],'goddess-treat':['טיפול בגבירה','Goddess Treat'],'her-glow':['זוהר','Glow'],'tribute-received':['העריצה התקבלה','Tribute received'],'tribute-sent':['טribute נשלח','Tribute sent']});
 Object.assign(labels,{reward:['נוצר פרס','Reward created'],'reward-request':['נשלחה בקשת פרס','Reward requested'],'reward-decision':['הוכרעה בקשת פרס','Reward request decided']});
 Object.assign(labels,{propose:['הוגשה הצעת הזמנה מהבעל','A proposal arrived from the husband'],'proposal-decide':['הוכרעה הצעת הזמנה','A proposal was decided']});
+Object.assign(labels,{
+  'agreement-propose':['הוצעו תנאים חדשים','New agreement proposed'],
+  'agreement-accept':['אושרה השתתפות','Participant opted in'],
+  'agreement-withdraw':['בוטלה הסכמה להשתתפות','Participant withdrew consent'],
+});
+Object.assign(serverMessages,{
+  'Both participants must agree to play':['נדרש אישור אישי של שני המשתתפים לפני משחק.','Both participants must opt in before playing.'],
+  'Play agreement changed':['תנאי המפגש השתנו. בדקו את הגרסה העדכנית.','The agreement changed. Review the latest terms.'],
+  'Play agreement revision limit reached':['המפגש הגיע למגבלת גרסאות התנאים.','This session has reached its agreement revision limit.'],
+  'Play session is read-only':['המפגש זמין לעיון בלבד.','This session is read-only.'],
+  'Play session unavailable':['המפגש אינו זמין.','This play session is unavailable.'],
+});
 Object.assign(serverMessages,{'Proposal list is full':['הרשימה מלאה (20 הצעות). היא מתנקה עם איפוס המשחק.','The list is full (20 proposals). It clears on game reset.'],'Proposal already decided':['ההצעה כבר הוכרעה. רעננו את המצב לפני ניסיון נוסף.','The proposal was already decided. Refresh state before retrying.'],'Proposal unavailable':['ההצעה אינה זמינה.','The proposal is not available.'],'adoration-revealed':['האדורציה נפתחה','Adoration revealed'],'adoration-missed':['אבדה הזדמנות','Missed adoration'],'tribute-auto-queued':['טribute שנוצר אוטומטית','Tribute auto-queued'],'tribute-chosen':['טribute שנבחר','Tribute chosen']});

@@ -24,7 +24,7 @@ import { adminHashFromEnv, isPublicAdmin, publicEmailHash } from './public-admin
 import { MAIN_ROOM, ROOM_PAGE_MAX, ROOM_POSTS_PER_TEN_MINUTES, activeRoomGrant, messagingNickname, messagingVisible, refreshMessaging, roomBody, roomHiddenIds, roomId, roomMessageSql, roomView } from './public-room.ts';
 import { CONVERSATION_COOLDOWN, CONVERSATION_MESSAGES_PER_TEN_MINUTES, CONVERSATION_PAGE_MAX, conversationBody, conversationMessageSql, conversationMessageView, conversationRowSql, conversationView, visibleConversation } from './public-conversations.ts';
 import { sessionAction, sessionActionExists, sessionProposal, sessionStart, sessionTransition, sessionView, sessionVisibleSql, validSessionStart } from './public-sessions.ts';
-import { pairedAgreement, pairedAgreementVersion, pairedGameBody, pairedGameOps, missionTransition, missionView, playAction, playSelect, playView, playVisibleSql, PLAY_MISSION_LIMIT, PLAY_PAGE_SIZE, type PlayMissionState } from './public-play.ts';
+import { pairedAgreement, pairedAgreementVersion, pairedGameBody, pairedGameOps, missionView, playAction, playSelect, playView, playVisibleSql, PLAY_MISSION_LIMIT, PLAY_PAGE_SIZE, type PlayMissionState } from './public-play.ts';
 const scrypt = promisify(scryptCallback);
 const hash = (v: string) => createHash('sha256').update(v).digest('hex');
 const text = z.string().trim().min(1).max(4000);
@@ -41,7 +41,7 @@ const eveningSchema=z.object({name:z.string().trim().min(1).max(80),mood:z.enum(
 const paceSchema=z.object({commandsPerEvening:z.union([z.literal(1),z.literal(2),z.literal(3)])});
 const fail = (status: number, message: string): never => { throw Object.assign(new Error(message), { status }); };
 export type User = { id: string; email: string|null; nickname: string|null; role: 'wife'|'husband'; pair_id: string|null };
-export type Mission = { id: string; revision: number; title: string; text: string; titleEn?: string; textEn?: string; points: number; secret: boolean; chapter?: boolean; surprise?:boolean; sealed?:boolean; revealsAt?:number; category?:string; revealedAt?:number; completionStyle?: 'simple'|'written'; status: string; scheduledAt?: number; completion?: string; submissionVersion?: number; deliveredAt?: number; acknowledgedAt?: number; adjustment?: {reason:'softer'|'adjust';note?:string;at:number}; replaces?: string; replacementId?: string; approvedAt?: number; rating?: 'love'|'like'|'skip'; ratedAt?: number; createdAt?: number; repeat?: 'daily'|'weekly'; repeatOf?: string; repeatStopped?: boolean; adoration?: 'loved'|'liked'|'ok'; adoredAt?: number; season?: {id:string;day:number} };
+export type Mission = { id: string; revision: number; title: string; text: string; titleEn?: string; textEn?: string; points: number; secret: boolean; chapter?: boolean; surprise?:boolean; sealed?:boolean; revealsAt?:number; category?:string; revealedAt?:number; completionStyle?: 'simple'|'written'; status: string; scheduledAt?: number; completion?: string; returnReason?:string; submissionVersion?: number; deliveredAt?: number; acknowledgedAt?: number; adjustment?: {reason:'softer'|'adjust';note?:string;at:number}; replaces?: string; replacementId?: string; approvedAt?: number; rating?: 'love'|'like'|'skip'; ratedAt?: number; createdAt?: number; repeat?: 'daily'|'weekly'; repeatOf?: string; repeatStopped?: boolean; adoration?: 'loved'|'liked'|'ok'; adoredAt?: number; season?: {id:string;day:number} };
 export type Reward = {id:string; title:string; description:string; cost:number};
 export type Auction = {id:string; title:string; description:string; minBid:number; closesAt:number; status:'open'|'closed'|'void'; bids:{amount:number;at:number}[]; winningBid?:number; outcome?:AuctionOutcome; createdAt:number};
 export type RewardRequest = Reward & {rewardId:string; status:'pending'|'approved'|'declined'};
@@ -79,7 +79,7 @@ function settleAuctions(s: Session, now: number) {
     notice(s, 'auction-close', 'server');
   }
 }
-function advance(s: Session) {
+function advance(s: Session,paired=false) {
   const now = Date.now();
   if (!terminal(s) && s.started && !suspended(s)) {
     // Unlimited sessions never count down and never expire; scheduled deliveries still run on time.
@@ -87,7 +87,9 @@ function advance(s: Session) {
       s.remaining = Math.max(0, s.remaining - (now - s.last));
       if (!s.remaining) { s.status = 'expired'; notice(s, 'expired', 'server'); }
     }
-    for (const m of s.missions) if (m.status === 'queued' && m.scheduledAt! <= now) { m.status = 'pending'; m.deliveredAt = now; notice(s, 'mission-delivered', 'server',m.surprise?{missionId:m.id}:undefined); repeatSuccessor(s,m,now); }
+    if(paired&&terminal(s)){
+      for(const m of s.missions)if(!['approved','refused','cancelled'].includes(m.status))m.status='cancelled';
+    }else for (const m of s.missions) if (m.status === 'queued' && m.scheduledAt! <= now) { m.status = 'pending'; m.deliveredAt = now; notice(s, 'mission-delivered', 'server',m.surprise?{missionId:m.id}:undefined); repeatSuccessor(s,m,now); }
   }
   settleAuctions(s, now);
   s.last = now;
@@ -986,7 +988,7 @@ export async function createApp(pool: Pool, origin: string, providers: Partial<R
         s.status='stopped';
         for(const m of s.missions)if(!['approved','refused','cancelled'].includes(m.status))m.status='cancelled';
       }
-      if(s.started||terminal(s))advance(s);else s.last=Date.now();
+      if(s.started||terminal(s))advance(s,true);else s.last=Date.now();
       const save=()=>c.query('UPDATE public_game_sessions SET data=$2 WHERE id=$1',[id,JSON.stringify(s)]);
       return {u,s,save,state,row};
     }
@@ -1013,6 +1015,7 @@ export async function createApp(pool: Pool, origin: string, providers: Partial<R
       }else{
         const {revision}=pairedAgreementVersion.parse(body);
         if(revision!==s.revision)fail(409,'Play agreement changed');
+        if(s.approvals.includes(u.id)===(op==='agreement-accept'))return {ok:true};
         if(op==='agreement-accept'&&!s.approvals.includes(u.id))s.approvals.push(u.id);
         if(op==='agreement-withdraw'){
           s.approvals=s.approvals.filter(id=>id!==u.id);
@@ -1068,7 +1071,7 @@ export async function createApp(pool: Pool, origin: string, providers: Partial<R
         if(!['pause','resume','stop','agreement-withdraw','refuse'].includes(op))await rate(req,'game-write',200,c,viewer.id);
         const {u,s,save,state}=await loadPairedGame(c,row,viewer.id);
         if(state==='cancelled'||state==='closed')fail(409,'Play session is read-only');
-        const outsideConsent=['reflection','pause','resume','stop','checkin','read','refuse','pin','unpin'].includes(op);
+        const outsideConsent=['reflection','pause','resume','stop','checkin','message','read','refuse','pin','unpin'].includes(op);
         if(!outsideConsent&&revision!==s.revision)fail(409,'Play agreement changed');
         if(!s.started&&!outsideConsent&&!op.startsWith('agreement-')&&!terminal(s))fail(409,'Both participants must agree to play');
         const result=op.startsWith('agreement-')?pairedAgreementAction(s,u,op,body):
@@ -1111,34 +1114,11 @@ export async function createApp(pool: Pool, origin: string, providers: Partial<R
           return prior.result;
         }
          if (session.state !== 'open') fail(409,'Play session is read-only');
-        let response: { stopped: true } | { mission: ReturnType<typeof missionView> };
-         if (input.action === 'stop') {
-           await c.query('UPDATE public_play_sessions SET stopped_at=clock_timestamp() WHERE request_id=$1', [id]);
-           response = { stopped: true };
-         } else if ((await c.query('SELECT 1 FROM public_game_sessions WHERE id=$1',[id])).rowCount) {
-           return fail(409,'Open the current play session to continue');
-         } else if (input.action === 'assign') {
-          if (session.role !== 'dom') fail(403,'You cannot take this mission action');
-          const counts = (await c.query(`SELECT count(*)::int AS total,
-            count(*) FILTER (WHERE state NOT IN ('approved','declined'))::int AS active FROM public_play_missions WHERE session_id=$1`, [id])).rows[0];
-          if (counts.active) fail(409,'Finish or decline the current mission first');
-          if (counts.total >= PLAY_MISSION_LIMIT) fail(409,'This session has reached its mission limit');
-          const mission = (await c.query(`INSERT INTO public_play_missions(id,session_id,title,instructions,points)
-            VALUES($1,$2,$3,$4,$5) RETURNING *`, [randomUUID(),id,input.title,input.instructions,input.points])).rows[0];
-          response = { mission: missionView(mission) };
-        } else {
-          const requiredRole = input.action === 'approve' || input.action === 'return' ? 'dom' : 'sub';
-          if (session.role !== requiredRole) fail(403,'You cannot take this mission action');
-          const mission = (await c.query('SELECT * FROM public_play_missions WHERE session_id=$1 AND id=$2', [id,input.missionId])).rows[0]
-            ?? fail(404,'Mission unavailable');
-          const state = missionTransition(mission.state, session.role, input.action);
-          if (!state || input.version !== mission.version) fail(409,'This mission changed; refresh and try again');
-          const updated = (await c.query(`UPDATE public_play_missions SET state=$2,version=version+1,
-            return_reason=$3 WHERE id=$1 RETURNING *`, [mission.id,state,input.action === 'return' ? input.reason : null])).rows[0];
-          if (state === 'approved') await c.query('INSERT INTO public_play_awards(mission_id,recipient_id,points) VALUES($1,$2,$3)',
-            [mission.id,row.sub_id,mission.points]);
-          response = { mission: missionView(updated) };
-        }
+        // A cached client may replay a committed action or stop for safety,
+        // but cannot bypass the expanded game's consent gate by using this URL.
+        if (input.action !== 'stop') fail(409,'Open the current play session to continue');
+        await c.query('UPDATE public_play_sessions SET stopped_at=clock_timestamp() WHERE request_id=$1', [id]);
+        const response={stopped:true};
         await c.query('INSERT INTO public_play_request_keys(actor_id,key,session_id,input,result) VALUES($1,$2,$3,$4,$5)',
           [viewer.id,idempotencyKey,id,signature,JSON.stringify(response)]);
         return response;
@@ -1623,7 +1603,7 @@ export async function createApp(pool: Pool, origin: string, providers: Partial<R
         }
         else if(mission){
            const m=mission;if(m.revision!==s.revision&&!(paired&&['rate','adore'].includes(op)))fail(409,'Mission belongs to a previous agreement');
-          if(['edit','queue','deliver','cancel','review','replace','repeat-stop'].includes(op))wife();else husband();
+         if(['edit','queue','deliver','cancel','review','replace','repeat-stop'].includes(op))wife();else husband();
           if(op==='edit'){if(m.status!=='draft')fail(409,'Delivered terms are immutable');const data=draftSchema.parse({...m,...b});Object.assign(m,data);}
           else if(op==='queue'){
             if(!['draft','queued'].includes(m.status))fail(409,'Draft required');
@@ -1684,7 +1664,10 @@ export async function createApp(pool: Pool, origin: string, providers: Partial<R
                :await c.query('INSERT INTO awards VALUES($1,$2,$3) ON CONFLICT DO NOTHING RETURNING points',[m.id,s.id,m.points]);if(award.rowCount){s.points+=m.points;s.herPoints=(s.herPoints??0)+m.points;}m.status='approved';m.approvedAt=Date.now();
               const index=s.sequence?.indexOf(m.id)??-1,next=index>=0?s.missions.find(item=>item.id===s.sequence?.[index+1]):undefined;
               if(s.autoProgress===true&&next?.status==='draft'&&next.revision===s.revision){next.status='pending';next.deliveredAt=Date.now();notice(s,'mission-delivered','server',next.surprise?{missionId:next.id}:undefined);}
-            }else m.status='revision';
+             }else {
+               m.status='revision';
+               if(paired)m.returnReason=z.string().trim().max(1000).optional().parse(b.reason);
+             }
             response={mission:m.id,submissionVersion:version,status:m.status,points:s.points};
           }
         }else fail(404,'Unknown action');

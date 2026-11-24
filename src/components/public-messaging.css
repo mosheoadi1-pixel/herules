@@ -110,8 +110,31 @@
 .msg-play-list:empty { display: none; }
 .msg-play-list button { display: grid; inline-size: 100%; gap: .2rem; justify-items: start; text-align: start; white-space: normal; }
 .msg-play-list span { font-size: .9rem; }
-.msg-play-mission { display: grid; gap: .55rem; padding-block: .6rem; border-block-start: 1px solid var(--line); }
-.msg-play-mission h4 { margin: 0; }
+.paired-game { inline-size: 100%; min-inline-size: 0; max-inline-size: 100%; overflow-wrap: anywhere; }
+.paired-game .preserve { unicode-bidi: plaintext; }
+.paired-game .paired-context { padding-block: .3rem .6rem; }
+.paired-game .paired-context h3 { font-size: clamp(1.35rem, 4vw, 2rem); color: var(--gold); }
+.paired-game .paired-context p, .paired-game .paired-status { margin-block: .4rem; color: #e7daee; }
+.paired-game .paired-status { border-block-start: 1px solid var(--line); padding-block-start: .65rem; }
+.paired-game .quick-bar { position: static; inset: auto; z-index: auto; grid-template-columns: repeat(auto-fit,minmax(6rem,1fr)); }
+.paired-game nav { flex-wrap: wrap; overflow: visible; }
+.paired-game .paired-more { inline-size: 100%; padding-inline: .25rem; }
+.paired-game .paired-more .row { padding-block-end: .6rem; }
+.paired-game :is(.account,.row) { flex-wrap: wrap; }
+.paired-game .panel, .paired-game fieldset { min-inline-size: 0; }
+.paired-game input:is([type="checkbox"],[type="radio"]) { inline-size: auto; min-block-size: auto; }
+.paired-game .paired-agreement > :not(summary) { margin-block: .55rem; }
+.paired-game .paired-agreement summary { padding-block: .4rem; }
+.paired-game .paired-compose { margin-block: .6rem; }
+.paired-game :focus-visible, .msg-play-list button:focus-visible { outline: 3px solid #f4cf91; outline-offset: 2px; }
+.paired-game [tabindex="-1"]:focus { scroll-margin-block: 1rem; }
+.paired-game .next-step :is(p,button) { max-inline-size: 100%; }
+.paired-game.hc { --muted: #fff; --line: #f7d7ee; }
+.paired-game.hc :is(.panel,.notice) { border-color: var(--line); }
+.paired-game.hc :is(.panel p,.panel li,.panel summary) { color: #fff; }
+@media (prefers-reduced-motion: reduce) {
+  .paired-game *, .paired-game *::before, .paired-game *::after { scroll-behavior: auto !important; animation-duration: .01ms !important; transition-duration: .01ms !important; }
+}
 .public-messaging button { min-block-size: 44px; }
 .msg-play :focus-visible, #msg-play-heading:focus-visible { outline: 2px solid var(--gold); outline-offset: 2px; }
 .public-messaging :focus-visible { outline-offset: 1px; }

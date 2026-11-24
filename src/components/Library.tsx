@@ -15,10 +15,11 @@ type LibraryTabProps = {
   away: boolean; setAway: Dispatch<SetStateAction<boolean>>;
   onlyFavorites: boolean; setOnlyFavorites: Dispatch<SetStateAction<boolean>>;
   favorites: string[]; setFavorites: Dispatch<SetStateAction<string[]>>;
+  favoriteKey?: string;
   recent: string[]; useIdea: (i: Idea) => void; setError: Dispatch<SetStateAction<string>>;
 };
 
-export function LibraryTab({ tab, s, t, lang, label, library, destinationIdeas, filtered, category, setCategory, intensity, setIntensity, tag, setTag, query, setQuery, noPrep, setNoPrep, away, setAway, onlyFavorites, setOnlyFavorites, favorites, setFavorites, recent, useIdea, setError }: LibraryTabProps) {
+export function LibraryTab({ tab, s, t, lang, label, library, destinationIdeas, filtered, category, setCategory, intensity, setIntensity, tag, setTag, query, setQuery, noPrep, setNoPrep, away, setAway, onlyFavorites, setOnlyFavorites, favorites, setFavorites, favoriteKey='hr-favorites', recent, useIdea, setError }: LibraryTabProps) {
   return <><section className="panel">
   <h2>{tab==='rewards'?t('השראה לפרסים','Reward inspiration'):tab==='punishments'?t('השראה לעונשים','Punishments inspiration'):`${destinationIdeas.length} ${t('דרכים לבחור יחד','ways to choose together')}`}</h2>
   <p>{t('המשימות האישיות שלכם לצד ההצעות הנועזות שנשמרו. סננו לפי תג תוכן אישי להצגת התוספות מהקובץ. קובייה מציעה בלבד; את עורכת ושולחת בנפרד. עשר ההצעות האחרונות לא יוגרלו שוב.','Your supplied tasks alongside the retained bold suggestions. Filter by Custom content to see additions from your file. Dice only suggests; you edit and send separately. The last ten suggestions are excluded.')}</p>
@@ -33,7 +34,7 @@ export function LibraryTab({ tab, s, t, lang, label, library, destinationIdeas, 
   {!filtered.length&&<p className="empty" role="status">{away?t('אין רעיונות שנבדקו למחוץ לבית התואמים למסננים הנוכחיים. אפשר לשנות מסננים או לכבות את האפשרות.','No reviewed away-from-home ideas match the current filters. Change the filters or turn off Away from home.'):t('אין רעיונות התואמים למסננים. נסו לשנות את החיפוש או המסננים.','No ideas match these filters. Try changing the search or filters.')}</p>}
   {tab==='punishments'&&<Roulette key={s.id} ideas={library.filter(i=>i.category==='consequences')} lang={lang} onChoose={useIdea}/>}
   </section><div className="cards library">{filtered.map(i=><article className="panel" key={i.id}>
-  <div className="row between"><span className="eyebrow">{label(i.category)}</span><button className="quiet" aria-label={favorites.includes(i.id)?t('הסרה ממועדפים','Remove favorite'):t('שמירה במועדפים','Save favorite')} aria-pressed={favorites.includes(i.id)} onClick={()=>{const next=favorites.includes(i.id)?favorites.filter(id=>id!==i.id):[...favorites,i.id];setFavorites(next);save('hr-favorites',next);}}>{favorites.includes(i.id)?'★':'☆'}</button></div>
+  <div className="row between"><span className="eyebrow">{label(i.category)}</span><button className="quiet" aria-label={favorites.includes(i.id)?t('הסרה ממועדפים','Remove favorite'):t('שמירה במועדפים','Save favorite')} aria-pressed={favorites.includes(i.id)} onClick={()=>{const next=favorites.includes(i.id)?favorites.filter(id=>id!==i.id):[...favorites,i.id];setFavorites(next);save(favoriteKey,next);}}>{favorites.includes(i.id)?'★':'☆'}</button></div>
   <p>{lang==='he'?i.he:i.en}</p><p className="small">{i.minutes} {t('דקות','min')} · {i.intensity===3?t('נועזת','Bold'):i.intensity===1?t('עדינה','Gentle'):t('מעורבות','Engaged')} · {i.tags.map(label).join(', ')}</p><button onClick={()=>useIdea(i)}>{t('בחירה ועריכה','Choose and edit')}</button>
  </article>)}</div></>;
 }

@@ -244,8 +244,6 @@ try {
   const mutate = (who: Member, id: string, body: object, status = 200) =>
     call(playPath(id), status, who.cookie, { idempotencyKey: randomUUID(), ...body });
   const missionInput = { action: 'assign', title: 'Couple-only mission', instructions: 'Couple-only instructions', points: 17 };
-  const step = (who: Member, id: string, mission: { id: string; version: number }, action: string, status = 200, extra: object = {}) =>
-    mutate(who, id, { action, missionId: mission.id, version: mission.version, ...extra }, status);
   const total = async (who: Member) => (await call('/play', 200, who.cookie)).points;
   const start = await newPlan(d, pair);
   await getPlay(s, start.id, 404);
@@ -272,56 +270,28 @@ try {
   await mutate(d,play,missionInput,409);
   await legacyPlay(play);
   const playCursor = (await call('/room', 200, s.cookie)).cursor;
-  await mutate(s, play, missionInput, 403);
+  await mutate(s, play, missionInput, 409);
   for (const input of [
     { points: -1 }, { points: 101 }, { points: 0.5 }, { points: '20' }, { title: ' ' }, { title: 'x'.repeat(161) },
     { instructions: '\0' }, { instructions: 'i'.repeat(4001) }, { recipient: secondS.id },
   ]) await mutate(d, play, { ...missionInput, ...input }, 400);
   const assignKey = randomUUID();
-  const [assigned, replay] = await Promise.all([
-    mutate(d, play, { ...missionInput, idempotencyKey: assignKey }),
-    mutate(d, play, { ...missionInput, idempotencyKey: assignKey }),
-  ]);
-  assert.deepEqual(assigned, replay);
-  await mutate(d, play, { ...missionInput, idempotencyKey: assignKey, points: 19 }, 409);
   await mutate(d, play, missionInput, 409);
-  const m = assigned.mission;
-  assert.deepEqual((await getPlay(s, play)).missions, [m]);
-  assert.equal(m.state, 'assigned');
-  await step(secondS, separatePlay, m, 'accept', 404);
-  await step(s, play, m, 'complete', 409);
-  await step(d, play, m, 'approve', 409);
-  await step(d, play, m, 'accept', 403);
-  await step(s, play, m, 'approve', 403);
-  const acknowledged = (await step(s, play, m, 'accept')).mission;
-  await step(s, play, m, 'complete', 409);
-  const submitted = (await step(s, play, acknowledged, 'complete')).mission;
-  assert.equal(await total(s), '0');
-  await step(d, play, submitted, 'return', 400, { reason: ' ' });
-  await step(d, play, submitted, 'return', 400, { reason: 'x'.repeat(1001) });
-  const returned = (await step(d, play, submitted, 'return', 200, { reason: 'One more detail' })).mission;
-  assert.equal(returned.state, 'returned');
-  assert.equal(returned.returnReason, 'One more detail');
-  await step(d, play, submitted, 'approve', 409);
-  const revised = (await step(s, play, returned, 'complete')).mission;
-  await step(d, play, submitted, 'approve', 409);
-  assert.equal(await total(s), '0');
-  const approve = { action: 'approve', missionId: revised.id, version: revised.version, idempotencyKey: randomUUID() };
-  const approvals = await Promise.all([
-    race(playPath(play), d.cookie, approve), race(playPath(play), d.cookie, approve),
-    race(playPath(play), d.cookie, { ...approve, idempotencyKey: randomUUID() }),
-  ]);
-  // Either retry pair wins or the independent key wins; exactly one award in either ordering.
-  assert.ok(approvals.every(result => [200, 409].includes(result.status)));
-  assert.equal(approvals[0].status, approvals[1].status);
-  assert.notEqual(approvals[0].status, approvals[2].status, 'one distinct review key wins');
-  assert.deepEqual((await pool.query('SELECT recipient_id,points FROM public_play_awards WHERE mission_id=$1', [m.id])).rows,
-    [{ recipient_id: s.id, points: 17 }]);
+  const insertLegacy=async(id:string,who:Member,points:number,state:'approved'|'declined')=>{
+    const mission=randomUUID();
+    await pool.query(`INSERT INTO public_play_missions(id,session_id,title,instructions,points,state)
+      VALUES($1,$2,'Legacy mission','Original mission instructions',$3,$4)`,[mission,id,points,state]);
+    if(state==='approved')await pool.query('INSERT INTO public_play_awards(mission_id,recipient_id,points) VALUES($1,$2,$3)',[mission,who.id,points]);
+    return mission;
+  };
+  const approvedId=await insertLegacy(play,s,17,'approved');
+  const declinedId=await insertLegacy(play,s,100,'declined');
+  const assigned={mission:{id:approvedId,state:'assigned'}};
+  await pool.query('INSERT INTO public_play_request_keys(actor_id,key,session_id,input,result) VALUES($1,$2,$3,$4,$5)',
+    [d.id,assignKey,play,JSON.stringify(missionInput),JSON.stringify(assigned)]);
+  await mutate(d, play, { ...missionInput, idempotencyKey: assignKey, points: 19 }, 409);
   assert.equal(await total(s), '17');
   assert.equal(await total(d), '0');
-  const declinedMission = (await mutate(d, play, { ...missionInput, points: 100 })).mission;
-  await step(s, play, declinedMission, 'decline');
-  assert.equal(await total(s), '17');
   const playMarker = (await call('/room/messages', 200, d.cookie, { body: 'Marker after gameplay' })).message;
   for (const who of [s, secondS, admin]) {
     assert.deepEqual((await call(`/room?after=${playCursor}`, 200, who.cookie)).events, []);
@@ -333,10 +303,7 @@ try {
   assert.deepEqual(await mutate(d, play, { ...missionInput, idempotencyKey: assignKey }), assigned, 'replay does not write into stopped play');
 
   const otherPlay = await legacyPlay(await seedPlay(secondD, s, cross));
-  const other = (await mutate(secondD, otherPlay, { ...missionInput, points: 3 })).mission;
-  const otherAccepted = (await step(s, otherPlay, other, 'accept')).mission;
-  const otherSubmitted = (await step(s, otherPlay, otherAccepted, 'complete')).mission;
-  await step(secondD, otherPlay, otherSubmitted, 'approve');
+  await insertLegacy(otherPlay,s,3,'approved');
   assert.equal(await total(s), '20', 'one account earns across distinct partners and sessions');
   assert.equal(await total(secondS), '0');
   assert.equal(await total(secondD), '0');
@@ -351,24 +318,25 @@ try {
   }
   assert.equal(await total(s), '20', 'blocking does not alter points earned');
   await call(`/room/blocks/${secondD.id}`, 200, s.cookie, undefined, 'DELETE');
-  const racePlan = await legacyPlay(await seedPlay(d, s, pair));
-  const zero = (await mutate(d, racePlan, { ...missionInput, points: 0 })).mission;
-  const zeroAccepted = (await step(s, racePlan, zero, 'accept')).mission;
-  const zeroSubmitted = (await step(s, racePlan, zeroAccepted, 'complete')).mission;
+  const racePlan = await seedPlay(d, s, pair);
+  await op(d,racePlan,'agreement-accept',{revision:1});
+  await op(s,racePlan,'agreement-accept',{revision:1});
+  const made=(await op(d,racePlan,'quick',{title:'Race mission',text:'Race instructions'})).mission;
+  await op(s,racePlan,'ack',{mission:made.id});
+  await op(s,racePlan,'complete',{mission:made.id,expectedVersion:0});
   const blockRace = await Promise.all([
-    race(playPath(racePlan), d.cookie, { action: 'approve', missionId: zero.id, version: zeroSubmitted.version, idempotencyKey: randomUUID() }),
+    race(`${gamePath(racePlan)}/review`, d.cookie, {revision:1,key:randomUUID(),body:{mission:made.id,approve:true,submissionVersion:1}}),
     race('/room/blocks', s.cookie, { userId: d.id }),
   ]);
   assert.equal(blockRace[1].status, 200);
   assert.ok([200, 404].includes(blockRace[0].status));
-  assert.equal((await pool.query('SELECT points FROM public_play_awards WHERE mission_id=$1', [zero.id])).rowCount, Number(blockRace[0].ok));
-  await mutate(d, racePlan, missionInput, 404);
+  assert.equal((await pool.query('SELECT points FROM public_game_awards WHERE mission_id=$1', [made.id])).rowCount, Number(blockRace[0].ok));
+  await game(d,racePlan,404);
   await call(`/room/blocks/${d.id}`, 200, s.cookie, undefined, 'DELETE');
-  if (!blockRace[0].ok) await step(d, racePlan, zeroSubmitted, 'approve');
-  assert.equal(await total(s), '20');
+  if (!blockRace[0].ok) await op(d,racePlan,'review',{mission:made.id,approve:true,submissionVersion:1});
   const cancelRace = await Promise.all([
     race(`/session-requests/${racePlan}/cancel`, s.cookie, {}),
-    race(playPath(racePlan), d.cookie, { ...missionInput, idempotencyKey: randomUUID() }),
+    race(`${gamePath(racePlan)}/quick`, d.cookie, {revision:1,key:randomUUID(),body:{title:'Soon',text:'A second mission'}}),
   ]);
   assert.equal(cancelRace[0].status, 200);
   assert.ok([200, 409].includes(cancelRace[1].status));
@@ -413,19 +381,29 @@ try {
   const migrated=(await game(s,play)).sessions[0];
   assert.equal(migrated.status,'stopped');
   assert.equal(migrated.points,17);
-  assert.deepEqual(migrated.missions.map((mission:any)=>[mission.id,mission.status]),[[m.id,'approved'],[declinedMission.id,'refused']]);
+  assert.deepEqual(new Map(migrated.missions.map((mission:any)=>[mission.id,mission.status])),new Map([[approvedId,'approved'],[declinedId,'refused']]));
   assert.equal(await total(s),'20','legacy lifetime award is not copied');
   await listen();
   assert.deepEqual((await game(s,play)).sessions[0].missions,migrated.missions);
   assert.equal((await game(s,otherPlay)).sessions[0].status,'stopped');
 
   const rich=await seedPlay(d,s,pair);
+  const gameResponse=await fetch(`${base}/api/public${gamePath(rich)}`,{headers:{Cookie:s.cookie}});
+  assert.equal(gameResponse.status,200);
+  assert.equal(gameResponse.headers.get('cache-control'),'no-store');
+  await gameResponse.arrayBuffer();
+  for(const path of ['/state','/ideas',`/sessions/${rich}`]){
+    const privateResponse=await fetch(`${base}/api${path}`,{headers:{Cookie:s.cookie}});
+    assert.equal(privateResponse.status,401);
+    await privateResponse.arrayBuffer();
+  }
   for(const [who,status] of [[secondD,404],[secondS,404],[admin,404],[pending,403]] as const){
     await game(who,rich,status);
     await op(who,rich,'stop',{},status);
   }
   const draft={title:'Hidden draft title',text:'Hidden mission instructions',points:23,secret:true,surprise:true,category:'care',completionStyle:'written'};
   await op(d,rich,'mission',draft,409);
+  await op(s,rich,'message',{text:'Consent check-in'});
   await op(d,rich,'agreement-accept',{revision:1});
   await op(d,rich,'mission',draft,409);
   await op(s,rich,'agreement-propose',{revision:1,terms:'Cannot change',minutes:10},403);
@@ -434,12 +412,24 @@ try {
   await op(s,rich,'agreement-accept',{revision:2},200,2);
   await op(d,rich,'agreement-accept',{revision:2},200,2);
   const {mission:secret}=await op(d,rich,'mission',draft,200,2);
+  const {mission:optional}=await op(d,rich,'quick',{title:'Optional mission',text:'Your choice'},200,2);
+  await op(s,rich,'refuse',{mission:optional.id},200,2);
+  await op(d,rich,'persona',{persona:'caring'},200,2);
+  await op(d,rich,'pace',{commandsPerEvening:2},200,2);
+  await op(s,rich,'whisper',{text:'Only Dom sees this'},200,2);
+  await op(s,rich,'tribute-queue',{kind:'note',text:'Devotion for this session only'},200,2);
+  await op(d,rich,'tribute-reveal',{},200,2);
+  await op(d,rich,'sip',{},200,2);
+  await op(s,rich,'checkin',{minutes:12,energy:'medium',mood:'quiet'},200,2);
   await op(d,rich,'note-save',{text:'Hidden private note'},200,2);
   await op(s,rich,'ack',{mission:secret.id},404,2);
   let snapshot=await game(s,rich);
   assert.equal(snapshot.play.role,'sub');
   assert.equal(snapshot.sessions[0].remaining<=600000,true);
-  assert.ok(!['Hidden','queenLevel','spark',secret.id].some(term=>JSON.stringify(snapshot).includes(term)));
+  assert.ok(!['Hidden','queenLevel','spark',secret.id,'Only Dom sees this','Devotion for this session only'].some(term=>JSON.stringify(snapshot).includes(term)));
+  assert.equal(snapshot.sessions[0].missions.find((mission:any)=>mission.id===optional.id).status,'refused');
+  assert.equal(snapshot.sessions[0].messages[0].text,'Consent check-in');
+  assert.equal(snapshot.sessions[0].checkIns[s.id].minutes,12);
   assert.equal((await game(d,rich)).play.role,'dom');
   await op(d,rich,'deliver',{mission:secret.id},200,2);
   await op(s,rich,'ack',{mission:secret.id},409,2);
@@ -467,6 +457,14 @@ try {
   assert.deepEqual(decisions.map(r=>r.status).sort(),[200,409]);
   assert.equal((await game(s,rich)).sessions[0].points,3);
   assert.equal(await total(s),'43','spending from this session does not affect lifetime earnings');
+  const timed=await seedPlay(secondD,s,cross);
+  await op(secondD,timed,'agreement-propose',{revision:1,terms:'Short timed game',minutes:1});
+  await op(secondD,timed,'agreement-accept',{revision:2},200,2);
+  await op(s,timed,'agreement-accept',{revision:2},200,2);
+  await pool.query(`UPDATE public_game_sessions SET data=jsonb_set(data,'{last}',to_jsonb($2::bigint)) WHERE id=$1`,[timed,Date.now()-61000]);
+  assert.equal((await game(s,timed)).sessions[0].status,'expired');
+  assert.equal((await getPlay(s,timed)).session.state,'expired');
+  await op(s,timed,'mission',draft,409,2);
   await op(s,rich,'agreement-withdraw',{revision:2},200,2);
   await op(d,rich,'quick',{title:'No consent',text:'No consent'},409,2);
   await act(s,rich,'cancel');
