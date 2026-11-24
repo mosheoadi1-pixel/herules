@@ -24,6 +24,7 @@ export function sessionActionExists(state: State, action: Action) {
 
 export const sessionView = (row: any) => ({
   id: row.id as string,
+  playId: (row.play_id ?? null) as string | null,
   conversationId: row.conversation_id as string,
   title: row.title as string,
   details: row.details as string,
@@ -36,8 +37,9 @@ export const sessionView = (row: any) => ({
 
 // Shared visibility for history and feed. Closed conversations retain history, while blocks hide it.
 // The SQL is used with conversations aliased to c and the viewer bound as $2.
-export const sessionVisibleSql = `($2 IN (c.dom_id,c.sub_id))
-  AND EXISTS (SELECT 1 FROM public_users WHERE id=c.dom_id AND verified_at IS NOT NULL)
-  AND EXISTS (SELECT 1 FROM public_users WHERE id=c.sub_id AND verified_at IS NOT NULL)
+export const sessionMembershipSql = `($2 IN (c.dom_id,c.sub_id))
   AND NOT EXISTS (SELECT 1 FROM room_blocks
     WHERE (blocker_id=c.dom_id AND blocked_id=c.sub_id) OR (blocker_id=c.sub_id AND blocked_id=c.dom_id))`;
+export const sessionVisibleSql = `${sessionMembershipSql}
+  AND EXISTS (SELECT 1 FROM public_users WHERE id=c.dom_id AND verified_at IS NOT NULL)
+  AND EXISTS (SELECT 1 FROM public_users WHERE id=c.sub_id AND verified_at IS NOT NULL)`;

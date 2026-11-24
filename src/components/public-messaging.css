@@ -101,6 +101,19 @@
 .msg-history > article + article { margin-block-start: .5rem; }
 .msg-fields fieldset { display: grid; gap: .75rem; min-inline-size: 0; border: 0; margin: 0; padding: 0; }
 .msg-fields input[type="datetime-local"] { direction: ltr; text-align: start; max-inline-size: 100%; }
+.msg-chat-view:not([hidden]) { display: contents; }
+.msg-play { display: grid; justify-items: start; gap: .75rem; padding: 1rem; }
+.msg-play .msg-feedback { padding: 0; }
+.msg-play .msg-card, .msg-play-list { inline-size: 100%; }
+.msg-play-total { font-weight: 700; }
+.msg-play-list { display: grid; gap: .5rem; list-style: none; margin: 0; padding: 0; max-inline-size: 34rem; }
+.msg-play-list:empty { display: none; }
+.msg-play-list button { display: grid; inline-size: 100%; gap: .2rem; justify-items: start; text-align: start; white-space: normal; }
+.msg-play-list span { font-size: .9rem; }
+.msg-play-mission { display: grid; gap: .55rem; padding-block: .6rem; border-block-start: 1px solid var(--line); }
+.msg-play-mission h4 { margin: 0; }
+.public-messaging button { min-block-size: 44px; }
+.msg-play :focus-visible, #msg-play-heading:focus-visible { outline: 2px solid var(--gold); outline-offset: 2px; }
 .public-messaging :focus-visible { outline-offset: 1px; }
 @media (max-width: 680px) {
   .public-messaging { grid-template-columns: minmax(0, 1fr); }

@@ -24,6 +24,7 @@ import { adminHashFromEnv, isPublicAdmin, publicEmailHash } from './public-admin
 import { MAIN_ROOM, ROOM_PAGE_MAX, ROOM_POSTS_PER_TEN_MINUTES, activeRoomGrant, messagingNickname, messagingVisible, refreshMessaging, roomBody, roomHiddenIds, roomId, roomMessageSql, roomView } from './public-room.ts';
 import { CONVERSATION_COOLDOWN, CONVERSATION_MESSAGES_PER_TEN_MINUTES, CONVERSATION_PAGE_MAX, conversationBody, conversationMessageSql, conversationMessageView, conversationRowSql, conversationView, visibleConversation } from './public-conversations.ts';
 import { sessionAction, sessionActionExists, sessionProposal, sessionStart, sessionTransition, sessionView, sessionVisibleSql, validSessionStart } from './public-sessions.ts';
+import { missionTransition, missionView, playAction, playSelect, playView, playVisibleSql, PLAY_MISSION_LIMIT, PLAY_PAGE_SIZE } from './public-play.ts';
 const scrypt = promisify(scryptCallback);
 const hash = (v: string) => createHash('sha256').update(v).digest('hex');
 const text = z.string().trim().min(1).max(4000);
@@ -170,6 +171,7 @@ export async function createApp(pool: Pool, origin: string, providers: Partial<R
   await pool.query(await readFile(new URL('../db/010-public-conversations.sql', import.meta.url), 'utf8'));
   await pool.query(await readFile(new URL('../db/011-public-sessions.sql', import.meta.url), 'utf8'));
   await pool.query(await readFile(new URL('../db/012-public-messaging.sql', import.meta.url), 'utf8'));
+  await pool.query(await readFile(new URL('../db/013-public-play.sql', import.meta.url), 'utf8'));
   const app = express(); app.disable('x-powered-by');
   app.set('trust proxy',process.env.TRUST_PROXY?.split(',').map(v=>v.trim())||false);
   // Public mode shows reviewer images as blob: object URLs; private mode keeps its existing policy.
@@ -191,10 +193,10 @@ export async function createApp(pool: Pool, origin: string, providers: Partial<R
     try { await c.query('BEGIN'); const result = await fn(c); await c.query('COMMIT'); return result; }
     catch (e) { await c.query('ROLLBACK'); throw e; } finally { c.release(); }
   }
-  async function rate(req: Request, bucket: string, limit: number) {
-    const key = `${bucket}:${req.ip}`;
+  async function rate(req: Request, bucket: string, limit: number, db: Pick<Pool, 'query'> = pool, actor?: string) {
+    const key = `${bucket}:${actor ?? req.ip}`;
     const window = Math.floor(Date.now()/600000);
-    const r = await pool.query('INSERT INTO rate_limits(key,period,hits) VALUES($1,$2,1) ON CONFLICT(key) DO UPDATE SET period=$2,hits=CASE WHEN rate_limits.period=$2 THEN rate_limits.hits+1 ELSE 1 END RETURNING hits', [key,window]);
+    const r = await db.query('INSERT INTO rate_limits(key,period,hits) VALUES($1,$2,1) ON CONFLICT(key) DO UPDATE SET period=$2,hits=CASE WHEN rate_limits.period=$2 THEN rate_limits.hits+1 ELSE 1 END RETURNING hits', [key,window]);
     if (r.rows[0].hits > limit) fail(429,'Too many attempts; retry in ten minutes');
   }
   const tokenOf = (req: Request) => /(?:^|;\s*)hr_session=([a-f0-9]{64})(?:;|$)/.exec(req.headers.cookie || '')?.[1] || '';
@@ -836,7 +838,7 @@ export async function createApp(pool: Pool, origin: string, providers: Partial<R
       res.json({ conversation });
     });
     const requireSessionConversation = async (c: PoolClient, id: string, viewerId: string) => {
-      const conversation = (await c.query(`SELECT c.dom_id,c.state FROM conversations c WHERE c.id=$1 AND ${sessionVisibleSql} FOR UPDATE OF c`, [id, viewerId])).rows[0]
+      const conversation = await visibleConversation(c, id, viewerId, await roomHiddenIds(c, viewerId), true)
         ?? fail(404,'Conversation unavailable');
       if (conversation.state !== 'accepted') fail(409,'Session requests require an accepted conversation');
       return conversation;
@@ -855,7 +857,8 @@ export async function createApp(pool: Pool, origin: string, providers: Partial<R
       const user = await roomUser(req);
       const id = uuid.parse(req.params.id);
       // Fetch visibility and history in one snapshot, including for an empty history.
-      const rows = (await pool.query(`SELECT r.* FROM conversations c LEFT JOIN public_session_requests r ON r.conversation_id=c.id
+      const rows = (await pool.query(`SELECT r.*,p.request_id AS play_id FROM conversations c LEFT JOIN public_session_requests r ON r.conversation_id=c.id
+        LEFT JOIN public_play_sessions p ON p.request_id=r.id
         WHERE c.id=$1 AND ${sessionVisibleSql}
         ORDER BY CASE WHEN r.state IN ('requested','countered','accepted') THEN 0 ELSE 1 END,r.created_at DESC,r.id`, [id, user.id])).rows;
       if (!rows.length) fail(404,'Conversation unavailable');
@@ -898,6 +901,11 @@ export async function createApp(pool: Pool, origin: string, providers: Partial<R
         const user = await roomUser(req, c, true);
         const row = (await c.query('SELECT * FROM public_session_requests WHERE id=$1', [id])).rows[0] ?? fail(404,'Conversation unavailable');
         const conversation = await requireSessionConversation(c, row.conversation_id, user.id);
+        // Only the actor who accepted can replay a successful acceptance.
+        if (action === 'accept' && row.state === 'accepted' && (await c.query(
+          "SELECT 1 FROM public_session_events WHERE request_id=$1 AND actor_id=$2 AND state='accepted'", [id, user.id])).rowCount) {
+          return sessionView({ ...row, play_id: id });
+        }
         const state = sessionTransition(row.state, conversation.dom_id === user.id ? 'dom' : 'sub', action)
           ?? (sessionActionExists(row.state, action) ? fail(403,'You cannot take this session action') : fail(409,'This session action is not available'));
         if (counter) {
@@ -908,10 +916,93 @@ export async function createApp(pool: Pool, origin: string, providers: Partial<R
         await checkSessionBudget(c, user.id);
         const updated = (await c.query(`UPDATE public_session_requests SET state=$2,counter_starts_at=COALESCE($3,counter_starts_at),
           updated_at=clock_timestamp() WHERE id=$1 RETURNING *`, [id, state, counter])).rows[0];
+        if (state === 'accepted') await c.query('INSERT INTO public_play_sessions(request_id) VALUES($1)', [id]);
         await recordSessionChange(c, id, user.id, state);
-        return sessionView(updated);
+        const playId = (await c.query('SELECT request_id FROM public_play_sessions WHERE request_id=$1', [id])).rows[0]?.request_id;
+        return sessionView({ ...updated, play_id: playId });
       });
       res.json({ sessionRequest });
+    });
+    // Lists and detail are never exposed through room payloads. History remains
+    // readable after stop, plan cancellation, or chat closure, unless blocked.
+    const playCursor = z.object({ before: z.iso.datetime({ precision: 6 }).optional(), tie: uuid.optional() })
+      .refine(q => !!q.before === !!q.tie);
+    app.get('/api/public/play', async (req,res) => {
+      const q = playCursor.parse(req.query);
+      res.json(await messagingRead(async c => {
+        const viewer = await roomUser(req, c, true);
+        await rate(req,'play-read',400,c,viewer.id);
+        const rows = (await c.query(`${playSelect} WHERE ${playVisibleSql}
+          AND ($1::timestamptz IS NULL OR (p.opened_at,p.request_id)<($1::timestamptz,$3::uuid))
+          ORDER BY p.opened_at DESC,p.request_id DESC LIMIT $4`, [q.before ?? null,viewer.id,q.tie ?? null,PLAY_PAGE_SIZE + 1])).rows;
+        const page = rows.slice(0, PLAY_PAGE_SIZE), last = page.at(-1);
+        const { points } = (await c.query('SELECT COALESCE(sum(points),0)::text AS points FROM public_play_awards WHERE recipient_id=$1', [viewer.id])).rows[0];
+        return { sessions: page.map(row => playView(row, viewer.id)), points,
+          next: last && rows.length > PLAY_PAGE_SIZE ? { before: last.opened_cursor, tie: last.request_id } : null };
+      }));
+    });
+    const getPlay = async (c: PoolClient, id: string, viewerId: string, lock = false) =>
+      (await c.query(`${playSelect} WHERE p.request_id=$1 AND ${playVisibleSql}
+        ${lock ? 'FOR UPDATE OF c,r,p' : ''} FOR SHARE OF d,s`, [id, viewerId])).rows[0] ?? fail(404,'Play session unavailable');
+    app.get('/api/public/play/:id', async (req,res) => {
+      const id = uuid.parse(req.params.id);
+      res.json(await messagingRead(async c => {
+        const viewer = await roomUser(req, c, true);
+        await rate(req,'play-read',400,c,viewer.id);
+        const row = await getPlay(c, id, viewer.id);
+        const missions = (await c.query('SELECT * FROM public_play_missions WHERE session_id=$1 ORDER BY created_at DESC,id DESC LIMIT $2',
+          [id, PLAY_MISSION_LIMIT])).rows;
+        return { session: playView(row, viewer.id), missions: missions.map(missionView) };
+      }));
+    });
+    app.post('/api/public/play/:id', async (req,res) => {
+      await rate(req,'play-write',120);
+      const id = uuid.parse(req.params.id).toLowerCase();
+      const { idempotencyKey, ...input } = playAction.parse(req.body);
+      const signature = JSON.stringify(input);
+      const result = await transaction(async c => {
+        await messagingLock(c);
+        const viewer = await roomUser(req, c, true);
+        const row = await getPlay(c, id, viewer.id, true);
+        const session = playView(row, viewer.id);
+        const prior = (await c.query(`SELECT session_id,result,input=$3::jsonb AS same_input FROM public_play_request_keys
+          WHERE actor_id=$1 AND key=$2`, [viewer.id,idempotencyKey,signature])).rows[0];
+        if (prior) {
+          if (prior.session_id !== id || !prior.same_input) fail(409,'Idempotency key was used for a different play action');
+          return prior.result;
+        }
+        if (session.state !== 'open') fail(409,'Play session is read-only');
+        let response: { stopped: true } | { mission: ReturnType<typeof missionView> };
+        if (input.action === 'stop') {
+          await c.query('UPDATE public_play_sessions SET stopped_at=clock_timestamp() WHERE request_id=$1', [id]);
+          response = { stopped: true };
+        } else if (input.action === 'assign') {
+          if (session.role !== 'dom') fail(403,'You cannot take this mission action');
+          const counts = (await c.query(`SELECT count(*)::int AS total,
+            count(*) FILTER (WHERE state NOT IN ('approved','declined'))::int AS active FROM public_play_missions WHERE session_id=$1`, [id])).rows[0];
+          if (counts.active) fail(409,'Finish or decline the current mission first');
+          if (counts.total >= PLAY_MISSION_LIMIT) fail(409,'This session has reached its mission limit');
+          const mission = (await c.query(`INSERT INTO public_play_missions(id,session_id,title,instructions,points)
+            VALUES($1,$2,$3,$4,$5) RETURNING *`, [randomUUID(),id,input.title,input.instructions,input.points])).rows[0];
+          response = { mission: missionView(mission) };
+        } else {
+          const requiredRole = input.action === 'approve' || input.action === 'return' ? 'dom' : 'sub';
+          if (session.role !== requiredRole) fail(403,'You cannot take this mission action');
+          const mission = (await c.query('SELECT * FROM public_play_missions WHERE session_id=$1 AND id=$2', [id,input.missionId])).rows[0]
+            ?? fail(404,'Mission unavailable');
+          const state = missionTransition(mission.state, session.role, input.action);
+          if (!state || input.version !== mission.version) fail(409,'This mission changed; refresh and try again');
+          const updated = (await c.query(`UPDATE public_play_missions SET state=$2,version=version+1,
+            return_reason=$3 WHERE id=$1 RETURNING *`, [mission.id,state,input.action === 'return' ? input.reason : null])).rows[0];
+          if (state === 'approved') await c.query('INSERT INTO public_play_awards(mission_id,recipient_id,points) VALUES($1,$2,$3)',
+            [mission.id,row.sub_id,mission.points]);
+          response = { mission: missionView(updated) };
+        }
+        await c.query('INSERT INTO public_play_request_keys(actor_id,key,session_id,input,result) VALUES($1,$2,$3,$4,$5)',
+          [viewer.id,idempotencyKey,id,signature,JSON.stringify(response)]);
+        return response;
+      });
+      res.json(result);
     });
     app.post('/api/public/conversations/:id/messages', async (req,res) => {
       await rate(req,'conversation-write',120);

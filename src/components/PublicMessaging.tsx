@@ -3,6 +3,7 @@ import type { FormEvent } from 'react';
 import { api } from '../api';
 import { PublicRoom } from './PublicRoom';
 import { PublicConversations, stateKeys, type Conversation, type ConversationDetail } from './PublicConversations';
+import { PublicPlay } from './PublicPlay';
 import { useChatRead, type ChatCopy, type Room } from './PublicChatParts';
 import './public-messaging.css';
 
@@ -118,8 +119,11 @@ export function PublicMessaging({ me, role, isAdmin, onAuthLost, ...copy }: Chat
   const { t, lang, errorText } = copy;
   const [selected, setSelected] = useState<Selection | null>(() =>
     window.matchMedia('(max-width: 680px)').matches ? null : { kind: 'room', id: 'main' });
+  // undefined = messaging, null = play inbox, string = a play session.
+  const [play, setPlay] = useState<string | null>();
   const [search, setSearch] = useState(''), [query, setQuery] = useState('');
   const heading = useRef<HTMLHeadingElement>(null), navigation = useRef<HTMLHeadingElement>(null);
+  const playHeading = useRef<HTMLHeadingElement>(null), playOpener = useRef<HTMLElement | null>(null);
   const searchInput = useRef<HTMLInputElement>(null);
   const moveFocus = useRef(false);
   const { updates, polling, invalidate, refreshRoom, refreshPrivate } = useMessagingFeed(onAuthLost);
@@ -141,22 +145,33 @@ export function PublicMessaging({ me, role, isAdmin, onAuthLost, ...copy }: Chat
     'people', updates.private, visibility);
   const person = selectedPerson?.value?.find(entry => entry.nickname === selected?.id);
   const title = room?.title[lang === 'he' ? 0 : 1] ?? detail?.value?.conversation.otherNickname ?? thread?.otherNickname ?? person?.nickname;
-  const choose = (value: Selection | null) => { moveFocus.current = true; setSelected(value); };
+  const choose = (value: Selection | null) => { playOpener.current = null; moveFocus.current = true; setPlay(undefined); setSelected(value); };
+  const openPlay = (id: string | null, opener?: HTMLElement) => {
+    if (opener) playOpener.current = opener;
+    setPlay(id);
+  };
+  const closePlay = () => { moveFocus.current = true; setPlay(undefined); };
   useLayoutEffect(() => {
-    if (!moveFocus.current) return;
+    if (play !== undefined) playHeading.current?.focus();
+  }, [play]);
+  useLayoutEffect(() => {
+    if (play !== undefined || !moveFocus.current) return;
     moveFocus.current = false;
-    (selected ? heading : searching ? searchInput : navigation).current?.focus();
-  }, [selected]);
+    const opener = playOpener.current;
+    playOpener.current = null;
+    (opener?.isConnected && opener.getClientRects().length ? opener : (selected ? heading : searching ? searchInput : navigation).current)?.focus();
+  }, [selected, play]);
   const current = (kind: Selection['kind'], id: string) => selected?.kind === kind && selected.id === id ? 'true' as const : undefined;
   const resultStatus = !people ? 'msgSearching' : people.value?.length === 0 ? 'msgNoPeople' : '';
   const orderedThreads = threads?.value && [...threads.value].sort((a, b) => Number(b.canAnswer) - Number(a.canAnswer));
-  return <section className={`public-messaging${selected ? ' has-selection' : ''}`} aria-label={t('msgTitle')}>
+  return <section className={`public-messaging${selected || play !== undefined ? ' has-selection' : ''}`} aria-label={t('msgTitle')}>
     <aside className="msg-sidebar" aria-labelledby="msg-navigation">
       <div className="msg-sidebar-head">
         <h2 id="msg-navigation" tabIndex={-1} ref={navigation}>{t('msgTitle')}</h2>
         {polling && <p className="small" role="status">{t('roomPolling')}</p>}
       </div>
       <div className="msg-inbox-controls">
+        <button type="button" aria-current={play !== undefined ? 'true' : undefined} onClick={event => openPlay(null, event.currentTarget)}>{t('playInbox')}</button>
         <div>
           <label htmlFor="msg-room-picker">{t('msgRooms')}</label>
           <select id="msg-room-picker" value={room?.id ?? ''} disabled={!rooms?.value} onChange={event => choose({ kind: 'room', id: event.target.value })}>
@@ -185,7 +200,8 @@ export function PublicMessaging({ me, role, isAdmin, onAuthLost, ...copy }: Chat
         </li>)}</ul>
       </nav>
     </aside>
-    <section className="msg-pane" aria-labelledby="msg-heading">
+    <section className="msg-pane" aria-labelledby={play === undefined ? 'msg-heading' : 'msg-play-heading'}>
+      <div className="msg-chat-view" hidden={play !== undefined}>
       <div className="msg-head">
         <button type="button" className="quiet msg-back" onClick={() => choose(null)}>{t('msgBack')}</button>
         <h2 id="msg-heading" tabIndex={-1} ref={heading}>{title ? <bdi>{title}</bdi> : t(selected?.kind === 'person' ? 'msgInviteChat' : selected ? 'msgConversation' : 'msgChoose')}</h2>
@@ -194,7 +210,7 @@ export function PublicMessaging({ me, role, isAdmin, onAuthLost, ...copy }: Chat
         revision={updates.rooms[selected.id] ?? 0} visibility={visibility} onChanged={() => refreshRoom(selected.id)} onVisibilityChanged={invalidate} />}
       {selected?.kind === 'private' && <PublicConversations key={selected.id} {...copy} id={selected.id} isAdmin={isAdmin}
         snapshot={detail} revision={updates.private} visibility={visibility} onChanged={refreshPrivate}
-        onDecision={() => heading.current?.focus({ preventScroll: true })} onBlocked={() => { invalidate(); choose(null); }} />}
+        onOpenPlay={openPlay} onDecision={() => heading.current?.focus({ preventScroll: true })} onBlocked={() => { invalidate(); choose(null); }} />}
       {selected?.kind === 'person' && (person?.canInvite ? <PrivateRequest key={person.nickname} {...copy} nickname={person.nickname}
         focusOpening={() => document.activeElement === heading.current}
         onCancel={() => choose(null)} onSent={id => { refreshPrivate(); choose({ kind: 'private', id }); }} /> :
@@ -203,6 +219,14 @@ export function PublicMessaging({ me, role, isAdmin, onAuthLost, ...copy }: Chat
             person?.conversationId ? <button type="button" onClick={() => choose({ kind: 'private', id: person.conversationId! })}>{t('msgOpenChat')}</button> :
               <p role="status">{t(selectedPerson?.value ? 'msgPersonUnavailable' : 'msgLoading')}</p>}
         </div>)}
+      </div>
+      {play !== undefined && <>
+        <div className="msg-head">
+          <button type="button" className="quiet" onClick={closePlay}>{t(selected ? 'playBackChat' : 'msgBack')}</button>
+          <h2 id="msg-play-heading" ref={playHeading} tabIndex={-1}>{t(play ? 'playSession' : 'playInbox')}</h2>
+        </div>
+        <PublicPlay {...copy} id={play} onPick={openPlay} revision={updates.private} visibility={visibility} />
+      </>}
     </section>
   </section>;
 }

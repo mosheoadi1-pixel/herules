@@ -13,8 +13,9 @@ export type ConversationDetail = { conversation: Conversation; messages: Message
 
 export const stateKeys: Record<Conversation['state'], string> = { requested: 'convStateRequested', accepted: 'convStateAccepted', declined: 'convStateDeclined', closed: 'convStateClosed' };
 
-export function PublicConversations({ id, isAdmin, snapshot, revision, visibility, onChanged, onBlocked, onDecision, ...copy }: ChatCopy & {
+export function PublicConversations({ id, isAdmin, snapshot, revision, visibility, onChanged, onBlocked, onDecision, onOpenPlay, ...copy }: ChatCopy & {
   id: string; isAdmin: boolean; revision: number; visibility: number; onChanged: () => void; onBlocked: () => void;
+  onOpenPlay: (id: string, opener: HTMLElement) => void;
   snapshot?: { value?: ConversationDetail; error?: any }; onDecision: () => void;
 }) {
   const { t, errorText } = copy, path = `/public/conversations/${id}`;
@@ -41,7 +42,7 @@ export function PublicConversations({ id, isAdmin, snapshot, revision, visibilit
     }} />;
   return <>
     {current?.state === 'accepted' && <PublicSessionRequests conversationId={id} role={current.role}
-      version={revision} editor={sessionEditor} onEditor={setSessionEditor} {...copy} />}
+      version={revision} editor={sessionEditor} onEditor={setSessionEditor} onOpenPlay={onOpenPlay} {...copy} />}
     <ChatFeedback error={error || (snapshot?.error && errorText(snapshot.error))} notice={notice} />
     {current?.canAnswer ? <section className="msg-card msg-consent" aria-labelledby="msg-consent-heading">
       <h3 id="msg-consent-heading">{t('convIncoming')}</h3>

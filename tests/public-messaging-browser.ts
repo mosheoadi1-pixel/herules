@@ -208,6 +208,53 @@ try {
   await exact(card, text('sessionAccepted', 'he')).waitFor();
   assert.equal(await exact(o, 'A reply with consent').count(), 0);
 
+  // Gameplay opens only when chosen, and opening it does not discard chat drafts.
+  const openPlayHe = card.getByRole('button', { name: text('playOpenButton', 'he'), exact: true });
+  const playHeading = (page: any) => page.locator('#msg-play-heading');
+  assert.equal(await playHeading(s).count(), 0);
+  await d.getByLabel(text('convCompose')).fill('Unsent chat draft');
+  await button(desktopCard, 'playOpenButton').press('Enter');
+  assert.equal(await playHeading(d).evaluate((el: Element) => el === document.activeElement), true);
+  await openPlayHe.press('Enter');
+  assert.equal(await playHeading(s).evaluate((el: Element) => el === document.activeElement), true);
+  await exact(s, text('playNoMission', 'he')).waitFor();
+  const assignButton = button(d, 'playAssign');
+  await assignButton.click();
+  const missionTitle = d.getByLabel(text('playTitle'));
+  assert.equal(await missionTitle.evaluate((el: Element) => el === document.activeElement), true);
+  await missionTitle.fill('A shared mission');
+  await d.getByLabel(text('playInstructions')).fill('Do something thoughtful.');
+  await d.getByLabel(text('playValue')).fill('9');
+  await assignButton.click();
+  const playButtonHe = (key: string) => s.getByRole('button', { name: text(key, 'he'), exact: true });
+  const acceptMission = playButtonHe('playAccept');
+  await acceptMission.waitFor();
+  assert.ok((await acceptMission.boundingBox()).height >= 44);
+  await acceptMission.press('Enter');
+  await playButtonHe('playComplete').press('Enter');
+  await button(d, 'playReturn').click();
+  await d.getByLabel(text('playReason')).fill('Please add one more detail.');
+  await button(d, 'playReturn').click();
+  await s.getByText(/Please add one more detail/).waitFor();
+  await playButtonHe('playComplete').click();
+  await button(d, 'playApprove').click();
+  await exact(s, `${text('playTotal', 'he')}: 9`).waitFor();
+  await exact(d, `${text('playTotal')}: 0`).waitFor();
+  assert.equal(await exact(o, 'A shared mission').count(), 0);
+  assert.equal(await s.evaluate(() => document.documentElement.scrollWidth <= innerWidth), true);
+  s.once('dialog', (dialog: { accept: () => Promise<void> }) => void dialog.accept());
+  await playButtonHe('playStop').press('Enter');
+  await exact(s, text('playStopped', 'he')).waitFor();
+  await exact(d, text('playStopped')).waitFor();
+  await button(d, 'playBackChat').click();
+  assert.equal(await d.getByLabel(text('convCompose')).inputValue(), 'Unsent chat draft');
+  await button(d, 'playInbox').click();
+  await d.getByRole('button', { name: /Planning/ }).click();
+  await exact(d, text('playStopped')).waitFor();
+  await button(d, 'playBackChat').click();
+  await playButtonHe('playBackChat').click();
+  assert.equal(await openPlayHe.evaluate((el: Element) => el === document.activeElement), true);
+
   // Back restores the search on mobile; the person and history are hidden by a bilateral block.
   assert.equal(await s.locator('html').getAttribute('dir'), 'rtl');
   assert.equal(await s.evaluate(() => document.documentElement.scrollWidth <= innerWidth), true);

@@ -4,12 +4,13 @@ import { api } from '../api';
 import { ChatFeedback, useChatAction, useChatRead, type ChatCopy } from './PublicChatParts';
 
 type State = 'requested' | 'countered' | 'accepted' | 'declined' | 'withdrawn' | 'cancelled';
-type SessionRequest = { id: string; title: string; details: string; startsAt: string; counterStartsAt: string | null; state: State };
+type SessionRequest = { id: string; playId: string | null; title: string; details: string; startsAt: string; counterStartsAt: string | null; state: State };
 type Verb = 'accept' | 'decline' | 'counter' | 'withdraw' | 'cancel';
 const stateKeys: Record<State, string> = { requested: 'sessionRequested', countered: 'sessionCountered', accepted: 'sessionAccepted', declined: 'sessionDeclined', withdrawn: 'sessionWithdrawn', cancelled: 'sessionCancelled' };
 
-export function PublicSessionRequests({ conversationId, role, version, editor, onEditor, ...copy }: ChatCopy & {
+export function PublicSessionRequests({ conversationId, role, version, editor, onEditor, onOpenPlay, ...copy }: ChatCopy & {
   conversationId: string; role: 'dom' | 'sub'; version: number; editor: string | null; onEditor: (editor: string | null) => void;
+  onOpenPlay: (id: string, opener: HTMLElement) => void;
 }) {
   const { t, lang, errorText } = copy;
   const [title, setTitle] = useState(''), [details, setDetails] = useState(''), [start, setStart] = useState('');
@@ -90,7 +91,7 @@ export function PublicSessionRequests({ conversationId, role, version, editor, o
         <p className="preserve" dir="auto">{request.details}</p>
         <p>{t(request.state === 'accepted' && !request.counterStartsAt ? 'sessionAgreedTime' : 'sessionOriginalTime')}: {time(request.startsAt)}</p>
         {request.counterStartsAt && <p>{t(request.state === 'accepted' ? 'sessionAgreedTime' : 'sessionCounterTime')}: {time(request.counterStartsAt)}</p>}
-        {!editor && (answer || withdraw || request.state === 'accepted') && <div className="row">
+        {!editor && (answer || withdraw || request.state === 'accepted' || request.playId) && <div className="row">
           {answer && <>
             <button type="button" className="primary" disabled={busy} onClick={() => action(request.id, 'accept')}>{t('convAccept')}</button>
             <button type="button" disabled={busy} onClick={() => action(request.id, 'decline')}>{t('convDecline')}</button>
@@ -99,7 +100,8 @@ export function PublicSessionRequests({ conversationId, role, version, editor, o
             setCounter(''); onEditor(request.id);
           }}>{t('sessionCounter')}</button>}
           {withdraw && <button type="button" disabled={busy} onClick={() => action(request.id, 'withdraw')}>{t('sessionWithdraw')}</button>}
-          {request.state === 'accepted' && <button type="button" className="danger" disabled={busy} onClick={() => {
+          {request.playId && <button type="button" className="primary" disabled={busy} onClick={event => onOpenPlay(request.playId!, event.currentTarget)}>{t('playOpenButton')}</button>}
+          {request.state === 'accepted' && <button type="button" className="quiet" disabled={busy} onClick={() => {
             if (confirm(t('sessionConfirmCancel'))) action(request.id, 'cancel');
           }}>{t('sessionCancel')}</button>}
         </div>}
