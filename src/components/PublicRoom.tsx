@@ -39,9 +39,9 @@ export function PublicRoom({ t, lang, errorText, me, role, isAdmin, onConversati
     const events = new EventSource('/api/public/events');
     let retry: ReturnType<typeof setTimeout> | undefined;
     events.addEventListener('room', event => merge([JSON.parse((event as MessageEvent).data)]));
-    for (const name of ['conversation_requested', 'conversation_updated', 'conversation_message']) events.addEventListener(name, () => onConversationEvent());
+    for (const name of ['conversation_requested', 'conversation_updated', 'conversation_message', 'session_request_updated']) events.addEventListener(name, () => onConversationEvent());
     // A fresh connection may have missed events while it was down; the poll closes that gap.
-    events.onopen = () => { setPolling(false); void poll(); };
+    events.onopen = () => { setPolling(false); onConversationEvent(); void poll(); };
     events.onerror = () => { events.close(); setPolling(true); retry = setTimeout(() => setAttempt(value => value + 1), 30000); };
     return () => { events.close(); clearTimeout(retry); };
   }, [attempt]);

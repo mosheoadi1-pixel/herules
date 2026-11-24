@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import type { FormEvent } from 'react';
 import { api } from '../api';
+import { PublicSessionRequests } from './PublicSessionRequests';
 
 type Conversation = { id: string; state: 'requested' | 'accepted' | 'declined' | 'closed'; role: 'dom' | 'sub'; otherNickname: string; createdAt: string; decidedAt: string | null; closedAt: string | null; cooldownUntil: string | null; lastMessageAt: string | null; canMessage: boolean; canAnswer: boolean; canClose: boolean };
 type Message = { id: string; seq: number; conversationId: string; nickname: string; mine: boolean; body: string | null; removed: boolean; createdAt: string };
@@ -99,7 +100,7 @@ export function PublicConversations({ t, lang, errorText, isAdmin, version }: { 
         </article>
       </li>)}</ul>
     </>}
-    {openId && current && detail && <section aria-label={t('convTitle')}>
+    {openId && current?.id === openId && detail && <section aria-label={t('convTitle')}>
       <button type="button" className="quiet" disabled={busy} onClick={() => setOpenId('')}>{t('convBack')}</button>
       <h3><span>{t('convWith')} </span><bdi>{current.otherNickname}</bdi> · {t('convStatus')}: {t(stateKeys[current.state])}</h3>
       {current.canAnswer && <div className="row">
@@ -111,6 +112,7 @@ export function PublicConversations({ t, lang, errorText, isAdmin, version }: { 
       {current.cooldownUntil && (current.state === 'closed' || current.state === 'declined') && <p className="small">{t('convCooldownNote')}</p>}
       {current.canClose && <button type="button" className="quiet" disabled={busy} onClick={close}>{t('convClose')}</button>}
       <button type="button" disabled={busy} onClick={blockOther}>{t('roomBlock')}</button>
+      {current.state === 'accepted' && <PublicSessionRequests key={current.id} conversationId={current.id} role={current.role} version={version} t={t} lang={lang} errorText={errorText} />}
       {detail.messages.length === 0 && <p className="empty">{t('convNone')}</p>}
       <ol className="room-list">{detail.messages.map(message => <li key={message.id}>
         <article>

@@ -23,6 +23,7 @@ import { VERIFICATION_ATTEMPTS_PER_DAY, VERIFICATION_MEDIA_MAX_ITEMS, cameraLive
 import { adminHashFromEnv, isPublicAdmin, publicEmailHash } from './public-admin.ts';
 import { ROOM_PAGE_MAX, ROOM_POSTS_PER_TEN_MINUTES, roomBody, roomHidden, roomHiddenIds, roomMessageSql, roomView } from './public-room.ts';
 import { CONVERSATION_COOLDOWN, CONVERSATION_MESSAGES_PER_TEN_MINUTES, CONVERSATION_PAGE_MAX, conversationBody, conversationMessageSql, conversationMessageView, conversationRowSql, conversationView, otherOf, participantOf, visibleConversation } from './public-conversations.ts';
+import { sessionAction, sessionActionExists, sessionProposal, sessionStart, sessionTransition, sessionView, sessionVisibleSql, validSessionStart } from './public-sessions.ts';
 const scrypt = promisify(scryptCallback);
 const hash = (v: string) => createHash('sha256').update(v).digest('hex');
 const text = z.string().trim().min(1).max(4000);
@@ -167,6 +168,7 @@ export async function createApp(pool: Pool, origin: string, providers: Partial<R
   await pool.query(await readFile(new URL('../db/008-public-admin.sql', import.meta.url), 'utf8'));
   await pool.query(await readFile(new URL('../db/009-public-room.sql', import.meta.url), 'utf8'));
   await pool.query(await readFile(new URL('../db/010-public-conversations.sql', import.meta.url), 'utf8'));
+  await pool.query(await readFile(new URL('../db/011-public-sessions.sql', import.meta.url), 'utf8'));
   const app = express(); app.disable('x-powered-by');
   app.set('trust proxy',process.env.TRUST_PROXY?.split(',').map(v=>v.trim())||false);
   // Public mode shows reviewer images as blob: object URLs; private mode keeps its existing policy.
@@ -432,10 +434,15 @@ export async function createApp(pool: Pool, origin: string, providers: Partial<R
       return user;
     };
     // Events are rows of the room sequence: room posts and removals, conversation state changes, and conversation messages. One feed serves SSE and polling.
-    type FeedRow = { seq: number; kind: 'room' | 'conversation' | 'conversation_message'; id: string };
+    type FeedRow = { seq: number; kind: 'room' | 'conversation' | 'conversation_message' | 'session_request'; id: string };
     type FeedEvent = { id: number; event: string; data: unknown };
-    const latestSeq = async () => Number((await pool.query('SELECT GREATEST((SELECT COALESCE(max(seq),0) FROM room_messages),(SELECT COALESCE(max(seq),0) FROM conversations),(SELECT COALESCE(max(seq),0) FROM conversation_messages)) AS seq')).rows[0].seq);
-    const feedAfter = async (after: number, limit: number): Promise<FeedRow[]> => (await pool.query("SELECT seq, kind, id::text AS id FROM (SELECT seq, 'room' AS kind, id FROM room_messages WHERE seq>$1 UNION ALL SELECT seq, 'conversation', id FROM conversations WHERE seq>$1 UNION ALL SELECT seq, 'conversation_message', id FROM conversation_messages WHERE seq>$1) feed ORDER BY seq LIMIT $2", [after, limit])).rows.map(row => ({ seq: Number(row.seq), kind: row.kind as FeedRow['kind'], id: row.id as string }));
+    const latestSeq = async () => Number((await pool.query('SELECT GREATEST((SELECT COALESCE(max(seq),0) FROM room_messages),(SELECT COALESCE(max(seq),0) FROM conversations),(SELECT COALESCE(max(seq),0) FROM conversation_messages),(SELECT COALESCE(max(seq),0) FROM public_session_events)) AS seq')).rows[0].seq);
+    const feedAfter = async (after: number, limit: number): Promise<FeedRow[]> => (await pool.query(`SELECT seq, kind, id::text AS id FROM (
+      SELECT seq, 'room' AS kind, id FROM room_messages WHERE seq>$1
+      UNION ALL SELECT seq, 'conversation', id FROM conversations WHERE seq>$1
+      UNION ALL SELECT seq, 'conversation_message', id FROM conversation_messages WHERE seq>$1
+      UNION ALL SELECT seq, 'session_request', request_id FROM public_session_events WHERE seq>$1
+    ) feed ORDER BY seq LIMIT $2`, [after, limit])).rows.map(row => ({ seq: Number(row.seq), kind: row.kind as FeedRow['kind'], id: row.id as string }));
     // Conversation events reach the two participants only. A request is announced to the sub; the dom sees its own opening message.
     const eventFor = async (viewerId: string, row: FeedRow, hidden: Set<string>): Promise<FeedEvent | null> => {
       if (row.kind === 'room') {
@@ -447,6 +454,12 @@ export async function createApp(pool: Pool, origin: string, providers: Partial<R
         if (!conversation || !participantOf(conversation, viewerId) || hidden.has(otherOf(conversation, viewerId))) return null;
         if (conversation.state === 'requested' && conversation.dom_id === viewerId) return null;
         return { id: row.seq, event: conversation.state === 'requested' ? 'conversation_requested' : 'conversation_updated', data: conversationView(conversation, viewerId) };
+      }
+      if (row.kind === 'session_request') {
+        const change = (await pool.query(`SELECT r.id, c.id AS "conversationId", e.state
+          FROM public_session_events e JOIN public_session_requests r ON r.id=e.request_id JOIN conversations c ON c.id=r.conversation_id
+          WHERE e.seq=$1 AND ${sessionVisibleSql}`, [row.seq, viewerId])).rows[0];
+        return change ? { id: row.seq, event: 'session_request_updated', data: change } : null;
       }
       const message = (await pool.query(`${conversationMessageSql} WHERE m.id=$1`, [row.id])).rows[0];
       const conversation = message && (await pool.query(`${conversationRowSql} WHERE c.id=$1`, [message.conversation_id])).rows[0];
@@ -588,14 +601,20 @@ export async function createApp(pool: Pool, origin: string, providers: Partial<R
       const b = z.object({ userId: uuid.optional(), nickname: z.string().trim().min(1).max(20).optional() }).refine(v => (v.userId === undefined) !== (v.nickname === undefined), 'Give either userId or nickname').parse(req.body);
       const target = (await pool.query(`SELECT id FROM public_users WHERE ${b.userId !== undefined ? 'id=$1' : 'nickname_key=$1'}`, [b.userId ?? b.nickname!.toLowerCase()])).rows[0] ?? fail(404,'Recipient unavailable');
       if (target.id === user.id) fail(400,'You cannot block yourself');
-      await pool.query('INSERT INTO room_blocks(blocker_id,blocked_id) VALUES($1,$2) ON CONFLICT DO NOTHING', [user.id, target.id]);
+      await transaction(async c => {
+        await c.query("SELECT pg_advisory_xact_lock(hashtext('public-room'))");
+        await c.query('INSERT INTO room_blocks(blocker_id,blocked_id) VALUES($1,$2) ON CONFLICT DO NOTHING', [user.id, target.id]);
+      });
       res.json({ blocked: true, userId: target.id });
     });
     app.delete('/api/public/room/blocks/:userId', async (req,res) => {
       await rate(req,'room-block',60);
       const user = await roomUser(req);
       const target = uuid.parse(req.params.userId);
-      await pool.query('DELETE FROM room_blocks WHERE blocker_id=$1 AND blocked_id=$2', [user.id, target]);
+      await transaction(async c => {
+        await c.query("SELECT pg_advisory_xact_lock(hashtext('public-room'))");
+        await c.query('DELETE FROM room_blocks WHERE blocker_id=$1 AND blocked_id=$2', [user.id, target]);
+      });
       res.json({ blocked: false, userId: target });
     });
     app.post('/api/public/admin/room/messages/:id/remove', async (req,res) => {
@@ -669,6 +688,84 @@ export async function createApp(pool: Pool, origin: string, providers: Partial<R
         await c.query("UPDATE conversations SET state='closed',closed_at=now(),closed_by=$2,cooldown_until=CASE WHEN state='accepted' THEN now()+$3::interval ELSE NULL END,seq=nextval('room_events_seq'),updated_at=now() WHERE id=$1", [row.id, user.id, CONVERSATION_COOLDOWN]);
       });
       res.json({ conversation: await conversationFor(id, user.id) });
+    });
+    const requireSessionConversation = async (c: PoolClient, id: string, viewerId: string) => {
+      const conversation = (await c.query(`SELECT c.dom_id,c.state FROM conversations c WHERE c.id=$1 AND ${sessionVisibleSql} FOR UPDATE OF c`, [id, viewerId])).rows[0]
+        ?? fail(404,'Conversation unavailable');
+      if (conversation.state !== 'accepted') fail(409,'Session requests require an accepted conversation');
+      return conversation;
+    };
+    const checkSessionBudget = async (c: PoolClient, userId: string) => {
+      const { n } = (await c.query("SELECT count(*)::int AS n FROM public_session_events WHERE actor_id=$1 AND created_at>clock_timestamp()-interval '10 minutes'", [userId])).rows[0];
+      if (n >= 10) fail(429,'Too many session actions; try again in ten minutes');
+    };
+    const recordSessionChange = (c: PoolClient, id: string, userId: string, state: string) =>
+      c.query('INSERT INTO public_session_events(request_id,actor_id,state) VALUES($1,$2,$3)', [id, userId, state]);
+    const checkSessionTime = (start: Date) => {
+      if (!validSessionStart(start)) fail(400,'Session start must be in the next 90 days');
+    };
+    app.get('/api/public/conversations/:id/session-requests', async (req,res) => {
+      await rate(req,'conversation-read',300);
+      const user = await roomUser(req);
+      const id = uuid.parse(req.params.id);
+      // Fetch visibility and history in one snapshot, including for an empty history.
+      const rows = (await pool.query(`SELECT r.* FROM conversations c LEFT JOIN public_session_requests r ON r.conversation_id=c.id
+        WHERE c.id=$1 AND ${sessionVisibleSql}
+        ORDER BY CASE WHEN r.state IN ('requested','countered','accepted') THEN 0 ELSE 1 END,r.created_at DESC,r.id`, [id, user.id])).rows;
+      if (!rows.length) fail(404,'Conversation unavailable');
+      res.json({ sessionRequests: rows.filter(row => row.id).map(sessionView) });
+    });
+    app.post('/api/public/conversations/:id/session-requests', async (req,res) => {
+      const user = await roomUser(req);
+      const conversationId = uuid.parse(req.params.id);
+      const b = sessionProposal.parse(req.body);
+      const sessionRequest = await transaction(async c => {
+        // Share the room lock with close, block and feed writes: checks and sequence assignment are serialized.
+        await c.query("SELECT pg_advisory_xact_lock(hashtext('public-room'))");
+        const conversation = await requireSessionConversation(c, conversationId, user.id);
+        if (conversation.dom_id !== user.id) fail(403,'Only the dom can propose a session');
+        if (b.idempotencyKey) {
+          const prior = (await c.query('SELECT * FROM public_session_requests WHERE proposer_id=$1 AND idempotency_key=$2', [user.id, b.idempotencyKey])).rows[0];
+          if (prior) {
+            if (prior.conversation_id !== conversationId || prior.title !== b.title || prior.details !== b.details || prior.starts_at.getTime() !== b.startsAt.getTime())
+              fail(409,'Idempotency key was used for a different session request');
+            return sessionView({ ...prior, state: 'requested', counter_starts_at: null, updated_at: prior.created_at });
+          }
+        }
+        checkSessionTime(b.startsAt);
+        await checkSessionBudget(c, user.id);
+        if ((await c.query("SELECT 1 FROM public_session_requests WHERE conversation_id=$1 AND state IN ('requested','countered')", [conversationId])).rows.length)
+          fail(409,'A session request is already open');
+        const row = (await c.query(`INSERT INTO public_session_requests(id,conversation_id,proposer_id,title,details,starts_at,idempotency_key)
+          VALUES($1,$2,$3,$4,$5,$6,$7) RETURNING *`, [randomUUID(), conversationId, user.id, b.title, b.details, b.startsAt, b.idempotencyKey ?? null])).rows[0];
+        await recordSessionChange(c, row.id, user.id, row.state);
+        return sessionView(row);
+      });
+      res.json({ sessionRequest });
+    });
+    app.post('/api/public/session-requests/:id/:action', async (req,res) => {
+      const user = await roomUser(req);
+      const id = uuid.parse(req.params.id);
+      const action = sessionAction.parse(req.params.action);
+      const counter = action === 'counter' ? z.object({ startsAt: sessionStart }).parse(req.body).startsAt : null;
+      const sessionRequest = await transaction(async c => {
+        await c.query("SELECT pg_advisory_xact_lock(hashtext('public-room'))");
+        const row = (await c.query('SELECT * FROM public_session_requests WHERE id=$1', [id])).rows[0] ?? fail(404,'Conversation unavailable');
+        const conversation = await requireSessionConversation(c, row.conversation_id, user.id);
+        const state = sessionTransition(row.state, conversation.dom_id === user.id ? 'dom' : 'sub', action)
+          ?? (sessionActionExists(row.state, action) ? fail(403,'You cannot take this session action') : fail(409,'This session action is not available'));
+        if (counter) {
+          checkSessionTime(counter);
+          if (counter.getTime() === row.starts_at.getTime()) fail(400,'Choose a different time for the counteroffer');
+        }
+        if (action === 'accept') checkSessionTime(row.counter_starts_at ?? row.starts_at);
+        await checkSessionBudget(c, user.id);
+        const updated = (await c.query(`UPDATE public_session_requests SET state=$2,counter_starts_at=COALESCE($3,counter_starts_at),
+          updated_at=clock_timestamp() WHERE id=$1 RETURNING *`, [id, state, counter])).rows[0];
+        await recordSessionChange(c, id, user.id, state);
+        return sessionView(updated);
+      });
+      res.json({ sessionRequest });
     });
     app.post('/api/public/conversations/:id/messages', async (req,res) => {
       await rate(req,'conversation-write',120);

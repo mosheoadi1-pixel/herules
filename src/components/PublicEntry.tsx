@@ -11,6 +11,17 @@ import { CameraCheck, type CameraLiveness } from './CameraCheck';
 
 type PublicUser = { id: string; nickname: string; role: string; gender: string; status: string };
 const errorKeys: Record<string,string> = {'provider not configured':'errProvider','Sign-in expired; start again':'errExpired','Already exists':'errTaken','Invalid or missing input':'errInvalid','verification not configured':'errVerifyNotConfigured','Consent required':'errConsent','Unsupported image type':'errMedia','Image too large':'errMedia','Too many verification attempts; try again tomorrow':'errAttempts','Reviewer role required':'errNotAdmin','Review unavailable':'errReviewGone','Only items awaiting review can be decided':'errReviewGone','Only items awaiting review have media to review':'errReviewGone','Media has been deleted':'errMediaGone','Media unavailable':'errMediaGone','Verification required':'errVerification','camera consent not available yet':'errCameraUnavailable','Camera check needs a front photo, a live selfie and liveness frames':'errCameraInput','Only doms can post in the room':'errOnlyDoms','Recipient unavailable':'errRecipient','Too many posts; try again in ten minutes':'errPosts','Message unavailable':'errRoomMessage','You cannot report your own message':'errOwnReport','Message already removed':'errRemoved','Idempotency key was used for a different message':'errKey','You cannot block yourself':'errSelf','Conversation unavailable':'errConversation','A conversation with this sub is already open':'errConversationOpen','Wait 30 days after a declined or closed conversation before asking again':'errCooldown','Only the sub can answer a request':'errOnlySub','The conversation is not waiting for an answer':'errNotRequested','Messages open after the request is accepted':'errNotAccepted','This conversation is closed':'errClosed','Too many messages; try again in ten minutes':'errConvPosts'};
+Object.assign(errorKeys, {
+  'Session start must be in the next 90 days': 'errSessionTime',
+  'Choose a different time for the counteroffer': 'errSessionSameTime',
+  'Session requests require an accepted conversation': 'errSessionConversation',
+  'Only the dom can propose a session': 'errSessionDom',
+  'Idempotency key was used for a different session request': 'errSessionKey',
+  'A session request is already open': 'errSessionOpen',
+  'You cannot take this session action': 'errSessionRole',
+  'This session action is not available': 'errSessionAction',
+  'Too many session actions; try again in ten minutes': 'errSessionBudget',
+});
 type Verification = { status: string; consented: boolean; cameraConsented?: boolean; cameraEnabled?: boolean; verification: { status: string } | null };
 const maxImageBytes = 5 * 1024 * 1024;
 const readImage = (file: File) => new Promise<string>((resolve, reject) => {
