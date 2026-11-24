@@ -1,12 +1,13 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import type { FormEvent } from 'react';
 import { api } from '../api';
 import { PublicRoom } from './PublicRoom';
-import { PublicConversations, stateKeys, type Conversation } from './PublicConversations';
-import { useChatRead, type ChatCopy, type Room, type Person } from './PublicChatParts';
+import { PublicConversations, stateKeys, type Conversation, type ConversationDetail } from './PublicConversations';
+import { useChatRead, type ChatCopy, type Room } from './PublicChatParts';
 import './public-messaging.css';
 
 type Selection = { kind: 'room' | 'private' | 'person'; id: string };
+type SearchResult = { nickname: string; conversationId: string | null; canInvite: boolean };
 type Updates = { rooms: Record<string, number>; private: number; visibility: number; permissions: number };
 
 function useMessagingFeed(onAuthLost: () => void) {
@@ -115,9 +116,11 @@ export function PublicMessaging({ me, role, isAdmin, onAuthLost, ...copy }: Chat
   me: string; role: string; isAdmin: boolean; onAuthLost: () => void;
 }) {
   const { t, lang, errorText } = copy;
-  const [selected, setSelected] = useState<Selection | null>({ kind: 'room', id: 'main' });
+  const [selected, setSelected] = useState<Selection | null>(() =>
+    window.matchMedia('(max-width: 680px)').matches ? null : { kind: 'room', id: 'main' });
   const [search, setSearch] = useState(''), [query, setQuery] = useState('');
   const heading = useRef<HTMLHeadingElement>(null), navigation = useRef<HTMLHeadingElement>(null);
+  const searchInput = useRef<HTMLInputElement>(null);
   const moveFocus = useRef(false);
   const { updates, polling, invalidate, refreshRoom, refreshPrivate } = useMessagingFeed(onAuthLost);
   const visibility = updates.visibility;
@@ -126,100 +129,111 @@ export function PublicMessaging({ me, role, isAdmin, onAuthLost, ...copy }: Chat
     return () => clearTimeout(timer);
   }, [search]);
   const rooms = useChatRead<Room[]>('/public/rooms', 'rooms', updates.permissions, visibility);
-  const people = useChatRead<Person[]>(`/public/directory?q=${encodeURIComponent(query)}`, 'people', 0, visibility);
+  const searching = search.trim() !== '';
+  const people = useChatRead<SearchResult[]>(searching && search.trim() === query ? `/public/directory?chat=1&q=${encodeURIComponent(query)}` : null,
+    'people', updates.private, visibility);
   const threads = useChatRead<Conversation[]>('/public/conversations', 'conversations', updates.private, visibility);
+  const detail = useChatRead<ConversationDetail>(selected?.kind === 'private' ? `/public/conversations/${selected.id}` : null,
+    null, updates.private, visibility);
   const room = selected?.kind === 'room' ? rooms?.value?.find(entry => entry.id === selected.id) : undefined;
   const thread = selected?.kind === 'private' ? threads?.value?.find(entry => entry.id === selected.id) : undefined;
-  const selectedPerson = useChatRead<Person[]>(selected?.kind === 'person' ? `/public/directory?q=${encodeURIComponent(selected.id)}&limit=1` : null, 'people', 0, visibility);
-  const nickname = selected?.kind === 'person' && selectedPerson?.value?.[0]?.nickname === selected.id ? selected.id : undefined;
-  const title = room?.title[lang === 'he' ? 0 : 1] ?? thread?.otherNickname ?? nickname;
+  const selectedPerson = useChatRead<SearchResult[]>(selected?.kind === 'person' ? `/public/directory?chat=1&q=${encodeURIComponent(selected.id)}&limit=1` : null,
+    'people', updates.private, visibility);
+  const person = selectedPerson?.value?.find(entry => entry.nickname === selected?.id);
+  const title = room?.title[lang === 'he' ? 0 : 1] ?? detail?.value?.conversation.otherNickname ?? thread?.otherNickname ?? person?.nickname;
   const choose = (value: Selection | null) => { moveFocus.current = true; setSelected(value); };
-  useEffect(() => {
+  useLayoutEffect(() => {
     if (!moveFocus.current) return;
     moveFocus.current = false;
-    (selected ? heading : navigation).current?.focus();
+    (selected ? heading : searching ? searchInput : navigation).current?.focus();
   }, [selected]);
   const current = (kind: Selection['kind'], id: string) => selected?.kind === kind && selected.id === id ? 'true' as const : undefined;
-  const existingThread = (nickname: string) => threads?.value?.find(item => item.otherNickname === nickname && item.canClose);
-  const selectPerson = (nickname: string) => {
-    const thread = existingThread(nickname);
-    choose(thread ? { kind: 'private', id: thread.id } : { kind: 'person', id: nickname });
-  };
+  const resultStatus = !people ? 'msgSearching' : people.value?.length === 0 ? 'msgNoPeople' : '';
+  const orderedThreads = threads?.value && [...threads.value].sort((a, b) => Number(b.canAnswer) - Number(a.canAnswer));
   return <section className={`public-messaging${selected ? ' has-selection' : ''}`} aria-label={t('msgTitle')}>
     <aside className="msg-sidebar" aria-labelledby="msg-navigation">
       <div className="msg-sidebar-head">
         <h2 id="msg-navigation" tabIndex={-1} ref={navigation}>{t('msgTitle')}</h2>
-        <p className="small" role="status">{polling ? t('roomPolling') : t('roomLive')}</p>
+        {polling && <p className="small" role="status">{t('roomPolling')}</p>}
       </div>
-      <nav aria-label={t('msgRooms')}>
-        <h3>{t('msgRooms')}</h3>
+      <div className="msg-inbox-controls">
+        <div>
+          <label htmlFor="msg-room-picker">{t('msgRooms')}</label>
+          <select id="msg-room-picker" value={room?.id ?? ''} disabled={!rooms?.value} onChange={event => choose({ kind: 'room', id: event.target.value })}>
+            <option value="" disabled>{t('msgChooseRoom')}</option>
+            {rooms?.value?.map(item => <option key={item.id} value={item.id}>{item.title[lang === 'he' ? 0 : 1]}</option>)}
+          </select>
+        </div>
         {rooms?.error && <p className="error" role="alert">{errorText(rooms.error)}</p>}
-        <ul>{rooms?.value?.map(item => <li key={item.id}>
-          <button type="button" aria-current={current('room', item.id)} onClick={() => choose({ kind: 'room', id: item.id })}>
-            <span>{item.title[lang === 'he' ? 0 : 1]}</span><small>{t(item.kind === 'channel' ? 'msgChannel' : 'msgGroup')}</small>
-          </button>
-        </li>)}</ul>
-      </nav>
-      <nav aria-label={t('convTitle')}>
-        <h3>{t('convTitle')}</h3>
-        {threads?.error && <p className="error" role="alert">{errorText(threads.error)}</p>}
-        {threads?.value?.length === 0 && <p className="small">{t('convEmpty')}</p>}
-        <ul>{threads?.value?.map(item => <li key={item.id}>
+        <label>{t('msgSearch')}
+          <input ref={searchInput} type="search" dir="auto" maxLength={20} value={search} onChange={event => setSearch(event.target.value)} />
+        </label>
+      </div>
+      <nav aria-label={t(searching ? 'msgPeople' : 'convTitle')}>
+        <p className="small" role="status">{searching && resultStatus ? t(resultStatus) : !searching && orderedThreads?.length === 0 ? t('convEmpty') : ''}</p>
+        {(searching ? people?.error : threads?.error) && <p className="error" role="alert">{errorText(searching ? people?.error : threads?.error)}</p>}
+        <ul>{searching ? people?.value?.map(result => <li key={result.nickname}>
+          {result.conversationId || result.canInvite ? <button type="button"
+            aria-current={result.conversationId ? current('private', result.conversationId) : current('person', result.nickname)}
+            onClick={() => choose(result.conversationId ? { kind: 'private', id: result.conversationId } : { kind: 'person', id: result.nickname })}>
+            <bdi>{result.nickname}</bdi><small>{t(result.conversationId ? 'msgOpenChat' : 'msgInviteChat')}</small>
+          </button> : <div className="msg-result-unavailable"><bdi>{result.nickname}</bdi><small>{t('msgChatUnavailable')}</small></div>}
+        </li>) : orderedThreads?.map(item => <li key={item.id}>
           <button type="button" aria-current={current('private', item.id)} onClick={() => choose({ kind: 'private', id: item.id })}>
-            <bdi>{item.otherNickname}</bdi><small>{t(stateKeys[item.state])}</small>
+            <bdi>{item.otherNickname}</bdi><small>{t(item.canAnswer ? 'convIncoming' : stateKeys[item.state])}</small>
           </button>
         </li>)}</ul>
-      </nav>
-      <nav aria-label={t('msgPeople')}>
-        <h3>{t('msgPeople')}</h3>
-        <label>{t('msgSearch')}<input type="search" dir="auto" maxLength={20} value={search} onChange={event => setSearch(event.target.value)} /></label>
-        {people?.error && <p className="error" role="alert">{errorText(people.error)}</p>}
-        {people?.value?.length === 0 && search.trim() === query && <p className="small">{t('msgNoPeople')}</p>}
-        {search.trim() === query && <ul>{people?.value?.map(person => <li key={person.nickname}>
-          <button type="button" aria-current={current('person', person.nickname)} onClick={() => selectPerson(person.nickname)}><bdi>{person.nickname}</bdi></button>
-        </li>)}</ul>}
       </nav>
     </aside>
     <section className="msg-pane" aria-labelledby="msg-heading">
       <div className="msg-head">
         <button type="button" className="quiet msg-back" onClick={() => choose(null)}>{t('msgBack')}</button>
-        <h2 id="msg-heading" tabIndex={-1} ref={heading}>{title ? <bdi>{title}</bdi> : t('msgTitle')}</h2>
-        {room && <p className="small">{t(room.kind === 'channel' ? 'msgChannel' : 'msgGroup')}</p>}
+        <h2 id="msg-heading" tabIndex={-1} ref={heading}>{title ? <bdi>{title}</bdi> : t(selected?.kind === 'person' ? 'msgInviteChat' : selected ? 'msgConversation' : 'msgChoose')}</h2>
       </div>
-      {!selected && <p className="msg-empty">{t('msgChoose')}</p>}
       {selected?.kind === 'room' && <PublicRoom key={selected.id} {...copy} id={selected.id} room={room} me={me} role={role} isAdmin={isAdmin}
         revision={updates.rooms[selected.id] ?? 0} visibility={visibility} onChanged={() => refreshRoom(selected.id)} onVisibilityChanged={invalidate} />}
       {selected?.kind === 'private' && <PublicConversations key={selected.id} {...copy} id={selected.id} isAdmin={isAdmin}
-        revision={updates.private} visibility={visibility} onChanged={refreshPrivate} onBlocked={() => { invalidate(); choose(null); }} />}
-      {selected?.kind === 'person' && (nickname ? <PrivateRequest key={`${nickname}:${visibility}`} {...copy} nickname={nickname} role={role}
-        onSent={id => { refreshPrivate(); choose({ kind: 'private', id }); }} /> :
-        <p className="msg-empty" role="status">{selectedPerson?.error ? errorText(selectedPerson.error) : t(selectedPerson?.value ? 'msgPersonUnavailable' : 'msgLoading')}</p>)}
+        snapshot={detail} revision={updates.private} visibility={visibility} onChanged={refreshPrivate}
+        onDecision={() => heading.current?.focus({ preventScroll: true })} onBlocked={() => { invalidate(); choose(null); }} />}
+      {selected?.kind === 'person' && (person?.canInvite ? <PrivateRequest key={person.nickname} {...copy} nickname={person.nickname}
+        focusOpening={() => document.activeElement === heading.current}
+        onCancel={() => choose(null)} onSent={id => { refreshPrivate(); choose({ kind: 'private', id }); }} /> :
+        <div className="msg-empty">
+          {selectedPerson?.error ? <p className="error" role="alert">{errorText(selectedPerson.error)}</p> :
+            person?.conversationId ? <button type="button" onClick={() => choose({ kind: 'private', id: person.conversationId! })}>{t('msgOpenChat')}</button> :
+              <p role="status">{t(selectedPerson?.value ? 'msgPersonUnavailable' : 'msgLoading')}</p>}
+        </div>)}
     </section>
   </section>;
 }
 
-function PrivateRequest({ nickname, role, onSent, t, errorText }: ChatCopy & { nickname: string; role: string; onSent: (id: string) => void }) {
+function PrivateRequest({ nickname, onSent, onCancel, focusOpening, t, errorText }: ChatCopy & {
+  nickname: string; onSent: (id: string) => void; onCancel: () => void; focusOpening: () => boolean;
+}) {
   const [body, setBody] = useState(''), [busy, setBusy] = useState(false), [error, setError] = useState('');
-  const retry = useRef({ body: '', key: '' }), alive = useRef(false);
+  const retry = useRef({ body: '', key: '' }), alive = useRef(false), writing = useRef(false);
+  const opening = useRef<HTMLTextAreaElement>(null);
   useEffect(() => { alive.current = true; return () => { alive.current = false; }; }, []);
+  useEffect(() => { if (focusOpening()) opening.current?.focus(); }, []);
   const send = async (event: FormEvent) => {
     event.preventDefault();
     const text = body.trim();
-    if (busy || !text) return;
+    if (writing.current || !text || [...text].length > 1000) return;
     if (retry.current.body !== text) retry.current = { body: text, key: crypto.randomUUID() };
-    setBusy(true); setError('');
+    writing.current = true; setBusy(true); setError('');
     try {
       const { conversation } = await api('/public/conversations/request', { targetNickname: nickname, body: text, idempotencyKey: retry.current.key });
       if (alive.current) onSent(conversation.id);
     } catch (e) { if (alive.current) setError(errorText(e)); }
-    finally { if (alive.current) setBusy(false); }
+    finally { writing.current = false; if (alive.current) setBusy(false); }
   };
-  return <div className="msg-empty">
-    <p>{t(role === 'dom' ? 'msgRequestHint' : 'msgSubRequest')}</p>
+  return <form className="msg-card msg-invite" onSubmit={send}>
+    <p id="msg-invite-note">{t('convNoWriting')}</p>
     {error && <p className="error" role="alert">{error}</p>}
-    {role === 'dom' && <form className="msg-compose" onSubmit={send}>
-      <label>{t('msgOpening')}<textarea rows={3} dir="auto" value={body} required disabled={busy} onChange={event => setBody(event.target.value)} /></label>
+    <label>{t('msgOpening')}<textarea ref={opening} aria-describedby="msg-invite-note" rows={3} dir="auto" value={body} required readOnly={busy} maxLength={2000} onChange={event => setBody(event.target.value)} /></label>
+    <div className="row">
       <button className="primary" disabled={busy || !body.trim() || [...body.trim()].length > 1000}>{t('msgRequest')}</button>
-    </form>}
-  </div>;
+      <button type="button" className="quiet" disabled={busy} onClick={onCancel}>{t('adminCancel')}</button>
+    </div>
+  </form>;
 }

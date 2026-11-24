@@ -448,9 +448,29 @@ export async function createApp(pool: Pool, origin: string, providers: Partial<R
 
     app.get('/api/public/directory', async (req,res) => {
       await rate(req,'room-read',300);
-      const q = z.object({ q: z.string().trim().max(20).default(''), limit: z.coerce.number().int().min(1).max(30).default(20) }).parse(req.query);
+      const q = z.object({ q: z.string().trim().max(20).default(''), limit: z.coerce.number().int().min(1).max(30).default(20),
+        chat: z.literal('1').optional() }).parse(req.query);
       const people = await messagingRead(async c => {
         const user = await roomUser(req, c, true);
+        // The inbox needs a hint, not permission to write. The request endpoint
+        // still checks roles, visibility, open conversations and cooldown under lock.
+        if (q.chat) return (await c.query(`SELECT t.nickname,
+          CASE WHEN recent.active OR NOT permission.invite THEN recent.id ELSE NULL END AS "conversationId",
+          permission.invite AS "canInvite"
+          FROM public_users t
+          LEFT JOIN LATERAL (
+            SELECT k.id, k.state IN ('requested','accepted') AS active FROM conversations k
+            WHERE k.dom_id=CASE WHEN $4='dom' THEN $1 ELSE t.id END
+              AND k.sub_id=CASE WHEN $4='dom' THEN t.id ELSE $1 END
+            ORDER BY (k.state IN ('requested','accepted')) DESC,k.created_at DESC,k.id LIMIT 1
+          ) recent ON true
+          CROSS JOIN LATERAL (
+            SELECT $4='dom' AND t.role='sub' AND NOT COALESCE(recent.active,false)
+              AND NOT EXISTS (SELECT 1 FROM conversations k WHERE k.dom_id=$1 AND k.sub_id=t.id AND k.cooldown_until>now()) AS invite
+          ) permission
+          WHERE t.id<>$1 AND t.verified_at IS NOT NULL AND starts_with(t.nickname_key,$2)
+            AND ${messagingVisible('t.id')} ORDER BY t.nickname_key LIMIT $3`,
+        [user.id, q.q.toLowerCase(), q.limit, user.role])).rows;
         return (await c.query(`SELECT t.nickname FROM public_users t
           WHERE t.id<>$1 AND t.verified_at IS NOT NULL AND starts_with(t.nickname_key,$2)
           AND ${messagingVisible('t.id')} ORDER BY t.nickname_key LIMIT $3`, [user.id, q.q.toLowerCase(), q.limit])).rows;

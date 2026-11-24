@@ -109,9 +109,16 @@ try {
   process.env.HR_ADMIN_PUBLIC_IDS=admin.id;
 
   // Gate: verified users only.
+  const searchChats = async (member: Member, prefix: string) =>
+    (await json(await get(base,`/public/directory?chat=1&q=${encodeURIComponent(prefix)}`,member.cookie))).people;
   await failure(await get(base,'/public/conversations',una.cookie),403,'Verification required');
   await failure(await get(base,'/public/conversations'),401,'Please sign in');
+  await failure(await get(base,'/public/directory?chat=1&q=Sara',una.cookie),403,'Verification required');
   assert.deepEqual(await listOf(sara),[],'a verified sub starts with no conversations');
+  assert.deepEqual(await searchChats(dana,'SaRa'),[{nickname:'Sara One',conversationId:null,canInvite:true}]);
+  assert.deepEqual(await searchChats(dana,'Dov'),[{nickname:'Dov Two',conversationId:null,canInvite:false}]);
+  assert.deepEqual(await searchChats(sara,'Dana'),[{nickname:'Dana One',conversationId:null,canInvite:false}]);
+  assert.deepEqual(await searchChats(dana,'Una'),[]);
 
   // Live streams open before the request so they can see it arrive.
   const saraLive=await stream(base,sara.cookie);
@@ -137,6 +144,9 @@ try {
   assert.equal(asSub!.role,'sub');
   assert.equal(asSub!.otherNickname,'Dana One');
   assert.equal(asSub!.canAnswer,true);
+  assert.deepEqual(await searchChats(dana,'Sara'),[{nickname:'Sara One',conversationId:requested.id,canInvite:false}]);
+  assert.deepEqual(await searchChats(sara,'Dana'),[{nickname:'Dana One',conversationId:requested.id,canInvite:false}]);
+  assert.deepEqual(await searchChats(sol,'Dana'),[{nickname:'Dana One',conversationId:null,canInvite:false}]);
   assert.ok(!JSON.stringify(saraList).includes('@'),'the list shows nicknames only');
 
   // The sub is told of the request; the dom is not.
@@ -237,6 +247,7 @@ try {
   assert.equal(closed.canMessage,false);
   assert.equal(closed.canClose,false);
   assert.ok(closed.cooldownUntil,'closing an accepted conversation starts the cooldown');
+  assert.deepEqual(await searchChats(dana,'Sara'),[{nickname:'Sara One',conversationId:requested.id,canInvite:false}]);
   await failure(await writeMessage(sara,requested.id,'After close'),409,'This conversation is closed');
   await failure(await act(sara,requested.id,'close'),409,'This conversation is closed');
   await failure(await addressed(dana,{body:'Again',targetNickname:'Sara One'}),409,'Wait 30 days after a declined or closed conversation before asking again');

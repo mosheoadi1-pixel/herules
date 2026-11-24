@@ -27,14 +27,14 @@ export function useChatAction(copy: ChatCopy, changed: () => void) {
   const [busy, setBusy] = useState(false), [error, setError] = useState(''), [notice, setNotice] = useState('');
   const alive = useRef(false), writing = useRef(false);
   useEffect(() => { alive.current = true; return () => { alive.current = false; }; }, []);
-  const run = async (request: () => Promise<unknown>, complete?: () => void, noticeKey?: string) => {
+  const run = async <T,>(request: () => Promise<T>, complete?: (result: T) => void, noticeKey?: string) => {
     if (writing.current) return;
     writing.current = true;
     setBusy(true); setNotice(''); setError('');
     try {
-      await request();
+      const result = await request();
       if (alive.current) {
-        complete?.();
+        complete?.(result);
         if (noticeKey) setNotice(copy.t(noticeKey));
       }
     } catch (error) { if (alive.current) setError(copy.errorText(error)); }
