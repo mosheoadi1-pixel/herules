@@ -14,12 +14,13 @@ npm run build                           # tsc --noEmit && vite build  <-- the on
 npm test                                # 27 suites, chained with &&; stops at first failure
 npx tsx tests/roulette.ts               # run one suite
 npm run test:browser                    # Playwright/Chromium; spawns its own DB
+npm run test:public-browser             # public messaging on Chromium; requires a build first
 npm run test:production                 # requires `npm run build` first
 ```
 
 - **There is no lint or formatter.** No ESLint/Prettier/Biome config. `npm run build` is the typecheck.
 - On Windows PowerShell use `npm.cmd` / `npx.cmd` (`npm.ps1` is blocked by execution policy).
-- Suites not in `npm test`: `idea-destinations`, `roulette`, `inspiration-browser`, `redesign-browser`, `browser`, `production`.
+- Suites not in `npm test`: `idea-destinations`, `roulette`, `inspiration-browser`, `redesign-browser`, `browser`, `public-messaging-browser`, `production`.
 
 ## Hard constraints
 
@@ -28,7 +29,7 @@ npm run test:production                 # requires `npm run build` first
 - **No dotenv.** `.env` is gitignored and never loaded; config comes from the process environment only. Startup throws without `DATABASE_URL`. `.env.example` documents the rest.
 - `APP_ORIGIN` must be an exact origin (no path/trailing slash) and HTTPS when `NODE_ENV=production`. Non-GET requests are rejected with 403 unless the `Origin` header equals `APP_ORIGIN` or the request's own host — test HTTP clients must send a matching `Origin`.
 - `HR_RESET_GAME_ON_START=1` wipes sessions, points, approvals, cookies and messages and reseeds identities/tasks. Dev and test only.
-- Test suites each spin a disposable cluster on a fixed port (55434–55450; `tests/foryou.ts` needs no database) and never touch `.local/postgres`. Ports must be free; ports collide if two suites run concurrently.
+- Test suites each spin a disposable cluster on a fixed port (55434–55451; `tests/foryou.ts` needs no database) and never touch `.local/postgres`. Ports must be free; ports collide if two suites run concurrently.
 - Browser suites `require()` Playwright from a hardcoded Windows path; override with `PLAYWRIGHT_MODULE=<absolute package dir>`. Chromium must be installed.
 
 ## Architecture

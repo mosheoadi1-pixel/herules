@@ -5,13 +5,19 @@ import { form } from '../app-shared';
 import { publicCopy } from '../i18n';
 import { CAMERA_CONSENT_VERSION, VERIFICATION_CONSENT_VERSION } from '../verification-consent';
 import { AdminReviews } from './PublicAdmin';
-import { PublicRoom } from './PublicRoom';
-import { PublicConversations } from './PublicConversations';
+import { PublicMessaging } from './PublicMessaging';
 import { CameraCheck, type CameraLiveness } from './CameraCheck';
 
 type PublicUser = { id: string; nickname: string; role: string; gender: string; status: string };
 const errorKeys: Record<string,string> = {'provider not configured':'errProvider','Sign-in expired; start again':'errExpired','Already exists':'errTaken','Invalid or missing input':'errInvalid','verification not configured':'errVerifyNotConfigured','Consent required':'errConsent','Unsupported image type':'errMedia','Image too large':'errMedia','Too many verification attempts; try again tomorrow':'errAttempts','Reviewer role required':'errNotAdmin','Review unavailable':'errReviewGone','Only items awaiting review can be decided':'errReviewGone','Only items awaiting review have media to review':'errReviewGone','Media has been deleted':'errMediaGone','Media unavailable':'errMediaGone','Verification required':'errVerification','camera consent not available yet':'errCameraUnavailable','Camera check needs a front photo, a live selfie and liveness frames':'errCameraInput','Only doms can post in the room':'errOnlyDoms','Recipient unavailable':'errRecipient','Too many posts; try again in ten minutes':'errPosts','Message unavailable':'errRoomMessage','You cannot report your own message':'errOwnReport','Message already removed':'errRemoved','Idempotency key was used for a different message':'errKey','You cannot block yourself':'errSelf','Conversation unavailable':'errConversation','A conversation with this sub is already open':'errConversationOpen','Wait 30 days after a declined or closed conversation before asking again':'errCooldown','Only the sub can answer a request':'errOnlySub','The conversation is not waiting for an answer':'errNotRequested','Messages open after the request is accepted':'errNotAccepted','This conversation is closed':'errClosed','Too many messages; try again in ten minutes':'errConvPosts'};
 Object.assign(errorKeys, {
+  'Room unavailable': 'errRoomUnavailable',
+  'Room grant unavailable': 'errRoomGrant',
+  'Room posting requires dom approval': 'msgReadOnly',
+  'Please sign in': 'msgSignInAgain',
+  'Too many attempts; retry in ten minutes': 'msgRate',
+  'Failed to fetch': 'msgNetwork',
+  'Request timed out; the server may have committed. Refresh state before retrying.': 'msgTimeout',
   'Session start must be in the next 90 days': 'errSessionTime',
   'Choose a different time for the counteroffer': 'errSessionSameTime',
   'Session requests require an accepted conversation': 'errSessionConversation',
@@ -99,8 +105,6 @@ function VerificationPanel({ t, errorText, onVerified }: { t: (key: string) => s
 export function PublicEntry({ lang }: { lang: 'he' | 'en' }) {
   const t = (key: string) => publicCopy[key]?.[lang === 'he' ? 0 : 1] || key;
   const [user, setUser] = useState<PublicUser | null>(null), [isAdmin, setIsAdmin] = useState(false), [adminOpen, setAdminOpen] = useState(false), [pending, setPending] = useState(''), [busy, setBusy] = useState(false), [error, setError] = useState('');
-  const [conversationVersion, setConversationVersion] = useState(0);
-  const conversationEvent = () => setConversationVersion(version => version + 1);
   const errorText = (e: any) => (errorKeys[e.message] ? t(errorKeys[e.message]) : e.message);
   // The server decides admin status; the browser only shows what /api/public/me reports.
   const loadMe = () => api('/public/me').then(data => { setUser(data.user); setIsAdmin(data.isAdmin === true); }).catch(() => { setUser(null); setIsAdmin(false); });
@@ -131,7 +135,7 @@ export function PublicEntry({ lang }: { lang: 'he' | 'en' }) {
     void api('/public/logout', {}).finally(() => { setUser(null); setIsAdmin(false); setAdminOpen(false); setBusy(false); });
   };
   if (user) return <>
-  <section className="panel auth">
+  <section className={user.status === 'verified' ? 'public-account' : 'panel auth'}>
     <h2>{t('signedIn')}</h2>
     <p><bdi>{user.nickname}</bdi> · {t(user.status)}</p>
     {user.status === 'pending_verification' && <VerificationPanel t={t} errorText={errorText} onVerified={() => setUser(current => current ? { ...current, status: 'verified' } : current)}/>}
@@ -139,8 +143,7 @@ export function PublicEntry({ lang }: { lang: 'he' | 'en' }) {
     <button type="button" className="quiet" disabled={busy} onClick={signOut}>{t('signOut')}</button>
   </section>
   {isAdmin && adminOpen && <AdminReviews t={t} lang={lang} errorText={errorText}/>}
-  {user.status === 'verified' && <PublicRoom t={t} lang={lang} errorText={errorText} me={user.id} role={user.role} isAdmin={isAdmin} onConversationEvent={conversationEvent}/>}
-  {user.status === 'verified' && <PublicConversations t={t} lang={lang} errorText={errorText} isAdmin={isAdmin} version={conversationVersion}/>}
+  {user.status === 'verified' && <PublicMessaging key={user.id} t={t} lang={lang} errorText={errorText} me={user.id} role={user.role} isAdmin={isAdmin} onAuthLost={loadMe}/>}
   </>;
   if (pending) return <section className="panel auth">
     <h2>{t('finish')}</h2>

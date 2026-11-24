@@ -1,124 +1,69 @@
-import { useEffect, useRef, useState } from 'react';
+import { useRef, useState } from 'react';
 import type { FormEvent } from 'react';
 import { api } from '../api';
+import { ChatComposer, ChatFeedback, ChatTranscript, useChatAction, useChatRead, type ChatCopy, type Person, type Room } from './PublicChatParts';
 
-type RoomMessage = { id: string; seq: number; authorId: string; nickname: string; targetId: string | null; targetNickname: string | null; body: string | null; removed: boolean; createdAt: string };
-type Action = { kind: 'report' | 'remove'; id: string } | null;
+type RoomMessage = { id: string; authorId: string; nickname: string; targetNickname: string | null; body: string | null; removed: boolean; createdAt: string };
 
-// Shown only to verified users; the server enforces it on every request. Live updates come from EventSource.
-// If the stream errors, the room polls /api/public/room instead and retries the stream after 30 seconds.
-// Conversation events arrive on the same stream; the room hands them to the conversations panel through onConversationEvent.
-export function PublicRoom({ t, lang, errorText, me, role, isAdmin, onConversationEvent }: { t: (key: string) => string; lang: 'he' | 'en'; errorText: (e: any) => string; me: string; role: string; isAdmin: boolean; onConversationEvent: () => void }) {
-  const [messages, setMessages] = useState<RoomMessage[]>([]), [loaded, setLoaded] = useState(false), [polling, setPolling] = useState(false), [attempt, setAttempt] = useState(0);
-  const [body, setBody] = useState(''), [target, setTarget] = useState(''), [busy, setBusy] = useState(false), [error, setError] = useState(''), [notice, setNotice] = useState('');
-  const [action, setAction] = useState<Action>(null), [reason, setReason] = useState('');
-  const cursor = useRef(0), sendKey = useRef({ payload: '', key: '' });
-  const dateText = (value: string) => new Date(value).toLocaleString(lang === 'he' ? 'he-IL' : 'en-GB');
+export function PublicRoom({ id, room, me, role, isAdmin, revision, visibility, onChanged, onVisibilityChanged, ...copy }: ChatCopy & {
+  id: string; room?: Room; me: string; role: string; isAdmin: boolean; revision: number; visibility: number;
+  onChanged: () => void; onVisibilityChanged: () => void;
+}) {
+  const { t, errorText } = copy, path = `/public/rooms/${id}`;
+  const snapshot = useChatRead<RoomMessage[]>(path, 'messages', revision, visibility);
+  const [body, setBody] = useState(''), [address, setAddress] = useState(''), [target, setTarget] = useState('');
+  const [toolsOpen, setToolsOpen] = useState(false), [grantRevision, refreshGrants] = useState(0);
+  const canAddress = room !== undefined && role === 'dom';
+  const canManage = role === 'dom' || isAdmin;
+  const grants = useChatRead<Person[]>(room && canManage && toolsOpen ? `${path}/grants` : null, 'grants', grantRevision, visibility);
+  const { busy, error, notice, run } = useChatAction(copy, onChanged);
+  const retry = useRef<{ post?: { signature: string; key: string }; address?: { signature: string; key: string } }>({});
 
-  const merge = (incoming: RoomMessage[], next?: number) => {
-    setMessages(current => {
-      const byId = new Map(current.map(message => [message.id, message]));
-      for (const message of incoming) byId.set(message.id, message);
-      return [...byId.values()].sort((a, b) => a.seq - b.seq);
-    });
-    for (const message of incoming) cursor.current = Math.max(cursor.current, message.seq);
-    if (next !== undefined) cursor.current = Math.max(cursor.current, next);
-  };
-  // Blocks and reports change what is visible, so the latest view is reloaded whole rather than merged.
-  const loadLatest = () => api('/public/room').then(page => { setMessages(page.messages); cursor.current = page.cursor; setLoaded(true); }).catch(e => setError(errorText(e)));
-  const poll = () => api(`/public/room?after=${cursor.current}&limit=50`).then(page => { merge(page.messages, page.cursor); if (page.events.length) onConversationEvent(); setLoaded(true); }).catch(e => setError(errorText(e)));
-
-  useEffect(() => { void loadLatest(); }, []);
-  useEffect(() => {
-    if (!polling) return;
-    const timer = setInterval(() => void poll(), 3000);
-    return () => clearInterval(timer);
-  }, [polling]);
-  useEffect(() => {
-    if (typeof EventSource === 'undefined') { setPolling(true); return; }
-    const events = new EventSource('/api/public/events');
-    let retry: ReturnType<typeof setTimeout> | undefined;
-    events.addEventListener('room', event => merge([JSON.parse((event as MessageEvent).data)]));
-    for (const name of ['conversation_requested', 'conversation_updated', 'conversation_message', 'session_request_updated']) events.addEventListener(name, () => onConversationEvent());
-    // A fresh connection may have missed events while it was down; the poll closes that gap.
-    events.onopen = () => { setPolling(false); onConversationEvent(); void poll(); };
-    events.onerror = () => { events.close(); setPolling(true); retry = setTimeout(() => setAttempt(value => value + 1), 30000); };
-    return () => { events.close(); clearTimeout(retry); };
-  }, [attempt]);
-
-  const send = (event: FormEvent<HTMLFormElement>) => {
+  const send = (event: FormEvent, addressed: boolean) => {
     event.preventDefault();
-    const text = body.trim(), nickname = target.trim() || undefined;
-    // A retry of the same text and target reuses its key, so a repeated tap cannot post twice.
-    const payload = JSON.stringify([text, nickname]);
-    if (sendKey.current.payload !== payload) sendKey.current = { payload, key: crypto.randomUUID() };
-    setBusy(true);
-    setError('');
-    setNotice('');
-    api('/public/room/messages', { body: text, targetNickname: nickname, idempotencyKey: sendKey.current.key })
-      .then(data => {
-        // An addressed post is a conversation request, so the room shows only that a request was sent.
-        if (data.message) merge([data.message]);
-        else setNotice(t('convRequestSent'));
-        setBody('');
-        setTarget('');
-        sendKey.current = { payload: '', key: '' };
-      })
-      .catch(e => setError(errorText(e)))
-      .finally(() => setBusy(false));
+    const text = (addressed ? address : body).trim(), nickname = addressed ? target.trim() : undefined;
+    const kind = addressed ? 'address' : 'post';
+    if (!text || [...text].length > 1000 || (addressed ? !canAddress || !nickname : !room?.canPost)) return;
+    const signature = JSON.stringify([text, nickname]);
+    if (retry.current[kind]?.signature !== signature) retry.current[kind] = { signature, key: crypto.randomUUID() };
+    const idempotencyKey = retry.current[kind]!.key;
+    void run(() => api(`${path}/${addressed ? 'address' : 'messages'}`, { body: text, targetNickname: nickname, idempotencyKey }), () => {
+      delete retry.current[kind];
+      if (addressed) { setAddress(''); setTarget(''); refreshGrants(value => value + 1); }
+      else setBody('');
+    }, addressed ? 'msgApproved' : undefined);
   };
-  const confirmAction = () => {
-    if (!action) return;
-    setBusy(true);
-    setError('');
-    setNotice('');
-    const request = action.kind === 'report'
-      ? api(`/public/room/messages/${action.id}/report`, { reason: reason.trim() }).then(() => setNotice(t('roomReported')))
-      : api(`/public/admin/room/messages/${action.id}/remove`, { reason: reason.trim() }).then(data => { merge([data.message]); setNotice(t('roomRemovedDone')); });
-    request.then(() => { setAction(null); setReason(''); }).catch(e => setError(errorText(e))).finally(() => setBusy(false));
+  const revoke = (nickname: string) => {
+    void run(() => api(`${path}/revoke`, { targetNickname: nickname }), () => {
+      refreshGrants(value => value + 1);
+      onVisibilityChanged();
+    }, 'msgRevoked');
   };
-  const blockAuthor = (message: RoomMessage) => {
-    if (!confirm(t('roomConfirmBlock'))) return;
-    setBusy(true);
-    setError('');
-    setNotice('');
-    api('/public/room/blocks', { userId: message.authorId })
-      .then(() => { setNotice(t('roomBlocked')); return loadLatest(); })
-      .catch(e => setError(errorText(e)))
-      .finally(() => setBusy(false));
+  const block = (userId: string) => {
+    if (confirm(t('roomConfirmBlock'))) void run(() => api('/public/room/blocks', { userId }), onVisibilityChanged, 'roomBlocked');
   };
-
-  return <section className="panel room" aria-label={t('roomTitle')}>
-    <h2>{t('roomTitle')}</h2>
-    <p className="small" role="status">{polling ? t('roomPolling') : t('roomLive')}</p>
-    {error && <p className="error" role="alert">{error}</p>}
-    {notice && <p role="status">{notice}</p>}
-    {loaded && messages.length === 0 && <p className="empty">{t('roomEmpty')}</p>}
-    <ol className="room-list">{messages.map(message => <li key={message.id}>
-      <article>
-        <p className="small"><bdi>{message.nickname}</bdi>{message.targetNickname && <> {'→'} <bdi>{message.targetNickname}</bdi></>} · <time dateTime={message.createdAt}>{dateText(message.createdAt)}</time></p>
-        {message.removed ? <p className="small">{t('roomRemoved')}</p> : <p className="preserve">{message.body}</p>}
-        {!message.removed && message.authorId !== me && <div className="row">
-          <button type="button" disabled={busy} onClick={() => { setAction({ kind: 'report', id: message.id }); setReason(''); }}>{t('roomReport')}</button>
-          <button type="button" disabled={busy} onClick={() => blockAuthor(message)}>{t('roomBlock')}</button>
-        </div>}
-        {!message.removed && isAdmin && <button type="button" className="danger" disabled={busy} onClick={() => { setAction({ kind: 'remove', id: message.id }); setReason(''); }}>{t('roomRemove')}</button>}
-        {action?.id === message.id && <form onSubmit={event => { event.preventDefault(); confirmAction(); }}>
-          <p>{t(action.kind === 'report' ? 'roomConfirmReport' : 'roomConfirmRemove')}</p>
-          <label>{t('roomReasonLabel')}<input value={reason} maxLength={300} required onChange={e => setReason(e.target.value)}/></label>
-          <div className="row">
-            <button type="button" disabled={busy} onClick={() => setAction(null)}>{t('adminCancel')}</button>
-            <button className={action.kind === 'remove' ? 'danger' : 'primary'} disabled={busy || !reason.trim()}>{t(action.kind === 'report' ? 'roomReport' : 'roomRemove')}</button>
-          </div>
-        </form>}
-      </article>
-    </li>)}</ol>
-    {role === 'dom' && <form className="room-compose" onSubmit={send}>
-      <fieldset disabled={busy}>
-        <label>{t('roomCompose')}<textarea value={body} required onChange={e => setBody(e.target.value)}/></label>
-        <label>{t('roomTarget')}<input value={target} maxLength={20} onChange={e => setTarget(e.target.value)}/></label>
-        <button className="primary" disabled={!body.trim()}>{t('roomSend')}</button>
-      </fieldset>
-    </form>}
-  </section>;
+  return <>
+    {canManage && <details className="msg-room-tools" onToggle={event => setToolsOpen(event.currentTarget.open)}>
+      <summary>{t('msgGrants')}</summary>
+      {role === 'dom' && <form className="msg-address" onSubmit={event => send(event, true)}>
+        <p className="small">{t('msgAddressHint')}</p>
+        <label>{t('msgSubNickname')}<input dir="auto" value={target} maxLength={20} onChange={event => setTarget(event.target.value)} required readOnly={busy} /></label>
+        <label>{t('roomCompose')}<textarea dir="auto" rows={2} value={address} onChange={event => setAddress(event.target.value)} required readOnly={busy} /></label>
+        <button className="primary" disabled={!canAddress || busy || !target.trim() || !address.trim() || [...address.trim()].length > 1000}>{t('msgAddress')}</button>
+      </form>}
+      {grants?.error && <p className="error" role="alert">{errorText(grants.error)}</p>}
+      {grants?.value?.length === 0 && <p className="small">{t('msgNoGrants')}</p>}
+      {grants?.value && grants.value.length > 0 && <ul className="msg-grants">{grants.value.map(person => <li key={person.nickname}>
+        <bdi>{person.nickname}</bdi> <button type="button" disabled={busy} aria-label={`${t('msgRevoke')}: ${person.nickname}`} onClick={() => revoke(person.nickname)}>{t('msgRevoke')}</button>
+      </li>)}</ul>}
+    </details>}
+    <ChatFeedback error={error || (snapshot?.error && errorText(snapshot.error))} notice={notice} />
+    {!snapshot?.error && <ChatTranscript key={visibility} {...copy} messages={snapshot?.value?.map(message => ({ ...message, mine: message.authorId === me }))}
+      empty={t('roomEmpty')} isAdmin={isAdmin} busy={busy} onBlock={block} onAction={(action, reason, complete) => {
+        const url = action.kind === 'report' ? `/public/room/messages/${action.id}/report` : `/public/admin/room/messages/${action.id}/remove`;
+        void run(() => api(url, { reason }), complete, action.kind === 'report' ? 'roomReported' : 'roomRemovedDone');
+      }} />}
+    {room && !room.canPost && <p className="msg-readonly" role="status">{t('msgReadOnly')}</p>}
+    {room?.canPost && <ChatComposer t={t} value={body} onInput={setBody} busy={busy} onSubmit={event => send(event, false)} />}
+  </>;
 }
