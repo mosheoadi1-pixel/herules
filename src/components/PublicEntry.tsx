@@ -3,14 +3,14 @@ import type { ChangeEvent, FormEvent } from 'react';
 import { api } from '../api';
 import { form } from '../app-shared';
 import { publicCopy } from '../i18n';
-import { VERIFICATION_CONSENT_VERSION } from '../verification-consent';
+import { CAMERA_CONSENT_VERSION, VERIFICATION_CONSENT_VERSION } from '../verification-consent';
 import { AdminReviews } from './PublicAdmin';
 import { PublicRoom } from './PublicRoom';
 import { CameraCheck, type CameraLiveness } from './CameraCheck';
 
 type PublicUser = { id: string; nickname: string; role: string; gender: string; status: string };
 const errorKeys: Record<string,string> = {'provider not configured':'errProvider','Sign-in expired; start again':'errExpired','Already exists':'errTaken','Invalid or missing input':'errInvalid','verification not configured':'errVerifyNotConfigured','Consent required':'errConsent','Unsupported image type':'errMedia','Image too large':'errMedia','Too many verification attempts; try again tomorrow':'errAttempts','Reviewer role required':'errNotAdmin','Review unavailable':'errReviewGone','Only items awaiting review can be decided':'errReviewGone','Only items awaiting review have media to review':'errReviewGone','Media has been deleted':'errMediaGone','Media unavailable':'errMediaGone','Verification required':'errVerification','camera consent not available yet':'errCameraUnavailable','Camera check needs a front photo, a live selfie and liveness frames':'errCameraInput','Only doms can post in the room':'errOnlyDoms','Recipient unavailable':'errRecipient','Too many posts; try again in ten minutes':'errPosts','Message unavailable':'errRoomMessage','You cannot report your own message':'errOwnReport','Message already removed':'errRemoved','Idempotency key was used for a different message':'errKey','You cannot block yourself':'errSelf'};
-type Verification = { status: string; consented: boolean; cameraEnabled?: boolean; verification: { status: string } | null };
+type Verification = { status: string; consented: boolean; cameraConsented?: boolean; cameraEnabled?: boolean; verification: { status: string } | null };
 const maxImageBytes = 5 * 1024 * 1024;
 const readImage = (file: File) => new Promise<string>((resolve, reject) => {
   if (!['image/jpeg', 'image/png'].includes(file.type)) return reject(new Error('Unsupported image type'));
@@ -24,10 +24,11 @@ function VerificationPanel({ t, errorText, onVerified }: { t: (key: string) => s
   const [state, setState] = useState<Verification | null>(null), [method, setMethod] = useState<'id_document' | 'camera_age'>('id_document'), [files, setFiles] = useState<File[]>([]), [front, setFront] = useState(''), [busy, setBusy] = useState(false), [error, setError] = useState('');
   const load = () => api('/public/verification').then(setState).catch(e => setError(errorText(e)));
   useEffect(() => { void load(); }, []);
+  const guided = method === 'camera_age' && state?.cameraEnabled === true;
   const consent = () => {
     setBusy(true);
     setError('');
-    void api('/public/consent', { kind: 'verification', textVersion: VERIFICATION_CONSENT_VERSION }).then(load).catch(e => setError(errorText(e))).finally(() => setBusy(false));
+    void api('/public/consent', { kind: 'verification', textVersion: guided ? CAMERA_CONSENT_VERSION : VERIFICATION_CONSENT_VERSION }).then(load).catch(e => setError(errorText(e))).finally(() => setBusy(false));
   };
   const submit = (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
@@ -35,7 +36,7 @@ function VerificationPanel({ t, errorText, onVerified }: { t: (key: string) => s
     setError('');
     void Promise.all(files.map(readImage))
       .then(media => api('/public/verification', { method, media }))
-      .then(data => { setState({ status: data.status, consented: true, verification: data.verification }); if (data.status === 'verified') onVerified(); })
+      .then(data => { setState(current => current ? { ...current, status: data.status, consented: true, verification: data.verification } : current); if (data.status === 'verified') onVerified(); })
       .catch(e => setError(errorText(e)))
       .finally(() => setBusy(false));
   };
@@ -54,28 +55,27 @@ function VerificationPanel({ t, errorText, onVerified }: { t: (key: string) => s
       .finally(() => { setFront(''); setBusy(false); });
   };
   if (!state) return error ? <p className="error" role="alert">{error}</p> : null;
-  if (!state.consented) return <section>
-    <h3>{t('consentTitle')}</h3>
-    <p>{t('consentText')}</p>
-    <button type="button" className="primary" disabled={busy} onClick={consent}>{t('consentAccept')}</button>
-    {error && <p className="error" role="alert">{error}</p>}
-  </section>;
   const status = state.verification?.status;
   const message = status === 'failed' ? t('verifyFailed') : status === 'review' ? t('verifyReview') : status === 'purged' ? t('verifyPurged') : status === 'pending' ? t('verifyPending') : '';
-  const guided = method === 'camera_age' && state.cameraEnabled === true;
+  const consentPending = guided ? state.cameraConsented !== true : !state.consented;
   return <section>
     <h3>{t('verifyTitle')}</h3>
     <p>{t('verifyIntro')}</p>
     <form onSubmit={submit}>
       <fieldset disabled={busy || status === 'review'}>
         <label>{t('methodLabel')}<select value={method} onChange={e => setMethod(e.target.value as 'id_document' | 'camera_age')}><option value="id_document">{t('methodId')}</option><option value="camera_age">{t('methodCamera')}</option></select></label>
-        {!guided && <>
+        {!consentPending && !guided && <>
           <label>{t('filesLabel')}<input type="file" accept="image/jpeg,image/png" multiple capture={method === 'camera_age' ? 'user' : undefined} onChange={e => setFiles(Array.from(e.target.files ?? []).slice(0, 3))}/></label>
           <button className="primary" disabled={!files.length}>{t('verifySubmit')}</button>
         </>}
       </fieldset>
     </form>
-    {guided && <fieldset disabled={busy || status === 'review'}>
+    {consentPending && <section>
+      <h4>{t('consentTitle')}</h4>
+      <p>{t(guided ? 'cameraConsentText' : 'consentText')}</p>
+      <button type="button" className="primary" disabled={busy} onClick={consent}>{t('consentAccept')}</button>
+    </section>}
+    {!consentPending && guided && <fieldset disabled={busy || status === 'review'}>
       <label>{t('camFrontLabel')}<span>{t('camFrontHint')}</span><input type="file" accept="image/jpeg,image/png" capture="environment" onChange={pickFront}/></label>
       {front && <CameraCheck t={t} busy={busy} front={front} onSend={sendCamera}/>}
     </fieldset>}

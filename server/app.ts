@@ -343,13 +343,14 @@ export async function createApp(pool: Pool, origin: string, providers: Partial<R
     app.get('/api/public/verification', async (req,res) => {
       const user = await signedPublic(req);
       const latest = (await pool.query('SELECT id,method,status,reason,created_at,decided_at FROM public_verifications WHERE public_user_id=$1 ORDER BY created_at DESC LIMIT 1', [user.id])).rows[0];
-      res.json({ status: user.verified_at ? 'verified' : 'pending_verification', consented: await hasVerificationConsent(pool, user.id), cameraEnabled: cameraEnabled && cameraConsentVersion !== null, verification: verificationView(latest) });
+      const cameraConsented = cameraConsentVersion !== null && await hasConsentVersion(pool, user.id, cameraConsentVersion);
+      res.json({ status: user.verified_at ? 'verified' : 'pending_verification', consented: await hasVerificationConsent(pool, user.id, cameraConsentVersion), cameraConsented, cameraEnabled: cameraEnabled && cameraConsentVersion !== null, verification: verificationView(latest) });
     });
     app.post('/api/public/verification', async (req,res) => {
       await rate(req,'public-verification',60);
       const user = await signedPublic(req);
       const adapter = verifier ?? fail(503,'verification not configured');
-      if (!(await hasVerificationConsent(pool, user.id))) fail(409,'Consent required');
+      if (!(await hasVerificationConsent(pool, user.id, cameraConsentVersion))) fail(409,'Consent required');
       const b = z.object({ method: z.enum(['id_document','camera_age']), media: z.array(z.string().max(7500000)).min(1).max(VERIFICATION_MEDIA_MAX_ITEMS), liveness: cameraLivenessSchema.optional() }).parse(req.body);
       const camera = cameraEnabled && b.method === 'camera_age';
       if (camera) {

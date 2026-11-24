@@ -11,7 +11,7 @@ import { createApp } from '../server/app.ts';
 import type { PublicIdentityProvider } from '../server/public-auth.ts';
 import { createIdswyftVerifier } from '../server/public-idswyft.ts';
 import { cameraLivenessSchema, type CameraLiveness } from '../server/public-verification.ts';
-import { VERIFICATION_CONSENT_VERSION } from '../src/verification-consent.ts';
+import { CAMERA_CONSENT_VERSION, VERIFICATION_CONSENT_VERSION } from '../src/verification-consent.ts';
 
 const phases = ['turn1_start', 'turn1_peak', 'turn1_return', 'turn_start', 'turn_peak', 'turn_return'] as const;
 const apiKey = 'ik_test_only_not_a_real_key';
@@ -228,7 +228,7 @@ try {
   const offFake = fakeIdswyft();
   const offApp = await listen(await createApp(pool, origin, { google: fakeProvider }, createIdswyftVerifier({ apiKey, baseUrl, fetch: offFake.fetch, cameraEnabled: false }), { cameraEnabled: false }));
   const nullFake = fakeIdswyft();
-  const nullApp = await listen(await createApp(pool, origin, { google: fakeProvider }, createIdswyftVerifier({ apiKey, baseUrl, fetch: nullFake.fetch, cameraEnabled: true }), { cameraEnabled: true }));
+  const nullApp = await listen(await createApp(pool, origin, { google: fakeProvider }, createIdswyftVerifier({ apiKey, baseUrl, fetch: nullFake.fetch, cameraEnabled: true }), { cameraEnabled: true, cameraConsentVersion: null }));
   const setFake = fakeIdswyft();
   const setApp = await listen(await createApp(pool, origin, { google: fakeProvider }, createIdswyftVerifier({ apiKey, baseUrl, fetch: setFake.fetch, cameraEnabled: true }), { cameraEnabled: true, cameraConsentVersion: testCameraVersion }));
 
@@ -291,7 +291,38 @@ try {
     assert.equal(identity.verification.status, 'passed', 'the id_document path is unchanged with the flag on');
   }
 
-  console.log('PASS public-camera: schema bounds, flag off review, both sessions in order, age and identity failure and review mapping, route refusals, stored media only');
+  // The approved camera consent (v3) is the shared constant: v2 alone does not unlock the camera, v3 unlocks both methods.
+  const cameraVersion = CAMERA_CONSENT_VERSION as string;
+  assert.ok(cameraVersion, 'the approved camera consent version is set');
+  const prodFake = fakeIdswyft();
+  const prodApp = await listen(await createApp(pool, origin, { google: fakeProvider }, createIdswyftVerifier({ apiKey, baseUrl, fetch: prodFake.fetch, cameraEnabled: true }), { cameraEnabled: true }));
+  const dee = await signUp(prodApp, 'dee', 'Dee Marsh');
+  const eve = await signUp(prodApp, 'eve', 'Eve Stone');
+
+  {
+    assert.equal((await body(await get(prodApp, '/public/verification', dee.cookie))).cameraEnabled, true, 'flag on with the approved v3 text reports cameraEnabled true');
+    await body(await consent(prodApp, dee));
+    const view = await body(await get(prodApp, '/public/verification', dee.cookie));
+    assert.equal(view.consented, true, 'v2 counts for the ID method');
+    assert.equal(view.cameraConsented, false, 'v2 alone does not count for the camera method');
+    assert.equal((await body(await camera(prodApp, dee, payload), 409)).error, 'Consent required', 'camera method with only v2 accepted returns 409');
+    assert.equal(prodFake.calls.length, 0, 'the refused camera request never reaches Idswyft');
+    await body(await consent(prodApp, dee, cameraVersion));
+    assert.equal((await body(await get(prodApp, '/public/verification', dee.cookie))).cameraConsented, true, 'v3 accepted counts for the camera method');
+    const passed = await body(await camera(prodApp, dee, payload));
+    assert.equal(passed.verification.status, 'passed', 'camera method with v3 accepted proceeds');
+    assert.equal(prodFake.calls.length, 5, 'the accepted camera request makes the five Idswyft calls');
+  }
+
+  {
+    await body(await consent(prodApp, eve, cameraVersion));
+    const view = await body(await get(prodApp, '/public/verification', eve.cookie));
+    assert.equal(view.consented, true, 'v3 accepted counts for the ID method');
+    const identity = await body(await post(prodApp, '/public/verification', { method: 'id_document', media: [dataUrl('image/jpeg', frontBytes)] }, eve.cookie));
+    assert.equal(identity.verification.status, 'passed', 'ID method with v3 accepted proceeds');
+  }
+
+  console.log('PASS public-camera: schema bounds, flag off review, both sessions in order, age and identity failure and review mapping, route refusals, stored media only, camera consent v3 gate');
 } finally {
   for (const [key, value] of [['HR_MODE', previous.mode], ['HR_VERIFICATION_DIR', previous.dir], ['HR_ADMIN_PUBLIC_IDS', previous.admins]] as const) {
     if (value === undefined) delete process.env[key];

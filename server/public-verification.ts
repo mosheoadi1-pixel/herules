@@ -2,7 +2,7 @@ import { mkdir, rm, writeFile } from 'node:fs/promises';
 import { join, resolve } from 'node:path';
 import type { Pool } from 'pg';
 import { z } from 'zod';
-import { VERIFICATION_CONSENT_VERSION } from '../src/verification-consent.ts';
+import { CAMERA_CONSENT_VERSION, VERIFICATION_CONSENT_VERSION } from '../src/verification-consent.ts';
 
 export type PublicVerificationMethod = 'id_document' | 'camera_age';
 export type PublicVerifierResult = { result: 'passed' | 'failed' | 'review'; reason: string };
@@ -94,7 +94,11 @@ export async function hasConsentVersion(pool: Pool, userId: string, version: str
   return r.rows.length > 0;
 }
 
-export const hasVerificationConsent = (pool: Pool, userId: string) => hasConsentVersion(pool, userId, VERIFICATION_CONSENT_VERSION);
+// The v3 text also covers the ID photo, so accepting v3 satisfies the ID method as well as the camera method.
+export async function hasVerificationConsent(pool: Pool, userId: string, cameraVersion: string | null = CAMERA_CONSENT_VERSION) {
+  if (await hasConsentVersion(pool, userId, VERIFICATION_CONSENT_VERSION)) return true;
+  return cameraVersion !== null && hasConsentVersion(pool, userId, cameraVersion);
+}
 
 // Deletes files and media rows for decided verifications past their purge time. The verification row stays
 // with status 'purged' and keeps its method, decision date, reviewer and reason.
