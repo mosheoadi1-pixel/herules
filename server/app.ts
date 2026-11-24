@@ -22,6 +22,7 @@ import { CAMERA_CONSENT_VERSION, VERIFICATION_CONSENT_VERSION } from '../src/ver
 import { VERIFICATION_ATTEMPTS_PER_DAY, VERIFICATION_MEDIA_MAX_ITEMS, cameraLivenessSchema, decodeImage, discardMedia, hasConsentVersion, hasVerificationConsent, purgeExpiredVerificationMedia, requireVerified, retentionMs, storeMedia, verificationDirectory, type PublicVerifier, type PublicVerifierResult } from './public-verification.ts';
 import { adminHashFromEnv, isPublicAdmin, publicEmailHash } from './public-admin.ts';
 import { ROOM_PAGE_MAX, ROOM_POSTS_PER_TEN_MINUTES, roomBody, roomHidden, roomHiddenIds, roomMessageSql, roomView } from './public-room.ts';
+import { CONVERSATION_COOLDOWN, CONVERSATION_MESSAGES_PER_TEN_MINUTES, CONVERSATION_PAGE_MAX, conversationBody, conversationMessageSql, conversationMessageView, conversationRowSql, conversationView, otherOf, participantOf, visibleConversation } from './public-conversations.ts';
 const scrypt = promisify(scryptCallback);
 const hash = (v: string) => createHash('sha256').update(v).digest('hex');
 const text = z.string().trim().min(1).max(4000);
@@ -165,6 +166,7 @@ export async function createApp(pool: Pool, origin: string, providers: Partial<R
   await pool.query(await readFile(new URL('../db/007-public-verification.sql', import.meta.url), 'utf8'));
   await pool.query(await readFile(new URL('../db/008-public-admin.sql', import.meta.url), 'utf8'));
   await pool.query(await readFile(new URL('../db/009-public-room.sql', import.meta.url), 'utf8'));
+  await pool.query(await readFile(new URL('../db/010-public-conversations.sql', import.meta.url), 'utf8'));
   const app = express(); app.disable('x-powered-by');
   app.set('trust proxy',process.env.TRUST_PROXY?.split(',').map(v=>v.trim())||false);
   // Public mode shows reviewer images as blob: object URLs; private mode keeps its existing policy.
@@ -429,31 +431,81 @@ export async function createApp(pool: Pool, origin: string, providers: Partial<R
       requireVerified({ status: user.verified_at ? 'verified' : 'pending_verification' });
       return user;
     };
+    // Events are rows of the room sequence: room posts and removals, conversation state changes, and conversation messages. One feed serves SSE and polling.
+    type FeedRow = { seq: number; kind: 'room' | 'conversation' | 'conversation_message'; id: string };
+    type FeedEvent = { id: number; event: string; data: unknown };
+    const latestSeq = async () => Number((await pool.query('SELECT GREATEST((SELECT COALESCE(max(seq),0) FROM room_messages),(SELECT COALESCE(max(seq),0) FROM conversations),(SELECT COALESCE(max(seq),0) FROM conversation_messages)) AS seq')).rows[0].seq);
+    const feedAfter = async (after: number, limit: number): Promise<FeedRow[]> => (await pool.query("SELECT seq, kind, id::text AS id FROM (SELECT seq, 'room' AS kind, id FROM room_messages WHERE seq>$1 UNION ALL SELECT seq, 'conversation', id FROM conversations WHERE seq>$1 UNION ALL SELECT seq, 'conversation_message', id FROM conversation_messages WHERE seq>$1) feed ORDER BY seq LIMIT $2", [after, limit])).rows.map(row => ({ seq: Number(row.seq), kind: row.kind as FeedRow['kind'], id: row.id as string }));
+    // Conversation events reach the two participants only. A request is announced to the sub; the dom sees its own opening message.
+    const eventFor = async (viewerId: string, row: FeedRow, hidden: Set<string>): Promise<FeedEvent | null> => {
+      if (row.kind === 'room') {
+        const message = (await pool.query(`${roomMessageSql} WHERE m.id=$1`, [row.id])).rows[0];
+        return message && !roomHidden(message, hidden) ? { id: row.seq, event: 'room', data: roomView(message) } : null;
+      }
+      if (row.kind === 'conversation') {
+        const conversation = (await pool.query(`${conversationRowSql} WHERE c.id=$1`, [row.id])).rows[0];
+        if (!conversation || !participantOf(conversation, viewerId) || hidden.has(otherOf(conversation, viewerId))) return null;
+        if (conversation.state === 'requested' && conversation.dom_id === viewerId) return null;
+        return { id: row.seq, event: conversation.state === 'requested' ? 'conversation_requested' : 'conversation_updated', data: conversationView(conversation, viewerId) };
+      }
+      const message = (await pool.query(`${conversationMessageSql} WHERE m.id=$1`, [row.id])).rows[0];
+      const conversation = message && (await pool.query(`${conversationRowSql} WHERE c.id=$1`, [message.conversation_id])).rows[0];
+      if (!message || !conversation || !participantOf(conversation, viewerId) || hidden.has(otherOf(conversation, viewerId))) return null;
+      return { id: row.seq, event: 'conversation_message', data: conversationMessageView(message, viewerId) };
+    };
+    // Every conversation write takes the room lock first, so its seq lands in commit order with room events.
+    const lockedConversation = async (c: PoolClient, id: string, user: { id: string }) => {
+      await c.query("SELECT pg_advisory_xact_lock(hashtext('public-room'))");
+      return (await visibleConversation(c, id, user.id, await roomHiddenIds(c, user.id), true)) ?? fail(404,'Conversation unavailable');
+    };
+    const conversationFor = async (id: string, viewerId: string) => conversationView((await pool.query(`${conversationRowSql} WHERE c.id=$1`, [id])).rows[0], viewerId);
+    // A dom's addressed post opens a conversation request. Its opening message is the first conversation message.
+    const requestConversation = (user: { id: string }, body: string, nickname: string, key?: string) => transaction(async c => {
+      await c.query("SELECT pg_advisory_xact_lock(hashtext('public-room'))");
+      const targetKey = nickname.toLowerCase();
+      if (key) {
+        if ((await c.query('SELECT 1 FROM room_messages WHERE author_id=$1 AND idempotency_key=$2', [user.id, key])).rows.length) fail(409,'Idempotency key was used for a different message');
+        const prior = (await c.query('SELECT m.conversation_id, m.body, s.nickname_key AS target_key FROM conversation_messages m JOIN conversations k ON k.id=m.conversation_id JOIN public_users s ON s.id=k.sub_id WHERE m.author_id=$1 AND m.idempotency_key=$2', [user.id, key])).rows[0];
+        if (prior) {
+          if (prior.body !== body || prior.target_key !== targetKey) fail(409,'Idempotency key was used for a different message');
+          return prior.conversation_id as string;
+        }
+      }
+      const recent = (await c.query("SELECT count(*)::int AS n FROM conversation_messages WHERE author_id=$1 AND created_at>now()-interval '10 minutes'", [user.id])).rows[0].n;
+      if (recent >= CONVERSATION_MESSAGES_PER_TEN_MINUTES) fail(429,'Too many messages; try again in ten minutes');
+      const target = (await c.query("SELECT t.id FROM public_users t WHERE t.nickname_key=$1 AND t.role='sub' AND t.verified_at IS NOT NULL AND NOT EXISTS (SELECT 1 FROM room_blocks k WHERE (k.blocker_id=$2 AND k.blocked_id=t.id) OR (k.blocker_id=t.id AND k.blocked_id=$2))", [targetKey, user.id])).rows[0] ?? fail(404,'Recipient unavailable');
+      if ((await c.query("SELECT 1 FROM conversations WHERE dom_id=$1 AND sub_id=$2 AND state IN ('requested','accepted')", [user.id, target.id])).rows.length) fail(409,'A conversation with this sub is already open');
+      if ((await c.query('SELECT 1 FROM conversations WHERE dom_id=$1 AND sub_id=$2 AND cooldown_until>now()', [user.id, target.id])).rows.length) fail(409,'Wait 30 days after a declined or closed conversation before asking again');
+      const id = randomUUID();
+      await c.query("INSERT INTO conversations(id,dom_id,sub_id,state,opening_body) VALUES($1,$2,$3,'requested',$4)", [id, user.id, target.id, body]);
+      await c.query('INSERT INTO conversation_messages(id,conversation_id,author_id,body,idempotency_key) VALUES($1,$2,$3,$4,$5)', [randomUUID(), id, user.id, body, key ?? null]);
+      return id;
+    });
     app.post('/api/public/room/messages', async (req,res) => {
       await rate(req,'room-post',120);
       const user = await roomUser(req);
       if (user.role !== 'dom') fail(403,'Only doms can post in the room');
       const b = z.object({ body: roomBody, targetNickname: z.string().trim().min(1).max(20).optional(), idempotencyKey: uuid.optional() }).parse(req.body);
-      const targetKey = b.targetNickname?.toLowerCase();
+      if (b.targetNickname !== undefined) {
+        const id = await requestConversation(user, b.body, b.targetNickname, b.idempotencyKey);
+        res.json({ conversation: await conversationFor(id, user.id) });
+        return;
+      }
       const message = await transaction(async c => {
         // Room writes are serialised so event seq order matches commit order for SSE and polling readers.
         await c.query("SELECT pg_advisory_xact_lock(hashtext('public-room'))");
         if (b.idempotencyKey) {
           const prior = (await c.query(`${roomMessageSql} WHERE m.author_id=$1 AND m.idempotency_key=$2`, [user.id, b.idempotencyKey])).rows[0];
           if (prior) {
-            if (prior.body !== b.body || (prior.target_nickname ? prior.target_nickname.toLowerCase() : undefined) !== targetKey) fail(409,'Idempotency key was used for a different message');
+            if (prior.body !== b.body || prior.target_id !== null) fail(409,'Idempotency key was used for a different message');
             return prior;
           }
+          if ((await c.query('SELECT 1 FROM conversation_messages WHERE author_id=$1 AND idempotency_key=$2', [user.id, b.idempotencyKey])).rows.length) fail(409,'Idempotency key was used for a different message');
         }
         const recent = (await c.query("SELECT count(*)::int AS n FROM room_messages WHERE author_id=$1 AND created_at>now()-interval '10 minutes'", [user.id])).rows[0].n;
         if (recent >= ROOM_POSTS_PER_TEN_MINUTES) fail(429,'Too many posts; try again in ten minutes');
-        let targetId: string | null = null;
-        if (targetKey !== undefined) {
-          const target = (await c.query("SELECT t.id FROM public_users t WHERE t.nickname_key=$1 AND t.role='sub' AND t.verified_at IS NOT NULL AND NOT EXISTS (SELECT 1 FROM room_blocks k WHERE (k.blocker_id=$2 AND k.blocked_id=t.id) OR (k.blocker_id=t.id AND k.blocked_id=$2))", [targetKey, user.id])).rows[0] ?? fail(404,'Recipient unavailable');
-          targetId = target.id as string;
-        }
         const id = randomUUID();
-        await c.query('INSERT INTO room_messages(id,author_id,target_id,body,idempotency_key) VALUES($1,$2,$3,$4,$5)', [id, user.id, targetId, b.body, b.idempotencyKey ?? null]);
+        await c.query('INSERT INTO room_messages(id,author_id,body,idempotency_key) VALUES($1,$2,$3,$4)', [id, user.id, b.body, b.idempotencyKey ?? null]);
         return (await c.query(`${roomMessageSql} WHERE m.id=$1`, [id])).rows[0];
       });
       res.json({ message: roomView(message) });
@@ -462,20 +514,33 @@ export async function createApp(pool: Pool, origin: string, providers: Partial<R
       await rate(req,'room-read',300);
       const user = await roomUser(req);
       const q = z.object({ after: z.coerce.number().int().min(0).max(Number.MAX_SAFE_INTEGER).optional(), limit: z.coerce.number().int().min(1).max(ROOM_PAGE_MAX).default(50) }).parse(req.query);
-      // Without a cursor the room opens on its latest messages; with one, it returns what came after that seq.
-      const rows = q.after === undefined
-        ? (await pool.query(`SELECT * FROM (${roomMessageSql} ORDER BY m.seq DESC LIMIT $1) latest ORDER BY latest.seq`, [q.limit])).rows
-        : (await pool.query(`${roomMessageSql} WHERE m.seq>$1 ORDER BY m.seq LIMIT $2`, [q.after, q.limit])).rows;
       const hidden = await roomHiddenIds(pool, user.id);
-      const messages = rows.filter(row => !roomHidden(row, hidden)).map(roomView);
-      const cursor = rows.length ? Number(rows[rows.length - 1].seq) : (q.after ?? 0);
-      res.json({ messages, cursor, hasMore: q.after !== undefined && rows.length === q.limit });
+      // Without a cursor the room opens on its latest messages. The cursor is read first, so anything newer is polled next time.
+      if (q.after === undefined) {
+        const cursor = await latestSeq();
+        const rows = (await pool.query(`SELECT * FROM (${roomMessageSql} ORDER BY m.seq DESC LIMIT $1) latest ORDER BY latest.seq`, [q.limit])).rows;
+        res.json({ messages: rows.filter(row => !roomHidden(row, hidden)).map(roomView), events: [], cursor, hasMore: false });
+        return;
+      }
+      // With a cursor, it returns what came after that seq: room messages as messages, conversation events as events.
+      const feed = await feedAfter(q.after, q.limit);
+      const events: FeedEvent[] = [];
+      for (const row of feed) {
+        const event = await eventFor(user.id, row, hidden);
+        if (event) events.push(event);
+      }
+      res.json({
+        messages: events.filter(event => event.event === 'room').map(event => event.data),
+        events: events.filter(event => event.event !== 'room'),
+        cursor: feed.length ? feed[feed.length - 1].seq : q.after,
+        hasMore: feed.length === q.limit,
+      });
     });
     app.get('/api/public/events', async (req,res) => {
       await rate(req,'room-events',60);
       await roomUser(req);
       const last = req.get('Last-Event-ID');
-      let cursor = last && /^\d{1,15}$/.test(last) ? Number(last) : Number((await pool.query('SELECT COALESCE(max(seq),0) AS seq FROM room_messages')).rows[0].seq);
+      let cursor = last && /^\d{1,15}$/.test(last) ? Number(last) : await latestSeq();
       res.set({ 'Content-Type': 'text/event-stream', Connection: 'keep-alive', 'X-Accel-Buffering': 'no' });
       res.flushHeaders();
       res.write('retry: 3000\n\n');
@@ -488,12 +553,13 @@ export async function createApp(pool: Pool, origin: string, providers: Partial<R
         try {
           const viewer = await roomUser(req);
           const hidden = await roomHiddenIds(pool, viewer.id);
-          let rows: any[];
+          let rows: FeedRow[];
           do {
-            rows = (await pool.query(`${roomMessageSql} WHERE m.seq>$1 ORDER BY m.seq LIMIT 200`, [cursor])).rows;
+            rows = await feedAfter(cursor, 200);
             for (const row of rows) {
-              cursor = Number(row.seq);
-              if (!roomHidden(row, hidden)) res.write(`id: ${cursor}\nevent: room\ndata: ${JSON.stringify(roomView(row))}\n\n`);
+              cursor = row.seq;
+              const event = await eventFor(viewer.id, row, hidden);
+              if (event && !closed) res.write(`id: ${event.id}\nevent: ${event.event}\ndata: ${JSON.stringify(event.data)}\n\n`);
             }
           } while (rows.length === 200 && !closed);
         } catch { stop(); res.end(); }
@@ -550,6 +616,114 @@ export async function createApp(pool: Pool, origin: string, providers: Partial<R
       await reviewer(req);
       const rows = (await pool.query('SELECT m.id, m.body, m.removed_at, a.nickname AS author_nickname, t.nickname AS target_nickname, count(r.id)::int AS report_count, array_agg(r.reason ORDER BY r.created_at) AS reasons, max(r.created_at) AS last_reported_at FROM room_messages m JOIN room_reports r ON r.message_id=m.id JOIN public_users a ON a.id=m.author_id LEFT JOIN public_users t ON t.id=m.target_id GROUP BY m.id, a.nickname, t.nickname ORDER BY count(r.id) DESC, max(r.created_at) DESC LIMIT 100')).rows;
       res.json({ reports: rows.map(row => ({ id: row.id, body: row.removed_at ? null : row.body, removed: row.removed_at !== null, nickname: row.author_nickname, targetNickname: row.target_nickname, reportCount: row.report_count, reasons: row.reasons, lastReportedAt: row.last_reported_at })) });
+    });
+    // Private conversations between a dom and a sub. Only the two participants see one; a block hides it both ways.
+    app.get('/api/public/conversations', async (req,res) => {
+      await rate(req,'conversation-read',300);
+      const user = await roomUser(req);
+      const hidden = await roomHiddenIds(pool, user.id);
+      const rows = (await pool.query(`SELECT x.*, (SELECT max(m.created_at) FROM conversation_messages m WHERE m.conversation_id=x.id) AS last_message_at FROM (${conversationRowSql} WHERE c.dom_id=$1 OR c.sub_id=$1) x ORDER BY x.created_at DESC LIMIT 100`, [user.id])).rows;
+      res.json({ conversations: rows.filter(row => !hidden.has(otherOf(row, user.id))).map(row => conversationView(row, user.id)) });
+    });
+    app.get('/api/public/conversations/:id', async (req,res) => {
+      await rate(req,'conversation-read',300);
+      const user = await roomUser(req);
+      const id = uuid.parse(req.params.id);
+      const row = await visibleConversation(pool, id, user.id, await roomHiddenIds(pool, user.id));
+      if (!row) fail(404,'Conversation unavailable');
+      const messages = (await pool.query(`SELECT * FROM (${conversationMessageSql} WHERE m.conversation_id=$1 ORDER BY m.seq DESC LIMIT $2) latest ORDER BY latest.seq`, [row.id, CONVERSATION_PAGE_MAX])).rows;
+      res.json({ conversation: conversationView(row, user.id), messages: messages.map(message => conversationMessageView(message, user.id)) });
+    });
+    app.post('/api/public/conversations/:id/accept', async (req,res) => {
+      await rate(req,'conversation-write',120);
+      const user = await roomUser(req);
+      const id = uuid.parse(req.params.id);
+      await transaction(async c => {
+        const row = await lockedConversation(c, id, user);
+        if (row.sub_id !== user.id) fail(403,'Only the sub can answer a request');
+        if (row.state !== 'requested') fail(409,'The conversation is not waiting for an answer');
+        await c.query("UPDATE conversations SET state='accepted',decided_at=now(),seq=nextval('room_events_seq'),updated_at=now() WHERE id=$1", [row.id]);
+      });
+      res.json({ conversation: await conversationFor(id, user.id) });
+    });
+    app.post('/api/public/conversations/:id/decline', async (req,res) => {
+      await rate(req,'conversation-write',120);
+      const user = await roomUser(req);
+      const id = uuid.parse(req.params.id);
+      await transaction(async c => {
+        const row = await lockedConversation(c, id, user);
+        if (row.sub_id !== user.id) fail(403,'Only the sub can answer a request');
+        if (row.state !== 'requested') fail(409,'The conversation is not waiting for an answer');
+        await c.query("UPDATE conversations SET state='declined',decided_at=now(),cooldown_until=now()+$2::interval,seq=nextval('room_events_seq'),updated_at=now() WHERE id=$1", [row.id, CONVERSATION_COOLDOWN]);
+      });
+      res.json({ conversation: await conversationFor(id, user.id) });
+    });
+    // Closing an accepted conversation starts the cooldown. Withdrawing a request does not: the dom may ask again at once.
+    app.post('/api/public/conversations/:id/close', async (req,res) => {
+      await rate(req,'conversation-write',120);
+      const user = await roomUser(req);
+      const id = uuid.parse(req.params.id);
+      await transaction(async c => {
+        const row = await lockedConversation(c, id, user);
+        if (row.state !== 'requested' && row.state !== 'accepted') fail(409,'This conversation is closed');
+        await c.query("UPDATE conversations SET state='closed',closed_at=now(),closed_by=$2,cooldown_until=CASE WHEN state='accepted' THEN now()+$3::interval ELSE NULL END,seq=nextval('room_events_seq'),updated_at=now() WHERE id=$1", [row.id, user.id, CONVERSATION_COOLDOWN]);
+      });
+      res.json({ conversation: await conversationFor(id, user.id) });
+    });
+    app.post('/api/public/conversations/:id/messages', async (req,res) => {
+      await rate(req,'conversation-write',120);
+      const user = await roomUser(req);
+      const id = uuid.parse(req.params.id);
+      const b = z.object({ body: conversationBody, idempotencyKey: uuid.optional() }).parse(req.body);
+      const message = await transaction(async c => {
+        const row = await lockedConversation(c, id, user);
+        if (b.idempotencyKey) {
+          const prior = (await c.query(`${conversationMessageSql} WHERE m.author_id=$1 AND m.idempotency_key=$2`, [user.id, b.idempotencyKey])).rows[0];
+          if (prior) {
+            if (prior.conversation_id !== row.id || prior.body !== b.body) fail(409,'Idempotency key was used for a different message');
+            return prior;
+          }
+        }
+        if (row.state !== 'accepted') fail(409, row.state === 'requested' ? 'Messages open after the request is accepted' : 'This conversation is closed');
+        const recent = (await c.query("SELECT count(*)::int AS n FROM conversation_messages WHERE author_id=$1 AND created_at>now()-interval '10 minutes'", [user.id])).rows[0].n;
+        if (recent >= CONVERSATION_MESSAGES_PER_TEN_MINUTES) fail(429,'Too many messages; try again in ten minutes');
+        const messageId = randomUUID();
+        await c.query('INSERT INTO conversation_messages(id,conversation_id,author_id,body,idempotency_key) VALUES($1,$2,$3,$4,$5)', [messageId, row.id, user.id, b.body, b.idempotencyKey ?? null]);
+        return (await c.query(`${conversationMessageSql} WHERE m.id=$1`, [messageId])).rows[0];
+      });
+      res.json({ message: conversationMessageView(message, user.id) });
+    });
+    app.post('/api/public/conversations/messages/:messageId/report', async (req,res) => {
+      await rate(req,'conversation-report',60);
+      const user = await roomUser(req);
+      const id = uuid.parse(req.params.messageId);
+      const b = z.object({ reason: z.string().trim().min(1).max(300) }).parse(req.body);
+      const message = (await pool.query(`${conversationMessageSql} WHERE m.id=$1`, [id])).rows[0];
+      const conversation = message ? await visibleConversation(pool, message.conversation_id, user.id, await roomHiddenIds(pool, user.id)) : undefined;
+      if (!message || !conversation || message.removed_at) fail(404,'Message unavailable');
+      if (message.author_id === user.id) fail(400,'You cannot report your own message');
+      // One report per user per message; a repeat is accepted and changes nothing.
+      await pool.query('INSERT INTO conversation_reports(id,message_id,reporter_id,reason) VALUES($1,$2,$3,$4) ON CONFLICT(message_id,reporter_id) DO NOTHING', [randomUUID(), id, user.id, b.reason]);
+      res.json({ reported: true });
+    });
+    app.post('/api/public/admin/conversations/messages/:messageId/remove', async (req,res) => {
+      const actor = await reviewer(req);
+      const id = uuid.parse(req.params.messageId);
+      const b = z.object({ reason: z.string().trim().min(1).max(300) }).parse(req.body);
+      const row = await transaction(async c => {
+        await c.query("SELECT pg_advisory_xact_lock(hashtext('public-room'))");
+        const message = (await c.query('SELECT removed_at FROM conversation_messages WHERE id=$1 FOR UPDATE', [id])).rows[0] ?? fail(404,'Message unavailable');
+        if (message.removed_at) fail(409,'Message already removed');
+        await c.query("UPDATE conversation_messages SET removed_at=now(),removed_by=$2,seq=nextval('room_events_seq') WHERE id=$1", [id, actor.id]);
+        await c.query('INSERT INTO public_admin_audit(id,actor_id,action,target_message_id,reason) VALUES($1,$2,$3,$4,$5)', [randomUUID(), actor.id, 'conversation-remove', id, b.reason]);
+        return (await c.query(`${conversationMessageSql} WHERE m.id=$1`, [id])).rows[0];
+      });
+      res.json({ message: conversationMessageView(row, actor.id) });
+    });
+    app.get('/api/public/admin/conversations/reports', async (req,res) => {
+      await reviewer(req);
+      const rows = (await pool.query('SELECT m.id, m.body, m.removed_at, a.nickname AS author_nickname, count(r.id)::int AS report_count, array_agg(r.reason ORDER BY r.created_at) AS reasons, max(r.created_at) AS last_reported_at FROM conversation_messages m JOIN conversation_reports r ON r.message_id=m.id JOIN public_users a ON a.id=m.author_id GROUP BY m.id, a.nickname ORDER BY count(r.id) DESC, max(r.created_at) DESC LIMIT 100')).rows;
+      res.json({ reports: rows.map(row => ({ id: row.id, body: row.removed_at ? null : row.body, removed: row.removed_at !== null, nickname: row.author_nickname, reportCount: row.report_count, reasons: row.reasons, lastReportedAt: row.last_reported_at })) });
     });
   }
   const listeners = new Map<string,Set<Response>>();

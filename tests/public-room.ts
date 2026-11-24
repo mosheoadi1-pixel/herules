@@ -118,9 +118,10 @@ try {
   assert.equal(first.targetNickname,null,'a dom post without a target is a general post');
   assert.equal(first.removed,false);
   assert.ok(!JSON.stringify(first).includes('@')&&!('email' in first),'the room shows nicknames only');
-  const toSara=(await json(await send(dana,{body:'Tonight, the usual',targetNickname:'sara ONE'}))).message;
-  assert.equal(toSara.targetNickname,'Sara One','nickname matching is case-insensitive');
-  assert.equal(toSara.targetId,sara.id);
+  const toSara=(await json(await send(dana,{body:'Tonight, the usual',targetNickname:'sara ONE'}))).conversation;
+  assert.equal(toSara.state,'requested','an addressed post opens a conversation request');
+  assert.equal(toSara.otherNickname,'Sara One','nickname matching is case-insensitive');
+  assert.ok(!(await roomOf(dana)).some(message=>message.body==='Tonight, the usual'),'an addressed post is not a room message');
   await failure(await send(dana,{body:'hi',targetNickname:'Una Pending'}),404,'Recipient unavailable');
   await failure(await send(dana,{body:'hi',targetNickname:'Dov Two'}),404,'Recipient unavailable');
   await failure(await send(dana,{body:'hi',targetNickname:'Nobody Here'}),404,'Recipient unavailable');
@@ -147,7 +148,7 @@ try {
 
   // Reports: one per user per message.
   const dovGeneral=(await json(await send(dov,{body:'Dov here'}))).message;
-  const dovToSara=(await json(await send(dov,{body:'For Sara',targetNickname:'Sara One'}))).message;
+  const dovToSara=(await json(await send(dov,{body:'For Sara',targetNickname:'Sara One'}))).conversation;
   assert.deepEqual(await json(await report(sara,first.id,'spam')),{reported:true});
   assert.deepEqual(await json(await report(sara,first.id,'spam again')),{reported:true},'a repeat report is accepted without a second row');
   assert.equal((await pool.query('SELECT count(*)::int AS n FROM room_reports WHERE message_id=$1 AND reporter_id=$2',[first.id,sara.id])).rows[0].n,1,'one report per user per message');
@@ -164,10 +165,10 @@ try {
   assert.deepEqual(await json(await block(dana,{userId:dov.id})),{blocked:true,userId:dov.id});
   {
     const danaSees=await seenBy(dana),dovSees=await seenBy(dov),saraSees=await seenBy(sara);
-    assert.ok(!danaSees.has(dovGeneral.id)&&!danaSees.has(dovToSara.id),'the blocker does not see the blocked user messages');
+    assert.ok(!danaSees.has(dovGeneral.id),'the blocker does not see the blocked user messages');
     assert.ok(!dovSees.has(first.id),'the blocked user does not see the blocker messages');
     assert.ok(dovSees.has(dovGeneral.id),'a user always sees their own messages');
-    assert.ok(saraSees.has(dovToSara.id)&&saraSees.has(first.id),'users outside the block see both');
+    assert.ok(saraSees.has(dovGeneral.id)&&saraSees.has(first.id),'users outside the block see both');
     await failure(await report(dov,first.id,'hidden'),404,'Message unavailable');
   }
   await json(await block(sol,{nickname:'dana one'}));
@@ -203,7 +204,7 @@ try {
 
   const older=await stream(base,sara.cookie,String(first.seq));
   await older.until(frames=>frames.some(frame=>frame.data.id===liveMessage.id&&frame.data.removed===true));
-  assert.ok(older.frames.some(frame=>frame.data.id===toSara.id),'resuming from an older event replays newer messages');
+  assert.ok(older.frames.some(frame=>frame.data.id===dovGeneral.id),'resuming from an older event replays newer messages');
 
   const oneMessage=await json(await get(base,'/public/room?after=0&limit=1',sara.cookie));
   assert.equal(oneMessage.messages.length,1);
@@ -212,7 +213,7 @@ try {
   const latest=await json(await get(base,'/public/room',sara.cookie));
   const latestSeqs=latest.messages.map((message:{seq:number})=>message.seq);
   assert.deepEqual(latestSeqs,[...latestSeqs].sort((a,b)=>a-b),'the default room view is oldest first');
-  assert.equal(latest.cursor,latestSeqs[latestSeqs.length-1]);
+  assert.ok(latest.cursor>=latestSeqs[latestSeqs.length-1],'the cursor is the newest event, which may be a conversation event');
   assert.ok(!JSON.stringify(latest).includes('@')&&!JSON.stringify(latest).includes('email'),'readers never see email or identity fields');
 
   // Admin removal and reports.

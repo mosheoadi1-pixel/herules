@@ -7,7 +7,8 @@ type Action = { kind: 'report' | 'remove'; id: string } | null;
 
 // Shown only to verified users; the server enforces it on every request. Live updates come from EventSource.
 // If the stream errors, the room polls /api/public/room instead and retries the stream after 30 seconds.
-export function PublicRoom({ t, lang, errorText, me, role, isAdmin }: { t: (key: string) => string; lang: 'he' | 'en'; errorText: (e: any) => string; me: string; role: string; isAdmin: boolean }) {
+// Conversation events arrive on the same stream; the room hands them to the conversations panel through onConversationEvent.
+export function PublicRoom({ t, lang, errorText, me, role, isAdmin, onConversationEvent }: { t: (key: string) => string; lang: 'he' | 'en'; errorText: (e: any) => string; me: string; role: string; isAdmin: boolean; onConversationEvent: () => void }) {
   const [messages, setMessages] = useState<RoomMessage[]>([]), [loaded, setLoaded] = useState(false), [polling, setPolling] = useState(false), [attempt, setAttempt] = useState(0);
   const [body, setBody] = useState(''), [target, setTarget] = useState(''), [busy, setBusy] = useState(false), [error, setError] = useState(''), [notice, setNotice] = useState('');
   const [action, setAction] = useState<Action>(null), [reason, setReason] = useState('');
@@ -25,7 +26,7 @@ export function PublicRoom({ t, lang, errorText, me, role, isAdmin }: { t: (key:
   };
   // Blocks and reports change what is visible, so the latest view is reloaded whole rather than merged.
   const loadLatest = () => api('/public/room').then(page => { setMessages(page.messages); cursor.current = page.cursor; setLoaded(true); }).catch(e => setError(errorText(e)));
-  const poll = () => api(`/public/room?after=${cursor.current}&limit=50`).then(page => { merge(page.messages, page.cursor); setLoaded(true); }).catch(e => setError(errorText(e)));
+  const poll = () => api(`/public/room?after=${cursor.current}&limit=50`).then(page => { merge(page.messages, page.cursor); if (page.events.length) onConversationEvent(); setLoaded(true); }).catch(e => setError(errorText(e)));
 
   useEffect(() => { void loadLatest(); }, []);
   useEffect(() => {
@@ -38,6 +39,7 @@ export function PublicRoom({ t, lang, errorText, me, role, isAdmin }: { t: (key:
     const events = new EventSource('/api/public/events');
     let retry: ReturnType<typeof setTimeout> | undefined;
     events.addEventListener('room', event => merge([JSON.parse((event as MessageEvent).data)]));
+    for (const name of ['conversation_requested', 'conversation_updated', 'conversation_message']) events.addEventListener(name, () => onConversationEvent());
     // A fresh connection may have missed events while it was down; the poll closes that gap.
     events.onopen = () => { setPolling(false); void poll(); };
     events.onerror = () => { events.close(); setPolling(true); retry = setTimeout(() => setAttempt(value => value + 1), 30000); };
@@ -54,7 +56,14 @@ export function PublicRoom({ t, lang, errorText, me, role, isAdmin }: { t: (key:
     setError('');
     setNotice('');
     api('/public/room/messages', { body: text, targetNickname: nickname, idempotencyKey: sendKey.current.key })
-      .then(data => { merge([data.message]); setBody(''); setTarget(''); sendKey.current = { payload: '', key: '' }; })
+      .then(data => {
+        // An addressed post is a conversation request, so the room shows only that a request was sent.
+        if (data.message) merge([data.message]);
+        else setNotice(t('convRequestSent'));
+        setBody('');
+        setTarget('');
+        sendKey.current = { payload: '', key: '' };
+      })
       .catch(e => setError(errorText(e)))
       .finally(() => setBusy(false));
   };
