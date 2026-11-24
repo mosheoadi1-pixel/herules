@@ -188,7 +188,8 @@ try {
     await call(path, 404, who.cookie);
     await call(path, 404, who.cookie, proposal);
     await act(who, stillOpen, who === sub ? 'accept' : 'withdraw', 404);
-    assert.deepEqual((await call(`/room?after=${cursor}`, 200, who.cookie)).events, []);
+    const blockedEvents = (await call(`/room?after=${cursor}`, 200, who.cookie)).events as Event[];
+    assert.deepEqual(blockedEvents.map(({ event, data }) => ({ event, data })), [{ event: 'messaging_refresh', data: {} }]);
     assert.deepEqual((await liveThrough(who, cursor, blockMarker.id)).filter(event => event.event === 'session_request_updated'), []);
   }
   await call(`/room/blocks/${dom.id}`, 200, sub.cookie, undefined, 'DELETE');

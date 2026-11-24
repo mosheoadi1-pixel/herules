@@ -44,9 +44,9 @@ export const conversationMessageView = (row: any, viewerId: string) => ({
   createdAt: row.created_at as Date,
 });
 
-// True when the viewer may see a conversation: a participant, and not blocked either way with the other side.
+// Only currently verified participants with no block may see a conversation.
 export async function visibleConversation(db: Pick<Pool, 'query'>, id: string, viewerId: string, hidden: Set<string>, lock = false) {
-  const row = (await db.query(`${conversationRowSql} WHERE c.id=$1${lock ? ' FOR UPDATE OF c' : ''}`, [id])).rows[0];
+  const row = (await db.query(`${conversationRowSql} WHERE c.id=$1 AND d.verified_at IS NOT NULL AND s.verified_at IS NOT NULL${lock ? ' FOR UPDATE OF c FOR SHARE OF d,s' : ''}`, [id])).rows[0];
   if (!row || !participantOf(row, viewerId) || hidden.has(otherOf(row, viewerId))) return undefined;
   return row;
 }

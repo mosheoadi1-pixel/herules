@@ -31,9 +31,9 @@ async function failure(response:Response,status:number,message:string){const dat
 type Frame={id:number;event:string;data:any};
 type Stream={status:number;frames:Frame[];until:(predicate:(frames:Frame[])=>boolean,timeout?:number)=>Promise<Frame[]>;close:()=>Promise<void>};
 // Reads the event stream into frames. Heartbeat comments and retry lines are not room events.
-async function stream(base:string,cookie:string,lastEventId?:string):Promise<Stream>{
+async function stream(base:string,cookie:string,lastEventId?:string,allRooms=false):Promise<Stream>{
   const controller=new AbortController();
-  const response=await fetch(`${base}/api/public/events`,{headers:{Cookie:cookie,...(lastEventId?{'Last-Event-ID':lastEventId}:{})},signal:controller.signal});
+  const response=await fetch(`${base}/api/public/events${allRooms?'?allRooms=1':''}`,{headers:{Cookie:cookie,...(lastEventId?{'Last-Event-ID':lastEventId}:{})},signal:controller.signal});
   if(response.status!==200){controller.abort();return {status:response.status,frames:[],until:async()=>[],close:async()=>{}};}
   const frames:Frame[]=[];
   const reading=(async()=>{
@@ -48,7 +48,7 @@ async function stream(base:string,cookie:string,lastEventId?:string):Promise<Str
           const block=buffer.slice(0,cut);buffer=buffer.slice(cut+2);
           const fields:Record<string,string>={};
           for(const line of block.split('\n')){const at=line.indexOf(':');if(at<=0)continue;fields[line.slice(0,at)]=line.slice(at+1).replace(/^ /,'');}
-          if(fields.event==='room')frames.push({id:Number(fields.id),event:fields.event,data:JSON.parse(fields.data)});
+          if(fields.event && (allRooms || fields.event==='room'))frames.push({id:Number(fields.id),event:fields.event,data:JSON.parse(fields.data)});
         }
       }
     }catch{/* closed by the test */}
@@ -86,7 +86,7 @@ try {
   // Private mode has no room routes at all.
   delete process.env.HR_MODE;
   const privateBase=await listen(await createApp(pool,origin));
-  for(const [method,path] of [['GET','/public/room'],['POST','/public/room/messages'],['GET','/public/events'],['POST',`/public/room/messages/${randomUUID()}/report`],['POST','/public/room/blocks'],['DELETE',`/public/room/blocks/${randomUUID()}`],['POST',`/public/admin/room/messages/${randomUUID()}/remove`],['GET','/public/admin/room/reports']] as const){
+  for(const [method,path] of [['GET','/public/room'],['POST','/public/room/messages'],['GET','/public/events'],['POST',`/public/room/messages/${randomUUID()}/report`],['POST','/public/room/blocks'],['DELETE',`/public/room/blocks/${randomUUID()}`],['POST',`/public/admin/room/messages/${randomUUID()}/remove`],['GET','/public/admin/room/reports'],['GET','/public/rooms'],['GET','/public/directory'],['POST','/public/conversations/request']] as const){
     const response=await fetch(`${privateBase}/api${path}`,{method,headers:{'Content-Type':'application/json',Origin:origin},body:method==='POST'?'{}':undefined});
     assert.equal(response.status,404,`${method} ${path} must not exist in private mode`);
   }
@@ -241,7 +241,114 @@ try {
   assert.equal(entry.nickname,'Dana One');
   assert.ok(!JSON.stringify(reports).includes('@'),'the report list has no email');
 
-  console.log('PASS public-room: verification gate, role rules, addressed posts, body and idempotency rules, post limit, reports, blocks, SSE live/removal/resume, polling agreement, admin removal and audit, private mode 404');
+  // Model the old schema in the disposable DB, then start twice. Existing
+  // messages, removal markers and reports keep their identifiers and history.
+  await Promise.all(streams.map(handle=>handle.close()));
+  await pool.query('ALTER TABLE room_messages DROP COLUMN room_id');
+  await createApp(pool,origin,{google:fake});
+  base=await listen(await createApp(pool,origin,{google:fake}));
+  const migrated=await json(await get(base,'/public/rooms/main?limit=100',sara.cookie));
+  assert.equal(migrated.messages.find((message:any)=>message.id===first.id).seq,first.seq);
+  assert.equal(migrated.messages.find((message:any)=>message.id===target.id).body,null);
+  assert.equal(migrated.messages.find((message:any)=>message.id===target.id).seq,done.message.seq);
+  assert.equal((await pool.query('SELECT count(*)::int n FROM room_reports WHERE message_id=$1',[first.id])).rows[0].n,2);
+  assert.deepEqual((await json(await get(base,'/public/rooms/introductions',sara.cookie))).messages,[]);
+
+  const scoped=(member:Member,room:string,action:string,body:unknown)=>post(base,`/public/rooms/${room}/${action}`,body,member.cookie);
+  const catalog=async(member:Member)=>(await json(await get(base,'/public/rooms',member.cookie))).rooms as {id:string;kind:string;canPost:boolean}[];
+  const canPost=async(member:Member,room:string)=>(await catalog(member)).find(entry=>entry.id===room)?.canPost;
+  const directoryOf=async(member:Member,query='')=>json(await get(base,`/public/directory?${query}`,member.cookie));
+  const grants=async(member:Member)=>(await json(await get(base,'/public/rooms/introductions/grants',member.cookie))).grants;
+  assert.deepEqual((await catalog(sara)).map(({id,kind,canPost})=>[id,kind,canPost]),[
+    ['main','group',false],['introductions','group',false],['community','channel',false],
+  ]);
+  for(const path of ['/public/rooms','/public/rooms/main','/public/directory','/public/room?after=0&allRooms=1','/public/events?allRooms=1']) {
+    assert.equal((await get(base,path)).status,401);
+    await failure(await get(base,path,una.cookie),403,'Verification required');
+  }
+  assert.deepEqual(await directoryOf(sara,'q=DANA'),{people:[{nickname:'Dana One'}]});
+  assert.deepEqual(await directoryOf(sol,'q=DANA'),{people:[]},'directory respects a block in both directions');
+  assert.deepEqual(await directoryOf(dana,'q=Sol'),{people:[]});
+  assert.deepEqual(await directoryOf(dana,'q=una'),{people:[]},'pending accounts are absent');
+  assert.deepEqual(await directoryOf(dana,'q=Dana'),{people:[]},'directory excludes the viewer');
+  assert.equal((await directoryOf(sara,'limit=1')).people.length,1);
+  await failure(await get(base,'/public/directory?limit=31',sara.cookie),400,'Invalid or missing input');
+  await failure(await get(base,'/public/rooms/unknown',sara.cookie),404,'Room unavailable');
+  await failure(await scoped(dana,'unknown','messages',{body:'wrong room'}),404,'Room unavailable');
+  await failure(await scoped(sara,'introductions','address',{body:'no',targetNickname:'Sol Two'}),403,'Room posting requires dom approval');
+  await failure(await scoped(dana,'introductions','address',{body:'no',targetNickname:'Una Pending'}),404,'Recipient unavailable');
+
+  const liveSub=await stream(base,sara.cookie,undefined,true);
+  const outsider=await stream(base,dov.cookie,undefined,true);
+  const legacy=await stream(base,sara.cookie);
+  const start=migrated.cursor;
+  const addressKey=randomUUID();
+  const address={body:'Welcome to Introductions',targetNickname:'Sara One',idempotencyKey:addressKey};
+  const addressed=(await json(await scoped(dana,'introductions','address',address))).message;
+  assert.equal(addressed.roomId,'introductions');
+  assert.equal(await canPost(sara,'introductions'),true);
+  assert.equal(await canPost(sara,'main'),false);
+  assert.deepEqual(await grants(dana),[{nickname:'Sara One'}]);
+  assert.deepEqual(await grants(dov),[],'another dom cannot list grants');
+  await failure(await get(base,'/public/rooms/introductions/grants',sara.cookie),403,'Room grant unavailable');
+  const subPost={body:'Thanks for the welcome',idempotencyKey:randomUUID()};
+  await failure(await scoped(sara,'community','messages',subPost),403,'Room posting requires dom approval');
+  const reply=(await json(await scoped(sara,'introductions','messages',subPost))).message;
+  assert.equal((await json(await scoped(sara,'introductions','messages',subPost))).message.id,reply.id);
+  await failure(await scoped(dov,'introductions','revoke',{targetNickname:'Sara One'}),404,'Room grant unavailable');
+  const privateKey=randomUUID();
+  const dm={body:'Private opening, not a room grant',targetNickname:'Sara One',idempotencyKey:privateKey};
+  // Existing private consent is unaffected; use a new recipient for the explicit directory action.
+  const request=(await json(await post(base,'/public/conversations/request',{...dm,targetNickname:'Sol Two'},dov.cookie))).conversation;
+  assert.equal(request.state,'requested');
+  assert.equal(await canPost(sol,'introductions'),false,'a private request never grants room permission');
+  await failure(await post(base,`/public/conversations/${request.id}/messages`,{body:'no consent yet'},sol.cookie),409,'Messages open after the request is accepted');
+  const barrier=(await json(await send(dana,{body:'Main realtime barrier'}))).message;
+  for(const viewer of [liveSub,outsider,legacy]) await viewer.until(frames=>frames.some(frame=>frame.data.id===barrier.id));
+  assert.ok(liveSub.frames.some(frame=>frame.event==='messaging_refresh' && Object.keys(frame.data).length===0));
+  assert.ok(liveSub.frames.some(frame=>frame.data.id===reply.id));
+  assert.ok(!legacy.frames.some(frame=>frame.data.id===reply.id));
+  assert.ok(!outsider.frames.some(frame=>frame.event==='messaging_refresh'),'only affected viewers receive grant refresh');
+  assert.ok(!JSON.stringify(liveSub.frames).includes(dm.body),'an outsider never receives the private opening');
+  const pollAll=await json(await get(base,`/public/room?after=${start}&allRooms=1`,sara.cookie));
+  assert.ok(pollAll.messages.some((message:any)=>message.id===reply.id));
+  assert.ok(pollAll.events.some((event:Frame)=>event.event==='messaging_refresh'));
+  assert.ok(!JSON.stringify(pollAll).includes(dm.body));
+  assert.ok(!(await roomOf(sara)).some(message=>message.id===reply.id));
+  assert.ok(!(await json(await get(base,'/public/room',sara.cookie))).messages.some((message:any)=>message.id===reply.id));
+
+  await json(await scoped(dana,'introductions','revoke',{targetNickname:'Sara One'}));
+  assert.equal(await canPost(sara,'introductions'),false);
+  await failure(await scoped(sara,'introductions','messages',subPost),403,'Room posting requires dom approval');
+  assert.equal((await json(await scoped(dana,'introductions','address',address))).message.id,addressed.id);
+  assert.equal(await canPost(sara,'introductions'),false,'replaying the address never restores a revoked grant');
+  await json(await scoped(dana,'introductions','address',{...address,idempotencyKey:randomUUID()}));
+  await json(await scoped(admin,'introductions','revoke',{targetNickname:'Sara One'}));
+  assert.equal(await canPost(sara,'introductions'),false,'a verified admin can revoke another grantor’s approval');
+  await json(await scoped(dana,'introductions','address',{...address,idempotencyKey:randomUUID()}));
+  await pool.query('UPDATE public_users SET verified_at=NULL WHERE id=$1',[dana.id]);
+  assert.equal(await canPost(sara,'introductions'),false);
+  await failure(await scoped(sara,'introductions','messages',subPost),403,'Room posting requires dom approval');
+  await verify(dana);
+  assert.equal(await canPost(sara,'introductions'),false,'reverification never revives old grants');
+  await json(await scoped(dana,'introductions','address',{...address,idempotencyKey:randomUUID()}));
+  await json(await block(sara,{userId:dana.id}));
+  assert.equal(await canPost(sara,'introductions'),false);
+  assert.deepEqual(await directoryOf(sara,'q=DANA'),{people:[]});
+  assert.ok(!(await json(await get(base,'/public/rooms/introductions',sara.cookie))).messages.some((message:any)=>message.authorId===dana.id));
+  await failure(await report(sara,addressed.id,'hidden'),404,'Message unavailable');
+  await failure(await scoped(dana,'introductions','address',address),404,'Recipient unavailable');
+  const replay=await stream(base,sara.cookie,String(start),true);
+  await replay.until(frames=>frames.some(frame=>frame.event==='messaging_refresh'));
+  assert.ok(!replay.frames.some(frame=>frame.event==='room' && frame.data.authorId===dana.id),'resume rechecks current blocks for all rooms');
+  assert.ok(!JSON.stringify(replay.frames).includes(dm.body));
+  await json(await del(base,`/public/room/blocks/${dana.id}`,sara.cookie));
+  assert.equal(await canPost(sara,'introductions'),false,'unblocking never restores a grant');
+  await json(await block(sol,{userId:dov.id}));
+  await failure(await post(base,'/public/conversations/request',{...dm,targetNickname:'Sol Two'},dov.cookie),404,'Recipient unavailable');
+  assert.ok(!(await json(await get(base,'/public/conversations',sol.cookie))).conversations.some((row:any)=>row.id===request.id));
+
+  console.log('PASS public-room: migration, directory, room grants, live/poll/replay privacy, moderation and private mode isolation');
 } finally {
   for(const [key,value] of [['HR_MODE',previous.mode],['HR_ADMIN_PUBLIC_IDS',previous.admins],['ADMIN_HASH',previous.adminHash]] as const){
     if(value===undefined)delete process.env[key];else process.env[key]=value;
