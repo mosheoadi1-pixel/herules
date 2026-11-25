@@ -7,6 +7,7 @@ import './style.css';
 import { PublicEntry, type PublicProviders } from './components/PublicEntry';
 import { publicCopy } from './i18n';
 import './components/public-entrance.css';
+import './components/private-game.css';
 
 function App(){
   const [mode,setMode]=useState<'private'|'public'|null>(null);
@@ -26,7 +27,7 @@ function App(){
     document.documentElement.dir=lang==='he'?'rtl':'ltr';
     save('hr-language',lang);
   },[lang,mode]);
-  if(mode==='private')return <GameApp/>;
+  if(mode==='private')return <div className="private-shell"><GameApp/></div>;
   return <div className={mode==='public'?'public-shell':undefined}>
     <header className={mode==='public'?'public-header':undefined}>
       <a className="brand" href="/" aria-label={t('entranceHome')}><bdi lang="en">HER RULES</bdi></a>
