@@ -120,11 +120,12 @@ export function PublicMessaging({ me, role, isAdmin, onAuthLost, ...copy }: Chat
   const [selected, setSelected] = useState<Selection | null>(() =>
     window.matchMedia('(max-width: 680px)').matches ? null : { kind: 'room', id: 'main' });
   // undefined = messaging, null = play inbox, string = a play session.
-  const playFromHistory=()=>window.history.state?.pairedPlayer===me?window.history.state.play as string|null:undefined;
+  const playFromHistory = () => window.history.state?.pairedPlayer === me ? window.history.state.play as string | null : undefined;
   const [play, setPlay] = useState<string | null | undefined>(playFromHistory);
   const [search, setSearch] = useState(''), [query, setQuery] = useState('');
   const heading = useRef<HTMLHeadingElement>(null), navigation = useRef<HTMLHeadingElement>(null);
   const playHeading = useRef<HTMLHeadingElement>(null), playOpener = useRef<HTMLElement | null>(null);
+  const playTraversal = useRef(false);
   const searchInput = useRef<HTMLInputElement>(null);
   const moveFocus = useRef(false);
   const { updates, polling, invalidate, refreshRoom, refreshPrivate } = useMessagingFeed(onAuthLost);
@@ -146,21 +147,40 @@ export function PublicMessaging({ me, role, isAdmin, onAuthLost, ...copy }: Chat
     'people', updates.private, visibility);
   const person = selectedPerson?.value?.find(entry => entry.nickname === selected?.id);
   const title = room?.title[lang === 'he' ? 0 : 1] ?? detail?.value?.conversation.otherNickname ?? thread?.otherNickname ?? person?.nickname;
-  const clearPlayHistory=()=>{
-    if(window.history.state?.pairedPlayer===me){
-      const {pairedPlayer,play,...rest}=window.history.state;
-      window.history.replaceState(rest,'');
+  const closePlay = () => {
+    if (playTraversal.current) return;
+    moveFocus.current = true;
+    const state = window.history.state;
+    if (state?.pairedPlayer === me) {
+      if (state.playDepth > 0) {
+        // Return to the chat entry instead of leaving the play inbox behind
+        // the chat, where the next browser Back would reopen it.
+        playTraversal.current = true;
+        window.history.go(-state.playDepth);
+        return;
+      }
+      const { pairedPlayer, play, playDepth, playParent, ...rest } = state;
+      window.history.replaceState(rest, '');
     }
+    setPlay(undefined);
   };
-  const choose = (value: Selection | null) => { playOpener.current = null; moveFocus.current = true; clearPlayHistory();setPlay(undefined); setSelected(value); };
+  const choose = (value: Selection | null) => { playOpener.current = null; closePlay(); setSelected(value); };
   const openPlay = (id: string | null, opener?: HTMLElement) => {
+    if (playTraversal.current) return;
     if (opener) playOpener.current = opener;
-    if(play!==id)window.history.pushState({...window.history.state,pairedPlayer:me,play:id},'');
+    if (play === id) return;
+    const state = window.history.state;
+    const depth = state?.pairedPlayer === me ? state.playDepth ?? 0 : 0;
+    if (id === null && depth > 1 && state.playParent === null) {
+      playTraversal.current = true;
+      window.history.back();
+      return;
+    }
+    window.history.pushState({ ...state, pairedPlayer: me, play: id, playDepth: depth + 1, playParent: play }, '');
     setPlay(id);
   };
-  const closePlay = () => { moveFocus.current = true; clearPlayHistory();setPlay(undefined); };
   useEffect(()=>{
-    const onBack=()=>{moveFocus.current=true;setPlay(playFromHistory());};
+    const onBack=()=>{playTraversal.current=false;moveFocus.current=true;setPlay(playFromHistory());};
     window.addEventListener('popstate',onBack);
     return ()=>window.removeEventListener('popstate',onBack);
   },[me]);
@@ -198,7 +218,7 @@ export function PublicMessaging({ me, role, isAdmin, onAuthLost, ...copy }: Chat
         </label>
       </div>
       <nav aria-label={t(searching ? 'msgPeople' : 'convTitle')}>
-        <p className="small" role="status">{searching && resultStatus ? t(resultStatus) : !searching && orderedThreads?.length === 0 ? t('convEmpty') : ''}</p>
+        <p className="small" role="status">{searching ? (resultStatus ? t(resultStatus) : '') : !threads ? t('msgInboxLoading') : orderedThreads?.length === 0 ? t('convEmpty') : ''}</p>
         {(searching ? people?.error : threads?.error) && <p className="error" role="alert">{errorText(searching ? people?.error : threads?.error)}</p>}
         <ul>{searching ? people?.value?.map(result => <li key={result.nickname}>
           {result.conversationId || result.canInvite ? <button type="button"
@@ -219,6 +239,7 @@ export function PublicMessaging({ me, role, isAdmin, onAuthLost, ...copy }: Chat
         <button type="button" className="quiet msg-back" onClick={() => choose(null)}>{t('msgBack')}</button>
         <h2 id="msg-heading" tabIndex={-1} ref={heading}>{title ? <bdi>{title}</bdi> : t(selected?.kind === 'person' ? 'msgInviteChat' : selected ? 'msgConversation' : 'msgChoose')}</h2>
       </div>
+      {!selected && <p className="msg-empty">{t('msgChooseHint')}</p>}
       {selected?.kind === 'room' && <PublicRoom key={selected.id} {...copy} id={selected.id} room={room} me={me} role={role} isAdmin={isAdmin}
         revision={updates.rooms[selected.id] ?? 0} visibility={visibility} onChanged={() => refreshRoom(selected.id)} onVisibilityChanged={invalidate} />}
       {selected?.kind === 'private' && <PublicConversations key={selected.id} {...copy} id={selected.id} isAdmin={isAdmin}

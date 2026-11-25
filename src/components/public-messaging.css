@@ -5,7 +5,6 @@
   gap: .4rem .8rem;
   margin-block: 0 .75rem;
 }
-.public-account h2 { font-size: .9rem; margin: 0; color: var(--muted); }
 .public-account p { margin: 0; flex: 1 1 auto; overflow-wrap: anywhere; }
 .public-messaging {
   --msg-surface: #211528;

@@ -49,6 +49,7 @@ try {
   process.env.HR_MODE='public';
   const bareBase=await listen(await createApp(pool,origin));
   assert.deepEqual(await (await get(bareBase,'/public/config')).json(),{mode:'public'});
+  assert.deepEqual(await (await get(bareBase,'/public/config?include=providers')).json(),{mode:'public',providers:{google:false,apple:false}});
   assert.equal((await post(bareBase,'/register',{email:'x@example.test',password:'correct horse battery',role:'wife',adult:true})).status,404,'email registration is disabled in public mode');
   assert.equal((await post(bareBase,'/login',{email:'private@example.test',password:'correct horse battery'})).status,404,'email login is disabled in public mode');
   assert.equal((await post(bareBase,'/guest',{nickname:'Guest',role:'wife',adult:true})).status,404,'guest entry is disabled in public mode');
@@ -57,6 +58,7 @@ try {
   assert.equal((await unconfigured.json()).error,'provider not configured');
 
   const base=await listen(await createApp(pool,origin,{google:fake}));
+  assert.deepEqual(await (await get(base,'/public/config?include=providers')).json(),{mode:'public',providers:{google:true,apple:false}});
   const started=await get(base,'/public/auth/google/start');
   assert.equal(started.status,200);
   const {url}=await started.json();

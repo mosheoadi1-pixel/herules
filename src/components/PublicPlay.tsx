@@ -26,14 +26,14 @@ export function PublicPlay({ id, onPick, visibility, revision, ...copy }: ChatCo
   return <section className="msg-play" aria-label={t('playInbox')}>
     {id && <button type="button" className="quiet" onClick={() => onPick(null)}>{t('playAll')}</button>}
     <p className="msg-play-total" tabIndex={-1} ref={listStart}>{t('playTotal')}: {inbox?.value ? <bdi>{BigInt(inbox.value.points).toLocaleString(lang === 'he' ? 'he-IL' : 'en-GB')}</bdi> : '—'}</p>
-    {inbox?.error && <><ChatFeedback error={errorText(inbox.error)} /><button type="button" onClick={() => poll(n => n + 1)}>{lang==='he'?'ניסיון חוזר':'Retry'}</button></>}
+    {inbox?.error && <><ChatFeedback error={errorText(inbox.error)} /><button type="button" onClick={() => poll(n => n + 1)}>{t('entryRetry')}</button></>}
     {id ? <GameApp key={`${id}:${visibility}`} paired={{id,lang,revision,refreshInbox:()=>poll(n=>n+1)}}/> : <>
       {!inbox && <p role="status">{t('msgLoading')}</p>}
       {inbox?.value?.sessions.length === 0 && <p>{t('playEmpty')}</p>}
       <ul className="msg-play-list">{inbox?.value?.sessions.map(session => <li key={session.id}>
         <button type="button" onClick={() => onPick(session.id)}>
           <bdi>{session.title}</bdi>
-          <span><bdi>{session.partner}</bdi> · {session.role === 'dom' ? (lang==='he'?'דום':'Dom') : (lang==='he'?'סאב':'Sub')} · {t(session.state==='open'&&session.availability?availabilityStates[session.availability]:sessionStates[session.state])} · {formatTime(session.scheduledAt)}</span>
+          <span><bdi>{session.partner}</bdi> · {t(session.role)} · {t(session.state==='open'&&session.availability?availabilityStates[session.availability]:sessionStates[session.state])} · {formatTime(session.scheduledAt)}</span>
         </button>
       </li>)}</ul>
       {(!!pages.length || !!inbox?.value?.next) && <div className="row">

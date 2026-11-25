@@ -287,7 +287,12 @@ export async function createApp(pool: Pool, origin: string, providers: Partial<R
       await pool.query("INSERT INTO public_sessions VALUES($1,$2,now()+interval '7 days')", [hash(token), userId]);
       res.cookie('hr_public_session', token, { httpOnly: true, sameSite: 'lax', secure: process.env.NODE_ENV === 'production', maxAge: 7*86400000, path: '/' });
     };
-    app.get('/api/public/config', (_req,res) => { res.json({ mode }); });
+    app.get('/api/public/config', (req,res) => {
+      if (req.query.include === 'providers') {
+        return res.json({ mode, providers: { google: !!providers.google, apple: !!providers.apple } });
+      }
+      res.json({ mode });
+    });
     app.get('/api/public/auth/:provider/start', async (req,res) => {
       await rate(req,'public-start',60);
       const name = providerName.parse(req.params.provider);

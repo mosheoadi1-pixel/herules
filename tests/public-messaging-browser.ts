@@ -27,13 +27,109 @@ process.env.HR_ADMIN_PUBLIC_IDS = dom.id;
 const text = (key: string, lang = 'en') => publicCopy[key][lang === 'he' ? 0 : 1];
 
 try {
-  const app = await createApp(pool, 'http://localhost:4193');
+  const app = await createApp(pool, 'http://localhost:4193', {
+    google: {
+      name: 'google',
+      authorizeUrl: ({ state }) => `/api/public/auth/google/callback?code=browser-fixture&state=${state}`,
+      exchange: async () => ({ subject: 'browser-fixture', emailVerified: false }),
+    },
+  });
   app.use(express.static('dist'));
   const listener = app.listen(0);
   server = listener;
   await new Promise(resolve => listener.once('listening', resolve));
   const url = `http://localhost:${(listener.address() as AddressInfo).port}`;
   browser = await chromium.launch({ headless: true });
+  const button = (page: any, key: string) => page.getByRole('button', { name: text(key), exact: true });
+  const exact = (page: any, value: string) => page.getByText(value, { exact: true });
+  const screenshots = process.env.HR_REVIEW_SCREENSHOTS;
+  const noOverflow = async (page: any) => assert.ok(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth));
+  const entranceContext = await browser.newContext({ viewport: { width: 1365, height: 900 } });
+  const entrance = await entranceContext.newPage();
+  await entrance.goto(url);
+  await entrance.getByRole('button', { name: 'English', exact: true }).click();
+  const signIn = button(entrance, 'google');
+  await signIn.waitFor();
+  assert.equal(await button(entrance, 'apple').count(), 0);
+  assert.ok((await signIn.boundingBox()).height >= 44);
+  assert.ok((await signIn.boundingBox()).y < 855);
+  await entrance.keyboard.press('Tab');
+  assert.ok(await signIn.evaluate((el: Element) => el === document.activeElement && getComputedStyle(el).outlineStyle === 'solid'));
+  await noOverflow(entrance);
+  if (screenshots) await entrance.screenshot({ path: join(screenshots, 'public-entrance-desktop-en.png'), fullPage: true, animations: 'disabled' });
+  const drift = () => (document.querySelector('.entrance-scene') as HTMLElement).style.getPropertyValue('--entrance-drift');
+  await entrance.waitForFunction(drift);
+  const startDrift = await entrance.evaluate(drift);
+  await entrance.evaluate(() => window.scrollBy(0, 120));
+  await entrance.waitForFunction((before: string) => {
+    const value = (document.querySelector('.entrance-scene') as HTMLElement).style.getPropertyValue('--entrance-drift');
+    return value !== before && Math.abs(parseFloat(value)) <= 18;
+  }, startDrift);
+  await entrance.getByRole('link', { name: text('entranceExplore') }).click();
+  await entrance.waitForFunction(() => document.querySelectorAll('.entrance-chapter-art.entrance-in-view').length === 3);
+  await entrance.getByRole('link', { name: text('entranceTop') }).click();
+  assert.equal(await entrance.evaluate(() => document.activeElement?.id), 'public-sign-in');
+  await entrance.route('**/api/public/auth/google/start', (route: any) => route.fulfill({ status: 503, json: { error: 'provider not configured' } }), { times: 1 });
+  await signIn.press('Enter');
+  await exact(entrance, text('errProvider')).waitFor();
+  await signIn.press('Enter');
+  await entrance.getByRole('heading', { name: text('finish'), exact: true }).waitFor();
+  assert.equal(await entrance.evaluate(() => document.activeElement?.tagName), 'H1');
+  assert.equal(await entrance.evaluate(() => location.hash), '', 'registration token is removed from the URL');
+  assert.equal(await entrance.getByLabel(text('role'), { exact: true }).inputValue(), '');
+  assert.equal(await entrance.getByLabel(text('gender'), { exact: true }).inputValue(), '');
+  const nickname = entrance.getByLabel(text('nickname'), { exact: true });
+  await nickname.fill('   ');
+  assert.equal(await nickname.evaluate((el: HTMLInputElement) => el.validity.patternMismatch), true);
+  await nickname.fill('Nova נובה');
+  await entrance.getByLabel(text('role'), { exact: true }).selectOption('sub');
+  await entrance.getByLabel(text('gender'), { exact: true }).selectOption('other');
+  await button(entrance, 'finish').press('Enter');
+  await entrance.getByRole('heading', { name: text('verifyTitle'), exact: true }).waitFor();
+  assert.equal(await entrance.evaluate(() => document.activeElement?.tagName), 'H1');
+  assert.equal(await button(entrance, 'consentAccept').isVisible(), true);
+  await pool.query(`INSERT INTO public_verifications(id,public_user_id,method,status)
+    SELECT $1,id,'id_document','review' FROM public_users WHERE nickname=$2`, [randomUUID(), 'Nova נובה']);
+  await entrance.reload();
+  await exact(entrance, text('verifyReview')).waitFor();
+  assert.equal(await entrance.getByLabel(text('methodLabel'), { exact: true }).count(), 0);
+  await pool.query('UPDATE public_users SET verified_at=now() WHERE nickname=$1', ['Nova נובה']);
+  await button(entrance, 'entryCheckStatus').press('Enter');
+  await entrance.getByRole('heading', { name: 'Main room', exact: true }).waitFor();
+  await entrance.route('**/api/public/logout', (route: any) => route.fulfill({ status: 503, json: { error: 'Failed to fetch' } }), { times: 1 });
+  await button(entrance, 'signOut').click();
+  await exact(entrance, text('msgNetwork')).waitFor();
+  assert.equal(await button(entrance, 'signOut').isVisible(), true);
+  await button(entrance, 'signOut').click();
+  await signIn.waitFor();
+  await entranceContext.close();
+  const mobileContext = await browser.newContext({ viewport: { width: 375, height: 800 }, reducedMotion: 'reduce' });
+  const mobile = await mobileContext.newPage();
+  await mobile.goto(url);
+  const mobileSignIn = mobile.getByRole('button', { name: text('google', 'he'), exact: true });
+  await mobileSignIn.waitFor();
+  assert.equal(await mobile.locator('html').getAttribute('dir'), 'rtl');
+  assert.ok((await mobileSignIn.boundingBox()).y <= 756);
+  assert.equal(await mobile.locator('.entrance-scene').evaluate((el: HTMLElement) => el.style.getPropertyValue('--entrance-drift')), '');
+  if (screenshots) await mobile.screenshot({ path: join(screenshots, 'public-entrance-mobile-he.png'), fullPage: true });
+  await mobile.getByRole('link', { name: text('entranceExplore', 'he') }).click();
+  assert.equal(await mobile.locator('.entrance-in-view').count(), 0);
+  await noOverflow(mobile);
+  await mobile.route('**/api/public/config?include=providers', (route: any) => route.fulfill({ json: { mode: 'public', providers: { google: false, apple: false } } }));
+  await mobile.reload();
+  await exact(mobile, text('entranceUnavailable', 'he')).waitFor();
+  assert.equal(await mobileSignIn.count(), 0);
+  await mobileContext.close();
+  const staticContext = await browser.newContext({ viewport: { width: 375, height: 800 } });
+  await staticContext.addInitScript(() => { Reflect.deleteProperty(window, 'IntersectionObserver'); });
+  const staticEntrance = await staticContext.newPage();
+  await staticEntrance.goto(url);
+  await staticEntrance.getByRole('link', { name: text('entranceExplore', 'he') }).click();
+  await staticEntrance.getByRole('heading', { name: text('entrancePlay', 'he'), exact: true }).waitFor();
+  assert.equal(await staticEntrance.locator('.entrance-in-view').count(), 0);
+  await noOverflow(staticEntrance);
+  await staticContext.close();
+
   const memberPage = async (member: typeof dom, fallback = false) => {
     const token = randomBytes(32).toString('hex');
     await pool.query('INSERT INTO public_users(id,nickname,nickname_key,role,gender,verified_at) VALUES($1,$2,$3,$4,$5,now())',
@@ -52,11 +148,9 @@ try {
     return page;
   };
   const d = await memberPage(dom), s = await memberPage(sub), o = await memberPage(outside, true);
-  const button = (page: any, key: string) => page.getByRole('button', { name: text(key), exact: true });
   const room = (page: any, id: string, lang = 'en') => page.getByLabel(text('msgRooms', lang), { exact: true }).selectOption(id);
   const thread = (page: any, nickname: string) => page.getByRole('navigation', { name: text('convTitle') }).getByRole('button', { name: new RegExp(nickname) });
   const transcript = (page: any) => page.getByRole('list', { name: text('msgTranscript') });
-  const exact = (page: any, value: string) => page.getByText(value, { exact: true });
 
   await exact(s, text('msgReadOnly')).waitFor();
   assert.equal(await s.getByLabel(text('roomCompose')).count(), 0);
@@ -291,8 +385,18 @@ try {
   await d.getByRole('button', { name: /Planning/ }).waitFor();
   await d.goForward();
   await exact(d, 'Stopped permanently').waitFor();
+  await button(d, 'playAll').click();
+  await d.getByRole('button', { name: /Planning/ }).waitFor();
+  await d.goForward();
+  await exact(d, 'Stopped permanently').waitFor();
+  await button(d, 'playBackChat').click();
+  await d.getByLabel(text('convCompose')).waitFor();
+  assert.equal(await d.evaluate(() => window.history.state?.playDepth), undefined);
+  await d.goForward();
+  await d.getByRole('button', { name: /Planning/ }).waitFor();
   await button(d, 'playBackChat').click();
   await playButtonHe(text('playBackChat','he')).click();
+  await openPlayHe.waitFor();
   assert.equal(await openPlayHe.evaluate((el: Element) => el === document.activeElement), true);
 
   // Back restores the search on mobile; the person and history are hidden by a bilateral block.
@@ -322,7 +426,7 @@ try {
   await s.getByLabel(text('msgSearch', 'he')).waitFor();
   assert.equal(await s.locator('.msg-pane').isVisible(), false, 'a fresh narrow viewport starts at the inbox');
 
-  console.log('PASS public messaging browser: desktop and narrow Hebrew/English, keyboard focus, room grants and revoke, SSE and polling, reports/removal, consent, session UI and bilateral block');
+  console.log('PASS public browser: entrance, provider availability and errors, registration, review refresh, logout recovery, desktop and narrow Hebrew/English, reduced motion, keyboard focus, room grants and revoke, SSE and polling, reports/removal, consent, session UI and bilateral block');
 } finally {
   await browser?.close();
   if (server) await new Promise<void>(resolve => server!.close(() => resolve()));
