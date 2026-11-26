@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { existsSync } from 'node:fs';
-import { mkdtemp, rm } from 'node:fs/promises';
+import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { randomUUID } from 'node:crypto';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -17,7 +17,7 @@ const directory=await mkdtemp(join(tmpdir(),'her-rules-verification-'));
 const storage=join(directory,'verification');
 const db=await startDatabase(directory,55445),pool=new pg.Pool({connectionString:db.url});
 const origin='http://localhost:4196';
-const previous={mode:process.env.HR_MODE,dir:process.env.HR_VERIFICATION_DIR,admins:process.env.HR_ADMIN_PUBLIC_IDS};
+const previous={mode:process.env.HR_MODE,dir:process.env.HR_VERIFICATION_DIR,admins:process.env.HR_ADMIN_PUBLIC_IDS,adminHash:process.env.ADMIN_HASH};
 const servers:Server[]=[];
 const listen=async(app:Awaited<ReturnType<typeof createApp>>)=>{const server=app.listen(0);servers.push(server);await new Promise(resolve=>server.once('listening',resolve));return `http://localhost:${(server.address() as AddressInfo).port}`;};
 const post=(base:string,path:string,body:unknown,cookie='')=>fetch(`${base}/api${path}`,{method:'POST',headers:{'Content-Type':'application/json',Origin:origin,...(cookie?{Cookie:cookie}:{})},body:JSON.stringify(body),redirect:'manual'});
@@ -27,7 +27,7 @@ const tokenOf=(response:Response)=>/#public-pending=([A-Za-z0-9_-]+)$/.exec(resp
 const jpeg=(size=64)=>Buffer.concat([Buffer.from([0xff,0xd8,0xff,0xe0]),Buffer.alloc(size,7)]);
 const png=(size=64)=>Buffer.concat([Buffer.from('89504e470d0a1a0a','hex'),Buffer.alloc(size,9)]);
 const dataUrl=(mime:string,bytes:Buffer)=>`data:${mime};base64,${bytes.toString('base64')}`;
-const mediaMarkers=['data:image','storage_path','.jpg','.png'];
+const mediaMarkers=['data:image','storage_path','image_bytes','.jpg','.png'];
 
 // Every JSON response goes through here: the status must match and no media may appear in the body.
 async function body(response:Response,status=200){
@@ -79,6 +79,7 @@ try {
   process.env.HR_MODE='public';
   process.env.HR_VERIFICATION_DIR=storage;
   delete process.env.HR_ADMIN_PUBLIC_IDS;
+  delete process.env.ADMIN_HASH;
   assert.equal(retentionDays({}),7,'retention defaults to seven days');
   assert.equal(retentionDays({HR_VERIFICATION_RETENTION_DAYS:'3'}),3);
   for(const value of ['0','366','7d','-1']) assert.throws(()=>retentionDays({HR_VERIFICATION_RETENTION_DAYS:value}),/HR_VERIFICATION_RETENTION_DAYS/,`retention ${value} must fail closed`);
@@ -131,8 +132,12 @@ try {
   assert.equal(await statusOf(base,bob),'verified','a passed check verifies the user');
   assert.equal(await isVerified(bob.id),true);
   assert.equal((await body(await get(base,'/public/verification',bob.cookie))).verification.status,'passed');
-  assert.ok(existsSync(join(storage,passed.verification.id,'0.jpg')),'media is stored until purge');
-  assert.ok(existsSync(join(storage,passed.verification.id,'1.png')));
+  const stored=await pool.query('SELECT image_index,content_type,image_bytes,storage_path FROM public_verification_media WHERE verification_id=$1 ORDER BY image_index',[passed.verification.id]);
+  assert.deepEqual(stored.rows,[
+    {image_index:0,content_type:'image/jpeg',image_bytes:bobImages[0],storage_path:null},
+    {image_index:1,content_type:'image/png',image_bytes:bobImages[1],storage_path:null},
+  ],'PostgreSQL holds the original media, in upload order, without file paths');
+  assert.equal(existsSync(storage),false,'new uploads do not write to the web server filesystem');
   assert.equal((await submit(base,bob,'id_document',[dataUrl('image/jpeg',jpeg())])).status,409,'a verified user cannot submit again');
   const bobVerification=passed.verification.id as string;
 
@@ -143,11 +148,11 @@ try {
   assert.equal(await isVerified(cara.id),false,'a failed check does not verify');
   const caraVerification=failed.verification.id as string;
   assert.equal((await pool.query('SELECT purge_after FROM public_verifications WHERE id=$1',[caraVerification])).rows[0].purge_after,null,'an automatic failure has no purge timer until an admin decides');
-  assert.ok(existsSync(join(storage,caraVerification,'0.jpg')),'an automatic failure keeps its media');
+  assert.equal((await pool.query('SELECT count(*)::int AS n FROM public_verification_media WHERE verification_id=$1 AND image_bytes IS NOT NULL',[caraVerification])).rows[0].n,1,'an automatic failure keeps its image');
 
   outcome={result:'review',reason:'needs a person'};
-  const deeImages=[jpeg(96)];
-  const reviewed=await body(await submit(base,dee,'camera_age',[dataUrl('image/jpeg',deeImages[0])]));
+  const deeImages=[jpeg(96),png(80)];
+  const reviewed=await body(await submit(base,dee,'id_document',[dataUrl('image/jpeg',deeImages[0]),dataUrl('image/png',deeImages[1])]));
   assert.equal(reviewed.verification.status,'review');
   assert.equal(await isVerified(dee.id),false);
   const deeVerification=reviewed.verification.id as string;
@@ -167,32 +172,49 @@ try {
   assert.equal((await get(base,'/public/admin/reviews')).status,401,'admin routes require a sign-in');
   assert.equal((await body(await get(base,'/public/admin/reviews',nova.cookie),403)).error,'Reviewer role required','no reviewers configured means nobody is an admin');
   process.env.HR_ADMIN_PUBLIC_IDS=` ${nova.id.toUpperCase()} , not-a-uuid`;
-  assert.equal((await get(base,'/public/admin/reviews',cara.cookie)).status,403,'a non-admin gets 403 on the admin list');
-  assert.equal((await post(base,`/public/admin/reviews/${caraVerification}/decision`,{decision:'approve',reason:'please'},cara.cookie)).status,403,'a non-admin cannot decide');
-  assert.equal((await get(base,`/public/admin/reviews/${caraVerification}/media`,cara.cookie)).status,403,'a non-admin cannot see media');
+  const firstServer=servers.pop()!;
+  await new Promise<void>((resolve,reject)=>firstServer.close(error=>error?reject(error):resolve()));
+  const restartedStorage=join(directory,'fresh-web-instance');
+  process.env.HR_VERIFICATION_DIR=restartedStorage;
+  assert.equal(existsSync(restartedStorage),false,'a fresh web instance has no local files');
+  const reviewBase=await listen(await createApp(pool,origin,{google:fake},fakeVerifier));
+  assert.equal((await get(reviewBase,'/public/admin/reviews',cara.cookie)).status,403,'a non-admin gets 403 on the admin list');
+  assert.equal((await post(reviewBase,`/public/admin/reviews/${caraVerification}/decision`,{decision:'approve',reason:'please'},cara.cookie)).status,403,'a non-admin cannot decide');
+  assert.equal((await get(reviewBase,`/public/admin/reviews/${caraVerification}/media`,cara.cookie)).status,403,'a non-admin cannot see their own uploaded media via the review endpoint');
+  assert.equal((await get(reviewBase,`/public/admin/reviews/${deeVerification}/media`)).status,401,'a direct image request still requires sign-in');
 
-  const list=await body(await get(base,'/public/admin/reviews',nova.cookie));
+  // Recreate the state after an instance stops between saving the bytes and recording the provider result.
+  const interrupted=await body(await submit(reviewBase,gus,'id_document',[dataUrl('image/png',png())]));
+  const interruptedId=interrupted.verification.id as string;
+  await pool.query("UPDATE public_verifications SET status='pending',reason=NULL,created_at=now()-interval '6 minutes' WHERE id=$1",[interruptedId]);
+
+  const list=await body(await get(reviewBase,'/public/admin/reviews',nova.cookie));
   const listed=list.reviews.map((item:any)=>item.id);
   assert.ok(listed.includes(deeVerification),'a review item appears in the admin list');
   assert.ok(listed.includes(caraVerification),'a failed item appears in the admin list');
   assert.ok(!listed.includes(bobVerification),'a passed item stays out of the admin list');
+  assert.equal(list.reviews.find((item:any)=>item.id===interruptedId)?.status,'review','a saved upload interrupted during the automatic check can be reviewed');
+  assert.equal((await get(reviewBase,`/public/admin/reviews/${interruptedId}/media`,nova.cookie)).headers.get('content-type'),'image/png');
   assert.ok(list.reviews.every((item:any)=>['review','failed'].includes(item.status)),'only review and failed items are listed');
 
-  const media=await get(base,`/public/admin/reviews/${deeVerification}/media?index=0`,nova.cookie);
-  assert.equal(media.status,200);
-  assert.equal(media.headers.get('content-type'),'image/jpeg');
-  assert.ok(Buffer.from(await media.arrayBuffer()).equals(deeImages[0]),'the reviewer sees the uploaded image');
-  assert.equal((await get(base,`/public/admin/reviews/${deeVerification}/media?index=2`,nova.cookie)).status,404,'a missing media index is not found');
-  assert.equal((await get(base,`/public/admin/reviews/${bobVerification}/media`,nova.cookie)).status,409,'passed items have no review media');
-  assert.equal((await pool.query("SELECT count(*)::int AS n FROM public_admin_audit WHERE action='media-view' AND target_verification_id=$1 AND actor_id=$2",[deeVerification,nova.id])).rows[0].n,1,'media views are audited');
+  for(const [index,mime] of ['image/jpeg','image/png'].entries()){
+    const media=await get(reviewBase,`/public/admin/reviews/${deeVerification}/media?index=${index}`,nova.cookie);
+    assert.equal(media.status,200);
+    assert.equal(media.headers.get('content-type'),mime);
+    assert.equal(media.headers.get('cache-control'),'no-store');
+    assert.deepEqual(Buffer.from(await media.arrayBuffer()),deeImages[index],'after restart the admin sees the exact uploaded ID images, in order');
+  }
+  assert.equal((await get(reviewBase,`/public/admin/reviews/${deeVerification}/media?index=2`,nova.cookie)).status,404,'a missing media index is not found');
+  assert.equal((await get(reviewBase,`/public/admin/reviews/${bobVerification}/media`,nova.cookie)).status,409,'passed items have no review media');
+  assert.equal((await pool.query("SELECT count(*)::int AS n FROM public_admin_audit WHERE action='media-view' AND target_verification_id=$1 AND actor_id=$2",[deeVerification,nova.id])).rows[0].n,2,'media views are audited');
 
-  const decide=(verification:string,decision:string,reason:unknown)=>post(base,`/public/admin/reviews/${verification}/decision`,{decision,reason},nova.cookie);
+  const decide=(verification:string,decision:string,reason:unknown)=>post(reviewBase,`/public/admin/reviews/${verification}/decision`,{decision,reason},nova.cookie);
   assert.equal((await decide(deeVerification,'approve','')).status,400,'a decision needs a reason');
   assert.equal((await decide(deeVerification,'maybe','ok')).status,400,'only approve or reject');
   assert.equal((await decide(bobVerification,'reject','changed my mind')).status,409,'a passed item cannot be decided');
   const approved=await body(await decide(deeVerification,'approve','documents match'));
   assert.equal(approved.verification.status,'passed');
-  assert.equal(await statusOf(base,dee),'verified','approve verifies the user');
+  assert.equal(await statusOf(reviewBase,dee),'verified','approve verifies the user');
   assert.equal((await decide(deeVerification,'reject','again')).status,409,'a decided item cannot be decided again');
   const audit=await pool.query("SELECT actor_id,action,reason FROM public_admin_audit WHERE target_verification_id=$1 AND action='approve'",[deeVerification]);
   assert.equal(audit.rows.length,1,'approve writes one audit row');
@@ -203,41 +225,62 @@ try {
   const rejected=await body(await decide(caraVerification,'reject','still unreadable'));
   assert.equal(rejected.verification.status,'failed','reject keeps the item failed');
   assert.equal(await isVerified(cara.id),false,'reject keeps the user unverified');
-  assert.equal(await statusOf(base,cara),'pending_verification');
+  assert.equal(await statusOf(reviewBase,cara),'pending_verification');
   assert.equal((await pool.query("SELECT count(*)::int AS n FROM public_admin_audit WHERE action='reject' AND target_verification_id=$1",[caraVerification])).rows[0].n,1,'reject writes an audit row');
   assert.ok((await pool.query('SELECT purge_after FROM public_verifications WHERE id=$1',[caraVerification])).rows[0].purge_after.getTime()>Date.now(),'an admin decision on a failed item starts the retention timer');
-  const queued=(await body(await get(base,'/public/admin/reviews',nova.cookie))).reviews.map((item:any)=>item.id);
+  const queued=(await body(await get(reviewBase,'/public/admin/reviews',nova.cookie))).reviews.map((item:any)=>item.id);
   assert.ok(!queued.includes(caraVerification),'a decided failed item leaves the admin queue');
   assert.ok(!queued.includes(deeVerification),'a decided review item leaves the admin queue');
+  assert.equal((await decide(caraVerification,'approve','already rejected')).status,409,'a rejected check cannot be approved later');
+  assert.equal((await get(reviewBase,`/public/admin/reviews/${caraVerification}/media`,nova.cookie)).status,409,'a decided case no longer serves images');
 
-  await pool.query("INSERT INTO public_verifications(id,public_user_id,method,status) VALUES($1,$2,'id_document','pending')",[randomUUID(),gus.id]);
-  assert.equal(await purgeExpiredVerificationMedia(pool,new Date(),storage),0,'nothing is purged before its purge time');
-  await pool.query("UPDATE public_verifications SET decided_at=now()-interval '8 days', purge_after=now()-interval '1 day' WHERE id=ANY($1::uuid[])",[[bobVerification,caraVerification]]);
-  assert.equal(await purgeExpiredVerificationMedia(pool,new Date(),storage),2,'only decided items past their window are purged');
+  const legacyId=randomUUID(), lostId=randomUUID();
+  for(const id of [legacyId,lostId]){
+    await pool.query("INSERT INTO public_verifications(id,public_user_id,method,status) VALUES($1,$2,'id_document','review')",[id,fox.id]);
+    await pool.query("INSERT INTO public_verification_media(id,verification_id,kind,storage_path) VALUES($1,$2,'document',$3)",[randomUUID(),id,`${id}/0.png`]);
+  }
+  await mkdir(join(restartedStorage,legacyId),{recursive:true});
+  await writeFile(join(restartedStorage,legacyId,'0.png'),png());
+  const legacyMedia=await get(reviewBase,`/public/admin/reviews/${legacyId}/media`,nova.cookie);
+  assert.equal(legacyMedia.headers.get('content-type'),'image/png');
+  assert.deepEqual(Buffer.from(await legacyMedia.arrayBuffer()),png(),'old uploads remain readable if their files still exist');
+  assert.equal((await get(reviewBase,`/public/admin/reviews/${lostId}/media`,nova.cookie)).status,410,'a lost local image is not returned');
+  assert.equal((await decide(lostId,'approve','no image')).status,410,'an admin cannot approve a check without its first image');
+  assert.equal(await isVerified(fox.id),false);
+  await body(await decide(legacyId,'reject','legacy document could not be verified'));
+  await body(await decide(lostId,'reject','please submit a new copy'));
+  assert.equal((await body(await get(reviewBase,'/public/verification',fox.cookie))).verification.status,'failed','a rejected lost upload lets the user retry');
+  const retry=await body(await submit(reviewBase,fox,'id_document',[dataUrl('image/png',png())]));
+  assert.equal(retry.verification.status,'review');
+
+  const pendingId=randomUUID();
+  await pool.query("INSERT INTO public_verifications(id,public_user_id,method,status) VALUES($1,$2,'id_document','pending')",[pendingId,gus.id]);
+  assert.equal(await purgeExpiredVerificationMedia(pool,new Date(),restartedStorage),0,'nothing is purged before its purge time');
+  await pool.query("UPDATE public_verifications SET created_at=now()-interval '8 days' WHERE id=$1",[thrown.verification.id]);
+  await pool.query("UPDATE public_verifications SET decided_at=now()-interval '8 days', purge_after=now()-interval '1 day' WHERE id=ANY($1::uuid[])",[[bobVerification,caraVerification,legacyId]]);
+  assert.equal(await purgeExpiredVerificationMedia(pool,new Date(),restartedStorage),3,'only decided items past their window are purged');
   assert.equal((await pool.query("SELECT status,purge_after FROM public_verifications WHERE id=$1",[bobVerification])).rows[0].status,'purged');
-  assert.equal((await pool.query('SELECT count(*)::int AS n FROM public_verification_media WHERE verification_id=ANY($1::uuid[])',[[bobVerification,caraVerification]])).rows[0].n,0,'purged media rows are deleted');
-  assert.equal(existsSync(join(storage,bobVerification)),false,'purged files are deleted');
-  assert.equal(existsSync(join(storage,caraVerification)),false,'purged failed-item files are deleted');
-  assert.ok(existsSync(join(storage,deeVerification,'0.jpg')),'a decision inside the window keeps its media');
-  assert.ok(existsSync(join(storage,thrown.verification.id,'0.jpg')),'review items keep their media until decided');
-  assert.equal((await pool.query("SELECT status FROM public_verifications WHERE public_user_id=$1",[gus.id])).rows[0].status,'pending','pending items are never purged');
-  const hank=await signUp(base,'hank','Hank Moss');
-  await consent(base,hank);
+  assert.equal((await pool.query('SELECT count(*)::int AS n FROM public_verification_media WHERE verification_id=ANY($1::uuid[])',[[bobVerification,caraVerification,legacyId]])).rows[0].n,0,'purged media and their bytes are deleted');
+  assert.equal(existsSync(join(restartedStorage,legacyId)),false,'purge still removes old files on disk');
+  assert.equal((await pool.query('SELECT count(*)::int AS n FROM public_verification_media WHERE verification_id=$1',[deeVerification])).rows[0].n,2,'a decision inside the window keeps its media');
+  assert.equal((await get(reviewBase,`/public/admin/reviews/${thrown.verification.id}/media`,nova.cookie)).status,200,'review items keep their media until decided');
+  assert.equal((await pool.query("SELECT status FROM public_verifications WHERE id=$1",[pendingId])).rows[0].status,'pending','pending items are never purged');
+  const hank=await signUp(reviewBase,'hank','Hank Moss');
+  await consent(reviewBase,hank);
   outcome={result:'failed',reason:'document unreadable'};
-  const hankVerification=(await body(await submit(base,hank,'id_document',[dataUrl('image/jpeg',jpeg())]))).verification.id as string;
-  assert.equal(await purgeExpiredVerificationMedia(pool,new Date(Date.now()+400*24*3600*1000),storage),1,'a far-future purge removes only the approved item, never an undecided failure');
-  assert.equal(existsSync(join(storage,deeVerification)),false,'the approved item is purged once its window has passed');
-  assert.ok(existsSync(join(storage,hankVerification,'0.jpg')),'an undecided automatic failure keeps its files after a far-future purge');
-  assert.equal((await pool.query('SELECT count(*)::int AS n FROM public_verification_media WHERE verification_id=$1',[hankVerification])).rows[0].n,1,'an undecided automatic failure keeps its media rows');
-  assert.equal(await purgeExpiredVerificationMedia(pool,new Date(),storage),0,'a second purge does nothing');
-  const afterPurge=await body(await get(base,'/public/verification',bob.cookie));
+  const hankVerification=(await body(await submit(reviewBase,hank,'id_document',[dataUrl('image/jpeg',jpeg())]))).verification.id as string;
+  assert.equal(await purgeExpiredVerificationMedia(pool,new Date(Date.now()+400*24*3600*1000),restartedStorage),2,'a far-future purge removes the approved and rejected items, never an undecided failure');
+  assert.equal((await pool.query('SELECT count(*)::int AS n FROM public_verification_media WHERE verification_id=$1',[deeVerification])).rows[0].n,0,'the approved item is purged once its window has passed');
+  assert.equal((await get(reviewBase,`/public/admin/reviews/${hankVerification}/media`,nova.cookie)).status,200,'an undecided automatic failure keeps its image after a far-future purge');
+  assert.equal(await purgeExpiredVerificationMedia(pool,new Date(),restartedStorage),0,'a second purge does nothing');
+  const afterPurge=await body(await get(reviewBase,'/public/verification',bob.cookie));
   assert.equal(afterPurge.verification.status,'purged');
   assert.equal(afterPurge.status,'verified','the verified status survives the purge');
-  assert.equal((await get(base,`/public/admin/reviews/${caraVerification}/media`,nova.cookie)).status,410,'purged media cannot be viewed');
+  assert.equal((await get(reviewBase,`/public/admin/reviews/${caraVerification}/media`,nova.cookie)).status,410,'purged media cannot be viewed');
 
-  console.log('PASS public-verification: consent gate, fake verifier outcomes, attempt limit, admin review and audit, retention purge, private mode 404');
+  console.log('PASS public-verification: admin review after restart, interrupted and legacy uploads, byte order, access and audit, retention');
 } finally {
-  for(const [key,value] of [['HR_MODE',previous.mode],['HR_VERIFICATION_DIR',previous.dir],['HR_ADMIN_PUBLIC_IDS',previous.admins]] as const){
+  for(const [key,value] of [['HR_MODE',previous.mode],['HR_VERIFICATION_DIR',previous.dir],['HR_ADMIN_PUBLIC_IDS',previous.admins],['ADMIN_HASH',previous.adminHash]] as const){
     if(value===undefined)delete process.env[key];else process.env[key]=value;
   }
   await Promise.all(servers.map(server=>new Promise(resolve=>server.close(resolve))));

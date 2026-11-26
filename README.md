@@ -32,6 +32,13 @@ Surprise-invitation redaction applies only to responses for the husband role. It
 
 Database process startup/shutdown details: [docs/DB-SETUP.md](docs/DB-SETUP.md). Older architecture and migration documents describe the previous persistent-account behavior; this startup-reset behavior supersedes it.
 
+### Public mode: verification uploads on Render
+
+- Keep the web service connected to the same persistent, private PostgreSQL database via `DATABASE_URL`. New verification images are stored there, not on the Render web service's local filesystem; no Render disk is required. Restrict access to the database and its backups and use encryption at rest.
+- Sign in with an account authorized by `ADMIN_HASH` or `HR_ADMIN_PUBLIC_IDS`, then choose **Review checks → Open check**. Only authorized admins can retrieve images, and views and decisions are audited. If a deploy interrupts the automatic check, the upload becomes eligible for manual review after five minutes and appears when the admin refreshes the list.
+- A check awaiting manual review, including an automatic failure, keeps its images until an admin decides. After automatic approval or an admin decision, images are removed from the live database after the configured retention window (`HR_VERIFICATION_RETENTION_DAYS`, default 7) by the startup/hourly cleanup. Database backups may retain copies until they expire. Camera liveness frames are never stored by the app.
+- Older uploads still read from `HR_VERIFICATION_DIR` (default `.local/verification`) if the files are present. Images already lost from Render's temporary filesystem cannot be recovered from PostgreSQL. If the reviewer sees a missing image, reject that check and ask the user to refresh and submit a new image.
+
 ### Origin rejected / כתובת משחק לא תואמת
 
 The server accepts same-origin requests through **any address serving the game**, including localhost, 127.0.0.1, LAN IPs and domains, without adding each address to a list. Unrelated websites, missing/null origins and mismatched ports remain rejected. `APP_ORIGIN` also remains an explicitly trusted canonical origin. Development Vite host filtering permits these aliases. Restart `npm.cmd run dev` after updating the backend. For another device use the PC's reachable LAN address and app port; localhost on a phone refers to the phone. Firewalls/routing must permit access. Production aliases require HTTPS; configure `TRUST_PROXY` only for a trusted TLS proxy so Express can determine the actual external host/protocol. Cookies are per host: switching addresses does not transfer guest identity.

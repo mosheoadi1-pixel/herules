@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { existsSync, readdirSync, readFileSync } from 'node:fs';
+import { existsSync } from 'node:fs';
 import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -195,7 +195,7 @@ const get = (base: string, path: string, cookie = '') => fetch(`${base}/api${pat
 const cookieOf = (response: Response) => /hr_public_session=[a-f0-9]{64}/.exec(response.headers.get('set-cookie') ?? '')?.[0] ?? '';
 const tokenOf = (response: Response) => /#public-pending=([A-Za-z0-9_-]+)$/.exec(response.headers.get('location') ?? '')?.[1] ?? '';
 const dataUrl = (mime: string, bytes: Buffer) => `data:${mime};base64,${bytes.toString('base64')}`;
-const mediaMarkers = ['data:image', 'storage_path', '.jpg', '.png', 'frame_base64'];
+const mediaMarkers = ['data:image', 'storage_path', 'image_bytes', '.jpg', '.png', 'frame_base64'];
 async function body(response: Response, status = 200) {
   const text = await response.text();
   assert.equal(response.status, status, text);
@@ -279,19 +279,19 @@ try {
     assert.equal(passed.verification.status, 'passed', 'both sessions verified passes');
     assert.equal(passed.status, 'verified');
     assert.equal(setFake.calls.length, 5, 'the camera path makes the five expected Idswyft calls');
-    const media = (await pool.query('SELECT kind,storage_path FROM public_verification_media WHERE verification_id=$1 ORDER BY storage_path', [passed.verification.id])).rows;
-    assert.deepEqual(media.map(row => row.kind), ['document', 'selfie'], 'only the front and the selfie are stored');
-    assert.deepEqual(readdirSync(join(storage, passed.verification.id)).sort(), ['0.jpg', '1.jpg'], 'no file is written for the frames');
-    assert.ok(readFileSync(join(storage, passed.verification.id, '0.jpg')).equals(frontBytes), 'the stored front is the ID image');
-    assert.ok(readFileSync(join(storage, passed.verification.id, '1.jpg')).equals(selfieBytes), 'the stored selfie is the live image');
-    assert.ok(existsSync(join(storage, passed.verification.id, '1.jpg')));
+    const media = (await pool.query('SELECT kind,image_bytes,storage_path FROM public_verification_media WHERE verification_id=$1 ORDER BY image_index', [passed.verification.id])).rows;
+    assert.deepEqual(media, [
+      { kind: 'document', image_bytes: frontBytes, storage_path: null },
+      { kind: 'selfie', image_bytes: selfieBytes, storage_path: null },
+    ], 'only the ID front and the selfie are stored, in order; no liveness frames');
+    assert.equal(existsSync(storage), false, 'the camera path writes no local files');
     assert.equal((await body(await get(setApp, '/public/me', ann.cookie))).user.status, 'verified', 'a passed camera check verifies the user');
 
     const identity = await body(await post(setApp, '/public/verification', { method: 'id_document', media: [dataUrl('image/jpeg', frontBytes)] }, ben.cookie));
     assert.equal(identity.verification.status, 'passed', 'the id_document path is unchanged with the flag on');
   }
 
-  // The approved camera consent (v3) is the shared constant: v2 alone does not unlock the camera, v3 unlocks both methods.
+  // ID consent alone does not unlock the camera; current camera consent unlocks both methods.
   const cameraVersion = CAMERA_CONSENT_VERSION as string;
   assert.ok(cameraVersion, 'the approved camera consent version is set');
   const prodFake = fakeIdswyft();
@@ -300,29 +300,29 @@ try {
   const eve = await signUp(prodApp, 'eve', 'Eve Stone');
 
   {
-    assert.equal((await body(await get(prodApp, '/public/verification', dee.cookie))).cameraEnabled, true, 'flag on with the approved v3 text reports cameraEnabled true');
+    assert.equal((await body(await get(prodApp, '/public/verification', dee.cookie))).cameraEnabled, true, 'flag on with camera consent available reports cameraEnabled true');
     await body(await consent(prodApp, dee));
     const view = await body(await get(prodApp, '/public/verification', dee.cookie));
-    assert.equal(view.consented, true, 'v2 counts for the ID method');
-    assert.equal(view.cameraConsented, false, 'v2 alone does not count for the camera method');
-    assert.equal((await body(await camera(prodApp, dee, payload), 409)).error, 'Consent required', 'camera method with only v2 accepted returns 409');
+    assert.equal(view.consented, true, 'ID consent counts for the ID method');
+    assert.equal(view.cameraConsented, false, 'ID consent alone does not count for the camera method');
+    assert.equal((await body(await camera(prodApp, dee, payload), 409)).error, 'Consent required', 'camera method with only ID consent accepted returns 409');
     assert.equal(prodFake.calls.length, 0, 'the refused camera request never reaches Idswyft');
     await body(await consent(prodApp, dee, cameraVersion));
-    assert.equal((await body(await get(prodApp, '/public/verification', dee.cookie))).cameraConsented, true, 'v3 accepted counts for the camera method');
+    assert.equal((await body(await get(prodApp, '/public/verification', dee.cookie))).cameraConsented, true, 'current camera consent counts for the camera method');
     const passed = await body(await camera(prodApp, dee, payload));
-    assert.equal(passed.verification.status, 'passed', 'camera method with v3 accepted proceeds');
+    assert.equal(passed.verification.status, 'passed', 'camera method with camera consent accepted proceeds');
     assert.equal(prodFake.calls.length, 5, 'the accepted camera request makes the five Idswyft calls');
   }
 
   {
     await body(await consent(prodApp, eve, cameraVersion));
     const view = await body(await get(prodApp, '/public/verification', eve.cookie));
-    assert.equal(view.consented, true, 'v3 accepted counts for the ID method');
+    assert.equal(view.consented, true, 'camera consent also counts for the ID method');
     const identity = await body(await post(prodApp, '/public/verification', { method: 'id_document', media: [dataUrl('image/jpeg', frontBytes)] }, eve.cookie));
-    assert.equal(identity.verification.status, 'passed', 'ID method with v3 accepted proceeds');
+    assert.equal(identity.verification.status, 'passed', 'ID method with camera consent accepted proceeds');
   }
 
-  console.log('PASS public-camera: schema bounds, flag off review, both sessions in order, age and identity failure and review mapping, route refusals, stored media only, camera consent v3 gate');
+  console.log('PASS public-camera: schema bounds, flag off review, both sessions in order, age and identity failure and review mapping, route refusals, durable photos only, camera consent gate');
 } finally {
   for (const [key, value] of [['HR_MODE', previous.mode], ['HR_VERIFICATION_DIR', previous.dir], ['HR_ADMIN_PUBLIC_IDS', previous.admins]] as const) {
     if (value === undefined) delete process.env[key];

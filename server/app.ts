@@ -2,7 +2,6 @@ import express, { type Request, type Response, type NextFunction } from 'express
 import { randomBytes, randomUUID, createHash, scrypt as scryptCallback, timingSafeEqual } from 'node:crypto';
 import { promisify } from 'node:util';
 import { readFile } from 'node:fs/promises';
-import { join } from 'node:path';
 import type { Pool, PoolClient } from 'pg';
 import { z } from 'zod';
 import { quickPresets } from '../src/quick.ts';
@@ -19,7 +18,7 @@ import { AUCTION_LIMITS, highestBid, settleAuction, type AuctionOutcome } from '
 import { hrMode } from './mode.ts';
 import { pkcePair, randomKey, type PublicIdentityProvider, type PublicProvider } from './public-auth.ts';
 import { CAMERA_CONSENT_VERSION, VERIFICATION_CONSENT_VERSION } from '../src/verification-consent.ts';
-import { VERIFICATION_ATTEMPTS_PER_DAY, VERIFICATION_MEDIA_MAX_ITEMS, cameraLivenessSchema, decodeImage, discardMedia, hasConsentVersion, hasVerificationConsent, purgeExpiredVerificationMedia, requireVerified, retentionMs, storeMedia, verificationDirectory, type PublicVerifier, type PublicVerifierResult } from './public-verification.ts';
+import { VERIFICATION_ATTEMPTS_PER_DAY, VERIFICATION_MEDIA_MAX_ITEMS, cameraLivenessSchema, decodeImage, hasConsentVersion, hasVerificationConsent, legacyVerificationDirectory, loadVerificationMedia, purgeExpiredVerificationMedia, queueStalledVerificationReviews, requireVerified, retentionMs, storeVerificationMedia, type PublicVerifier, type PublicVerifierResult } from './public-verification.ts';
 import { adminHashFromEnv, isPublicAdmin, publicEmailHash } from './public-admin.ts';
 import { MAIN_ROOM, ROOM_PAGE_MAX, ROOM_POSTS_PER_TEN_MINUTES, activeRoomGrant, messagingNickname, messagingVisible, refreshMessaging, roomBody, roomHiddenIds, roomId, roomMessageSql, roomView } from './public-room.ts';
 import { CONVERSATION_COOLDOWN, CONVERSATION_MESSAGES_PER_TEN_MINUTES, CONVERSATION_PAGE_MAX, conversationBody, conversationMessageSql, conversationMessageView, conversationRowSql, conversationView, visibleConversation } from './public-conversations.ts';
@@ -192,6 +191,7 @@ export async function createApp(pool: Pool, origin: string, providers: Partial<R
   await pool.query(await readFile(new URL('../db/012-public-messaging.sql', import.meta.url), 'utf8'));
   await pool.query(await readFile(new URL('../db/013-public-play.sql', import.meta.url), 'utf8'));
   await pool.query(await readFile(new URL('../db/014-public-game.sql', import.meta.url), 'utf8'));
+  await pool.query(await readFile(new URL('../db/015-public-verification-media.sql', import.meta.url), 'utf8'));
   const app = express(); app.disable('x-powered-by');
   app.set('trust proxy',process.env.TRUST_PROXY?.split(',').map(v=>v.trim())||false);
   // Public mode shows reviewer images as blob: object URLs; private mode keeps its existing policy.
@@ -347,7 +347,7 @@ export async function createApp(pool: Pool, origin: string, providers: Partial<R
     };
     app.get('/api/public/me', async (req,res) => { const user = await signedPublic(req); res.json({ user: publicUser(user), isAdmin: isPublicAdmin(user) }); });
     app.post('/api/public/logout', async (req,res) => { await pool.query('DELETE FROM public_sessions WHERE hash=$1',[hash(publicTokenOf(req))]); res.clearCookie('hr_public_session',{ path:'/' }); res.json({ok:true}); });
-    const verificationDir = verificationDirectory();
+    const legacyVerificationDir = legacyVerificationDirectory();
     const verificationRetention = retentionMs();
     const cameraEnabled = options.cameraEnabled === true;
     const cameraConsentVersion = options.cameraConsentVersion === undefined ? CAMERA_CONSENT_VERSION : options.cameraConsentVersion;
@@ -358,7 +358,7 @@ export async function createApp(pool: Pool, origin: string, providers: Partial<R
       if (!isPublicAdmin(user)) fail(403,'Reviewer role required');
       return user;
     };
-    const purge = () => purgeExpiredVerificationMedia(pool, new Date(), verificationDir).catch(error => console.error('Verification media purge failed', error.code || error.name));
+    const purge = () => purgeExpiredVerificationMedia(pool, new Date(), legacyVerificationDir).catch(error => console.error('Verification media purge failed', error.code || error.name));
     await purge();
     setInterval(purge, 3600000).unref();
     app.post('/api/public/consent', async (req,res) => {
@@ -398,17 +398,10 @@ export async function createApp(pool: Pool, origin: string, providers: Partial<R
         const recent = (await c.query("SELECT count(*)::int AS n FROM public_verifications WHERE public_user_id=$1 AND created_at>now()-interval '24 hours'", [user.id])).rows[0].n;
         if (recent >= VERIFICATION_ATTEMPTS_PER_DAY) fail(429,'Too many verification attempts; try again tomorrow');
         await c.query("INSERT INTO public_verifications(id,public_user_id,method,status) VALUES($1,$2,$3,'pending')", [id, user.id, b.method]);
-        try {
-          // Camera checks store the front and the selfie only; the liveness frames are never written.
-          const paths = await storeMedia(verificationDir, id, images);
-          for (const [index, path] of paths.entries()) {
-            const kind = b.method === 'id_document' || (camera && index === 0) ? 'document' : 'selfie';
-            await c.query('INSERT INTO public_verification_media(id,verification_id,kind,storage_path) VALUES($1,$2,$3,$4)', [randomUUID(), id, kind, path]);
-          }
-        } catch (error) {
-          await discardMedia(verificationDir, id);
-          throw error;
-        }
+        // Store the submitted photos, not the camera liveness frames.
+        await storeVerificationMedia(c, id, images.map((image, index) => ({
+          ...image, kind: b.method === 'id_document' || (camera && index === 0) ? 'document' : 'selfie',
+        })));
       });
       let outcome: PublicVerifierResult;
       try { outcome = await adapter.check({ method: b.method, media: images.map(image => image.bytes), liveness: camera ? b.liveness : undefined }); }
@@ -417,14 +410,17 @@ export async function createApp(pool: Pool, origin: string, providers: Partial<R
       const reason = String(outcome.reason ?? '').slice(0, 300);
       const decided = result !== 'review';
       const row = await transaction(async c => {
-        const r = await c.query('UPDATE public_verifications SET status=$2,reason=$3,decided_at=$4,purge_after=$5 WHERE id=$1 RETURNING id,method,status,reason,created_at,decided_at', [id, result, reason, decided ? new Date() : null, result === 'passed' ? new Date(Date.now() + verificationRetention) : null]);
+        const r = await c.query("UPDATE public_verifications SET status=$2,reason=$3,decided_at=$4,purge_after=$5 WHERE id=$1 AND status='pending' RETURNING id,method,status,reason,created_at,decided_at", [id, result, reason, decided ? new Date() : null, result === 'passed' ? new Date(Date.now() + verificationRetention) : null]);
+        // A late provider response must not overwrite a case already handed off to a reviewer.
+        if (!r.rowCount) return (await c.query('SELECT id,method,status,reason,created_at,decided_at FROM public_verifications WHERE id=$1', [id])).rows[0];
         if (result === 'passed') await c.query('UPDATE public_users SET verified_at=COALESCE(verified_at,now()) WHERE id=$1', [user.id]);
         return r.rows[0];
       });
-      res.json({ verification: verificationView(row), status: result === 'passed' ? 'verified' : 'pending_verification' });
+      res.json({ verification: verificationView(row), status: row?.status === 'passed' ? 'verified' : 'pending_verification' });
     });
     app.get('/api/public/admin/reviews', async (req,res) => {
       await reviewer(req);
+      await queueStalledVerificationReviews(pool);
       const rows = (await pool.query("SELECT v.id,v.method,v.status,v.reason,v.created_at,v.decided_at,u.nickname FROM public_verifications v JOIN public_users u ON u.id=v.public_user_id WHERE v.status IN ('review','failed') AND v.reviewer_id IS NULL ORDER BY v.created_at")).rows;
       res.json({ reviews: rows.map(row => ({ ...verificationView(row), nickname: row.nickname })) });
     });
@@ -432,22 +428,25 @@ export async function createApp(pool: Pool, origin: string, providers: Partial<R
       const actor = await reviewer(req);
       const id = uuid.parse(req.params.id);
       const index = z.coerce.number().int().min(0).max(VERIFICATION_MEDIA_MAX_ITEMS - 1).parse(req.query.index ?? 0);
-      const verification = (await pool.query('SELECT status FROM public_verifications WHERE id=$1', [id])).rows[0] ?? fail(404,'Review unavailable');
-      if (verification.status === 'purged') fail(410,'Media has been deleted');
-      if (!['review','failed'].includes(verification.status)) fail(409,'Only items awaiting review have media to review');
-      const media = (await pool.query('SELECT storage_path FROM public_verification_media WHERE verification_id=$1 ORDER BY created_at,id', [id])).rows;
-      const item = media[index] ?? fail(404,'Media unavailable');
-      await pool.query('INSERT INTO public_admin_audit(id,actor_id,action,target_verification_id) VALUES($1,$2,$3,$4)', [randomUUID(), actor.id, 'media-view', id]);
-      res.sendFile(join(verificationDir, item.storage_path), (error?: Error) => { if (error && !res.headersSent) res.status(410).json({ error: 'Media has been deleted' }); });
+      const image = await transaction(async c => {
+        const verification = (await c.query('SELECT status,reviewer_id FROM public_verifications WHERE id=$1 FOR SHARE', [id])).rows[0] ?? fail(404,'Review unavailable');
+        if (verification.status === 'purged') fail(410,'Media has been deleted');
+        if (verification.reviewer_id || !['review','failed'].includes(verification.status)) fail(409,'Only items awaiting review have media to review');
+        const item = await loadVerificationMedia(c, id, index, legacyVerificationDir) ?? fail(404,'Media unavailable');
+        await c.query('INSERT INTO public_admin_audit(id,actor_id,action,target_verification_id) VALUES($1,$2,$3,$4)', [randomUUID(), actor.id, 'media-view', id]);
+        return item;
+      });
+      res.type(image.mime).set('Content-Length', String(image.bytes.length)).end(image.bytes);
     });
     app.post('/api/public/admin/reviews/:id/decision', async (req,res) => {
       const actor = await reviewer(req);
       const id = uuid.parse(req.params.id);
       const b = z.object({ decision: z.enum(['approve','reject']), reason: z.string().trim().min(1).max(300) }).parse(req.body);
       const row = await transaction(async c => {
-        const verification = (await c.query('SELECT public_user_id,status FROM public_verifications WHERE id=$1 FOR UPDATE', [id])).rows[0] ?? fail(404,'Review unavailable');
-        if (!['review','failed'].includes(verification.status)) fail(409,'Only items awaiting review can be decided');
+        const verification = (await c.query('SELECT public_user_id,status,reviewer_id FROM public_verifications WHERE id=$1 FOR UPDATE', [id])).rows[0] ?? fail(404,'Review unavailable');
+        if (verification.reviewer_id || !['review','failed'].includes(verification.status)) fail(409,'Only items awaiting review can be decided');
         const approve = b.decision === 'approve';
+        if (approve && !(await loadVerificationMedia(c, id, 0, legacyVerificationDir))) fail(410,'Media unavailable');
         const r = await c.query('UPDATE public_verifications SET status=$2,reason=$3,reviewer_id=$4,decided_at=$5,purge_after=$6 WHERE id=$1 RETURNING id,method,status,reason,created_at,decided_at', [id, approve ? 'passed' : 'failed', b.reason, actor.id, new Date(), new Date(Date.now() + verificationRetention)]);
         if (approve) await c.query('UPDATE public_users SET verified_at=COALESCE(verified_at,now()) WHERE id=$1', [verification.public_user_id]);
         await c.query('INSERT INTO public_admin_audit(id,actor_id,action,target_verification_id,reason) VALUES($1,$2,$3,$4,$5)', [randomUUID(), actor.id, b.decision, id, b.reason]);
