@@ -2,6 +2,7 @@ import type { Dispatch, SetStateAction } from 'react';
 import type { Session } from '../../server/app';
 import { categories, suggest, type Idea } from '../library';
 import { Roulette } from '../Roulette';
+import type { MoodInput } from '../wheels';
 import { save, type Translate } from '../app-shared';
 
 type LibraryTabProps = {
@@ -17,24 +18,42 @@ type LibraryTabProps = {
   favorites: string[]; setFavorites: Dispatch<SetStateAction<string[]>>;
   favoriteKey?: string;
   recent: string[]; useIdea: (i: Idea) => void; setError: Dispatch<SetStateAction<string>>;
+  play: boolean; ended: boolean; mood?: MoodInput; spend: () => Promise<boolean>; configure?: (cost: number) => Promise<boolean>;
 };
 
-export function LibraryTab({ tab, s, t, lang, label, library, destinationIdeas, filtered, category, setCategory, intensity, setIntensity, tag, setTag, query, setQuery, noPrep, setNoPrep, away, setAway, onlyFavorites, setOnlyFavorites, favorites, setFavorites, favoriteKey='hr-favorites', recent, useIdea, setError }: LibraryTabProps) {
+export function LibraryTab({ tab, s, t, lang, label, library, destinationIdeas, filtered, category, setCategory, intensity, setIntensity, tag, setTag, query, setQuery, noPrep, setNoPrep, away, setAway, onlyFavorites, setOnlyFavorites, favorites, setFavorites, favoriteKey='hr-favorites', recent, useIdea, setError, play, ended, mood, spend, configure }: LibraryTabProps) {
+  const clearFilters = () => {
+    setQuery(''); setCategory(''); setIntensity(''); setTag('');
+    setNoPrep(false); setAway(false); setOnlyFavorites(false);
+  };
   return <><section className="panel">
-  <h2>{tab==='rewards'?t('השראה לפרסים','Reward inspiration'):tab==='punishments'?t('השראה לעונשים','Punishments inspiration'):`${destinationIdeas.length} ${t('דרכים לבחור יחד','ways to choose together')}`}</h2>
-  <p>{t('המשימות האישיות שלכם לצד ההצעות הנועזות שנשמרו. סננו לפי תג תוכן אישי להצגת התוספות מהקובץ. קובייה מציעה בלבד; את עורכת ושולחת בנפרד. עשר ההצעות האחרונות לא יוגרלו שוב.','Your supplied tasks alongside the retained bold suggestions. Filter by Custom content to see additions from your file. Dice only suggests; you edit and send separately. The last ten suggestions are excluded.')}</p>
-  <p className="notice">{t('תוצאות משחק הן בחירה נפרדת, מומךץ כתגובה לסירוב, השהיה או עצירה.','Game outcomes require a separate opt-in and never follow refusal, pause or stop.')}</p>
-  <div className="filters">
-   <label>{t('חיפוש','Search')}<input type="search" value={query} onChange={e=>setQuery(e.target.value)}/></label>
+  <h2>{tab==='library'?t('ספריית השראה','Idea library'):tab==='rewards'?t('רעיונות פרסים','Reward ideas'):t('השראת עונשים','Punishments inspiration')}</h2>
+  <div className="library-search">
+   <label>{t('חיפוש','Search')}<input type="search" dir="auto" value={query} onChange={e=>setQuery(e.target.value)}/></label>
+   <div className="filters">
    {tab==='library'&&<label>{t('קטגוריה','Category')}<select value={category} onChange={e=>setCategory(e.target.value)}><option value="">{t('הכל','All')}</option>{categories.filter(c=>c!=='rewards'&&c!=='consequences').map(c=><option key={c} value={c}>{label(c)}</option>)}</select></label>}
    <label>{t('עוצמה','Intensity')}<select value={intensity} onChange={e=>setIntensity(e.target.value)}><option value="">{t('הכל','All')}</option><option value="1">{t('עדינה','Gentle')}</option><option value="2">{t('מעורבות','Engaged')}</option><option value="3">{t('נועזת','Bold')}</option></select></label>
-   <label>{t('תג גבול / פעילות','Boundary / activity tag')}<select value={tag} onChange={e=>setTag(e.target.value)}><option value="">{t('הכל','All')}</option>{[...new Set(destinationIdeas.flatMap(i=>i.tags))].map(tag=><option key={tag} value={tag}>{label(tag)}</option>)}</select></label>
+   </div>
   </div>
-  <div className="row"><label className="check"><input type="checkbox" checked={noPrep} onChange={e=>setNoPrep(e.target.checked)}/>{t('ללא הכנה מראש','Nothing to prepare')}</label><label className="check"><input type="checkbox" checked={away} onChange={e=>setAway(e.target.checked)}/>{t('מחוץ לבית','Away from home')}</label><label className="check"><input type="checkbox" checked={onlyFavorites} onChange={e=>setOnlyFavorites(e.target.checked)}/>{t('מועדפים בלבד (במכשיר זה)','Favorites only (this device)')}</label><button className="gold" disabled={!filtered.length} onClick={()=>{const idea=suggest(filtered,recent);if(idea)useIdea(idea);else setError(t('אין הצעות חדשות במסנן הנוכחי; הרחיבו את הבחירה.','No fresh suggestions in these filters; broaden the selection.'));}}>⚄ {t('הצעה אקראית לבדיקה','Roll a suggestion to review')}</button><span>{filtered.length} {t('הצעות','ideas')}</span></div>
-  {!filtered.length&&<p className="empty" role="status">{away?t('אין רעיונות שנבדקו למחוץ לבית התואמים למסננים הנוכחיים. אפשר לשנות מסננים או לכבות את האפשרות.','No reviewed away-from-home ideas match the current filters. Change the filters or turn off Away from home.'):t('אין רעיונות התואמים למסננים. נסו לשנות את החיפוש או המסננים.','No ideas match these filters. Try changing the search or filters.')}</p>}
-  {tab==='punishments'&&<Roulette key={s.id} ideas={library.filter(i=>i.category==='consequences')} lang={lang} onChoose={useIdea}/>}
+  <details className="library-options">
+   <summary>{t('מסננים נוספים','More filters')}</summary>
+   <label>{t('תג גבול / פעילות','Boundary / activity tag')}<select value={tag} onChange={e=>setTag(e.target.value)}><option value="">{t('הכל','All')}</option>{[...new Set(destinationIdeas.flatMap(i=>i.tags))].map(tag=><option key={tag} value={tag}>{label(tag)}</option>)}</select></label>
+   <div className="row"><label className="check"><input type="checkbox" checked={noPrep} onChange={e=>setNoPrep(e.target.checked)}/>{t('ללא הכנה מראש','Nothing to prepare')}</label><label className="check"><input type="checkbox" checked={away} onChange={e=>setAway(e.target.checked)}/>{t('מחוץ לבית','Away from home')}</label><label className="check"><input type="checkbox" checked={onlyFavorites} onChange={e=>setOnlyFavorites(e.target.checked)}/>{t('מועדפים בלבד (במכשיר זה)','Favorites only (this device)')}</label></div>
+  </details>
+  <div className="row library-results">
+   <span role="status"><bdi>{filtered.length}</bdi> {t('הצעות','ideas')}</span>
+   <button type="button" className="quiet" disabled={!(query||category||intensity||tag||noPrep||away||onlyFavorites)} onClick={clearFilters}>{t('ניקוי מסננים','Clear filters')}</button>
+   <button type="button" disabled={!filtered.length} onClick={()=>{const idea=suggest(filtered,recent);if(idea)useIdea(idea);else setError(t('אין הצעות חדשות במסנן הנוכחי; הרחיבו את הבחירה.','No fresh suggestions in these filters; broaden the selection.'));}}>{t('הצעה אקראית לבדיקה','Roll a suggestion to review')}</button>
+  </div>
+  {tab==='punishments'&&<>
+    <p className="small">{t('תוצאות משחק הן בחירה נפרדת, ולעולם אינן תגובה לסירוב, השהיה או עצירה.','Game outcomes require a separate opt-in and never follow refusal, pause or stop.')}</p>
+    <details className="library-options idea-wheel"><summary>{t('פתיחת גלגל הרעיונות','Open the idea wheel')}</summary><Roulette key={s.id} ideas={library} lang={lang} onChoose={useIdea} mood={mood} herPoints={s.herPoints??0} wheelCost={s.wheelCost??0} play={play} ended={ended} spend={spend} configure={configure}/></details>
+  </>}
+  {!filtered.length&&<p className="empty" role="status">{away?t('אין רעיונות שנבדקו מחוץ לבית התואמים למסננים הנוכחיים. אפשר לשנות מסננים או לכבות את האפשרות.','No reviewed away-from-home ideas match the current filters. Change the filters or turn off Away from home.'):t('אין רעיונות התואמים למסננים. נסו לשנות את החיפוש או המסננים.','No ideas match these filters. Try changing the search or filters.')}</p>}
   </section><div className="cards library">{filtered.map(i=><article className="panel" key={i.id}>
-  <div className="row between"><span className="eyebrow">{label(i.category)}</span><button className="quiet" aria-label={favorites.includes(i.id)?t('הסרה ממועדפים','Remove favorite'):t('שמירה במועדפים','Save favorite')} aria-pressed={favorites.includes(i.id)} onClick={()=>{const next=favorites.includes(i.id)?favorites.filter(id=>id!==i.id):[...favorites,i.id];setFavorites(next);save(favoriteKey,next);}}>{favorites.includes(i.id)?'★':'☆'}</button></div>
+  <div className="row between"><span className="eyebrow">{label(i.category)}</span><button className="quiet favorite-button" aria-label={favorites.includes(i.id)?t('הסרה ממועדפים','Remove favorite'):t('שמירה במועדפים','Save favorite')} aria-pressed={favorites.includes(i.id)} onClick={()=>{const next=favorites.includes(i.id)?favorites.filter(id=>id!==i.id):[...favorites,i.id];setFavorites(next);save(favoriteKey,next);}}>
+    <svg aria-hidden="true" width="18" height="18" viewBox="0 0 24 24" fill={favorites.includes(i.id)?'currentColor':'none'} stroke="currentColor" strokeWidth="1.5" strokeLinejoin="round"><path d="M6 4h12v16l-6-4-6 4z"/></svg>
+  </button></div>
   <p>{lang==='he'?i.he:i.en}</p><p className="small">{i.minutes} {t('דקות','min')} · {i.intensity===3?t('נועזת','Bold'):i.intensity===1?t('עדינה','Gentle'):t('מעורבות','Engaged')} · {i.tags.map(label).join(', ')}</p><button onClick={()=>useIdea(i)}>{t('בחירה ועריכה','Choose and edit')}</button>
  </article>)}</div></>;
 }

@@ -73,6 +73,7 @@
 }
 .entrance-copy h1 { font-size: clamp(3rem, 4.95vw, 4.4rem); line-height: 1.04; text-wrap: balance; }
 .entrance-copy h1 span { display: block; color: var(--gold); }
+.entrance-copy h1:lang(en) { font-size: clamp(2.35rem, 4.35vw, 3.75rem); }
 .public-shell:dir(rtl) :is(.entrance-copy h1, .entrance-journey h2, .public-auth-card h1) { letter-spacing: normal; }
 .entrance-lead { color: var(--muted); line-height: 1.56; font-size: clamp(1rem, 1.8vw, 1.18rem); max-inline-size: 30rem; margin: 1rem 0 1.5rem; }
 .public-auth-card {
@@ -260,6 +261,7 @@
   .entrance-hero { grid-template-columns: minmax(0, 1fr); min-block-size: auto; padding-block: .75rem 1rem; }
   .entrance-scene { inline-size: min(100%, 34rem); margin-inline: auto; }
   .entrance-copy h1 { font-size: clamp(2.85rem, 8.5vw, 4rem); }
+  .entrance-copy h1:lang(en) { font-size: clamp(2.1rem, 9vw, 3.75rem); }
 }
 @media (max-width: 560px) {
   .public-header { min-block-size: 3.9rem; padding-block: .45rem; }

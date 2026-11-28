@@ -32,9 +32,11 @@ export function GameApp({paired}: {paired?:{id:string;lang:'he'|'en';revision:nu
  const [state,setState]=useState<State|null>(null),[ready,setReady]=useState(false),[error,setError]=useState(''),[online,setOnline]=useState(true),[busy,setBusy]=useState(false),[unreconciled,setUnreconciled]=useState(false),[unknownOutcome,setUnknownOutcome]=useState(()=>{try{return !paired&&sessionStorage.getItem('hr-unknown-outcome')==='1';}catch{return false;}});
   const [notificationPermission,setNotificationPermission]=useState(()=>typeof Notification==='undefined'?'unsupported':Notification.permission);
   const navRef=useRef<HTMLElement>(null);
+  const [moreOpen,setMoreOpen]=useState(false);
    const [loadError,setLoadError]=useState('');
  const knownNotices=useRef<Set<string>|null>(null),noticeUser=useRef('');
-  const [tab,setTab]=useState('missions');
+   const [tab,setTab]=useState('missions');
+   const [inspiration,setInspiration]=useState<'library'|'punishments'>('library');
  const [now,setNow]=useState(Date.now());
  const [category,setCategory]=useState(''),[intensity,setIntensity]=useState(''),[tag,setTag]=useState(''),[query,setQuery]=useState(''),[onlyFavorites,setOnlyFavorites]=useState(false),[away,setAway]=useState(false);
  const [drawnFollowup,setDrawnFollowup]=useState('');
@@ -70,7 +72,7 @@ export function GameApp({paired}: {paired?:{id:string;lang:'he'|'en';revision:nu
   },[state,lang]);
    const errorMessage=(e:any,prefix:string)=>serverMessages[e.message]?t(...serverMessages[e.message]):e.message==='Insufficient points'?t('אין מספיק נקודות לאישור הפרס. הבקשה נשארה ממתינה.','Not enough points to approve this reward. The request remains pending.'):e.message?.startsWith('Role occupied')?t('התפקיד כבר תפוס במשחק הפרטי. חזרו לדפדפן ולכתובת שבהם נכנסתם לראשונה. הכינוי אינו משחזר גישה.','That role is already occupied in this private game. Return to the browser and address used for your first entry. A nickname cannot recover access.'):e.message==='Origin rejected'?t(`הבקשה הגיעה מכתובת שונה מכתובת המשחק. פתחו את המשחק מחדש באותה כתובת, או בכתובת הראשית: ${e.expectedOrigin||'הכתובת שהוגדרה בשרת'}.`,`The request came from a different address than the game. Reopen the game at the same address, or at the canonical address: ${e.expectedOrigin||'the configured server address'}.`):prefix+e.message;
    const run=async(fn:()=>Promise<any>):Promise<boolean>=>{if(busy||pairedBusy.current||needsRefresh.current||unknownRef.current)return false;if(paired)pairedBusy.current=true;setBusy(true);setError('');let ok=false;try{await fn();ok=true;}catch(e:any){if(e.unknownOutcome)setUnknown(true);setError(errorMessage(e,t('הפעולה לא הושלמה. בדקו הרשאות, הסכמות ומצב מפגש. פרטי שרת: ','Action failed. Check permissions, agreement and session state. Server detail: ')));}finally{await reconcile();pairedBusy.current=false;setBusy(false);}return ok;};
-   const runSafety=async(op:'pause'|'resume'|'stop'|'agreement-withdraw',body?:object)=>{setError('');try{await action(op,body);}catch(e:any){if(e.unknownOutcome)setUnknown(true);setError(errorMessage(e,t('פעולת הבטיחות לא אושרה בשרת. נסו שוב: ','Safety action was not confirmed by the server. Retry: ')));}finally{await reconcile();}};
+    const runSafety=async(op:'pause'|'resume'|'stop'|'restart'|'agreement-withdraw',body?:object)=>{setError('');try{await action(op,body);}catch(e:any){if(e.unknownOutcome)setUnknown(true);setError(errorMessage(e,t('פעולת הבטיחות לא אושרה בשרת. נסו שוב: ','Safety action was not confirmed by the server. Retry: ')));}finally{await reconcile();}};
  const sessions=state?.sessions||[];
  const s=sessions.find(s=>!['stopped','expired'].includes(s.status))||[...sessions].sort((a,b)=>b.last-a.last)[0];
    const u=state?.user,wife=u?.role==='wife',ended=!!s&&['stopped','expired'].includes(s.status),held=!!s&&s.pauses.length>0,play=!!s&&!ended&&!held&&(!paired||(s.started&&online));
@@ -91,7 +93,12 @@ export function GameApp({paired}: {paired?:{id:string;lang:'he'|'en';revision:nu
    const current=s&&u?currentMission(s,u.role):undefined;
    useEffect(()=>{const nav=navRef.current,button=nav?.querySelector<HTMLElement>('[aria-current="page"]');if(!nav||!button)return;const box=nav.getBoundingClientRect(),item=button.getBoundingClientRect(),left=box.left+nav.clientLeft,right=left+nav.clientWidth;const offset=item.left<left+4?item.left-left-4:item.right>right-4?item.right-right+4:0;if(offset)nav.scrollLeft+=offset;},[tab,lang,s?.id,u?.id]);
    const savedSequence=JSON.stringify(s?.sequence??[]);
-   useEffect(()=>{setSequence(JSON.parse(savedSequence));setAutoProgress(s?.autoProgress===true);setComposerOpen(false);setEditing('');setDrawnFollowup('');},[s?.id]);
+    useEffect(()=>{
+      setSequence(JSON.parse(savedSequence));setAutoProgress(s?.autoProgress===true);
+      setComposerOpen(false);setEditing('');setDrawnFollowup('');
+      setDraft({title:'',text:'',points:5,secret:false,completionStyle:'simple'});
+      setRewardDraft({title:'',description:'',cost:''});
+    },[s?.id]);
    useEffect(()=>{setCategory(s?.persona?{strict:'challenges',playful:'teasing',caring:''}[s.persona]:'');},[s?.id,s?.persona]);
    useEffect(()=>{setSequence(JSON.parse(savedSequence));},[savedSequence]);
    useEffect(()=>{setAutoProgress(s?.autoProgress===true);},[s?.autoProgress]);
@@ -100,16 +107,31 @@ export function GameApp({paired}: {paired?:{id:string;lang:'he'|'en';revision:nu
   const ownReflection=u?s?.reflections?.[u.id]:undefined;
   const [reflection,setReflection]=useState({appreciation:'',repeat:''});
   useEffect(()=>{setReflection(ownReflection??{appreciation:'',repeat:''});},[s?.id,u?.id,ownReflection?.appreciation,ownReflection?.repeat]);
-    const action=async(op:string,body:any={})=>{const keyed=!!paired||['mission','message','complete','review','adjust','replace','reward','reward-request','reward-decision','wish-add','wish-request','wish-decision','quick','her-night','evening-close','evening-run','propose','tribute-queue','tribute-reveal','sip','grant','seal','chamberlain-decree','chamberlain-compose','repeat-stop','adore','whisper','whisper-delete','spark-reroll','spark-dismiss','season-start','season-stop','pin','unpin','auction','auction-bid'].includes(op);const {key:ignored,...payload}=body;const slot=`${op}:${body.mission||body.reward||body.request||body.idea||body.ref||body.pin||body.auction||''}`;
+     const action=async(op:string,body:any={})=>{const keyed=!!paired||['mission','message','complete','review','adjust','replace','reward','reward-request','reward-decision','wish-add','wish-request','wish-decision','quick','her-night','evening-close','evening-run','propose','tribute-queue','tribute-reveal','sip','grant','seal','chamberlain-decree','chamberlain-compose','repeat-stop','adore','whisper','whisper-delete','spark-reroll','spark-dismiss','season-start','season-stop','pin','unpin','auction','auction-bid','wheel-config','wheel-spin'].includes(op);const {key:ignored,...payload}=body;const slot=`${op}:${body.mission||body.reward||body.request||body.idea||body.ref||body.pin||body.auction||''}`;
       const result=paired?await api(`/public/play/${paired.id}/game/${op}`,{key:retryKey(slot,[s!.revision,payload]),revision:s!.revision,body:payload}):
         await api(`/sessions/${s!.id}/${op}`,keyed?{...payload,key:retryKey(slot,payload)}:body);
       if(keyed)delete pendingKeys.current[slot];
       if(paired&&(op==='review'||op==='stop'))paired.refreshInbox();
       return result;};
- const destination=tab==='rewards'?'rewards':tab==='punishments'?'consequences':'library';
+  const libraryTab=tab==='inspiration'?inspiration:tab;
+  const destination=libraryTab==='rewards'?'rewards':libraryTab==='punishments'?'consequences':'library';
  const destinationIdeas=ideasForDestination(library,destination,away);
  const filtered=destinationIdeas.filter(i=>(destination!=='library'||!category||i.category===category)&&(!intensity||i.intensity===Number(intensity))&&(!tag||i.tags.includes(tag))&&(!onlyFavorites||favorites.includes(i.id))&&(!noPrep||!i.tags.some(tag=>setupTags.has(tag)))&&`${i.he} ${i.en}`.toLowerCase().includes(query.toLowerCase()));
- function useIdea(i:{id:string;category:string;he:string;en:string}){const text=lang==='he'?i.he:i.en;if(i.category==='rewards'){setRewardDraft({title:text.slice(0,160),description:text,cost:''});document.getElementById('reward-title')?.focus();}else{setDraft({title:text.slice(0,150),text,points:5,secret:i.category==='secret',completionStyle:'simple'});setEditing('');setComposerOpen(true);setTab('missions');setTimeout(()=>document.querySelector<HTMLInputElement>('#mission-composer input')?.focus(),0);}setRecent(v=>[...v.filter(id=>id!==i.id),i.id].slice(-10));}
+  function draftInvitation(text:string,secret=false){
+    setDraft({title:text.slice(0,150),text,points:5,secret,completionStyle:'simple'});
+    setEditing('');
+    openComposer();
+  }
+  function useIdea(i:{id:string;category:string;he:string;en:string}){
+    const text=lang==='he'?i.he:i.en;
+    if(i.category==='rewards'){
+      setRewardDraft({title:text.slice(0,160),description:text,cost:''});
+      const composer=document.querySelector<HTMLDetailsElement>('#reward-composer');
+      if(composer)composer.open=true;
+      document.getElementById('reward-title')?.focus();
+    }else draftInvitation(text,i.category==='secret');
+    setRecent(v=>[...v.filter(id=>id!==i.id),i.id].slice(-10));
+  }
  const progress=progressStats(s?.missions??[],now),needsCare=careDue(s?.missions??[],s?.lastCareAt);
   const weekly=weeklyRecap(s?.missions??[],now),badges=milestones(progress.total),favourite=favouriteMood(s?.moodCounts);
   const visibleMissions=sessions.flatMap(session=>session.missions);
@@ -130,7 +152,7 @@ export function GameApp({paired}: {paired?:{id:string;lang:'he'|'en';revision:nu
     const sendBlock=!s?t('אין מפגש פעיל.','No active session.'):ended?t('המפגש הסתיים.','The session has ended.'):held?t('המשחק מושהה. השליחה תחזור כשהמשחק פעיל.','The game is paused. Sending resumes when the game is active.'):paired&&!s.started?t('נדרש אישור של שני המשתתפים.','Both participants must agree before playing.'):closedNow?t('הערב נסגר. ייפתח מחדש אוטומטית.','The evening is closed. It reopens automatically.'):null;
    const limitMessage=t('הגעת למכסת הפקודות לערב. שני את הקצב כדי להמשיך.','Evening limit reached for the current pace. Change the pace to continue.'),pastMessage=t('אפשר לתזמן רק לשעה עתידית.','Choose a time in the future.');
     const quickAtMs=quickAt?new Date(quickAt).getTime():NaN,schedulePast=Number.isFinite(quickAtMs)&&quickAtMs<=Date.now();
-    const quickBlock=sendBlock??(schedulePast?pastMessage:usedNow>=cap?t(`הגעת למכסת הפקודות לערב (${usedNow} מתוך ${cap}). הספירה מתעדכנת לפי ${windowHours} השעות האחרונות.`,`You have reached this evening's command limit (${usedNow} of ${cap}). The count covers the last ${windowHours} hours.`):null);
+     const quickBlock=sendBlock??(schedulePast?pastMessage:usedNow>=cap?t(`הגעת למכסת הפקודות לערב (${usedNow} מתוך ${cap}). הספירה מתעדכנת לפי ${windowHours} השעות האחרונות.`,`You have reached this evening's command limit (${usedNow} of ${cap}). The count covers the last ${windowHours} hours.`):null);
    const sayReady=!!sayDraft&&sayDraft.title.trim().length>0&&sayDraft.text.trim().length>0&&sayDraft.title.trim().length<=160&&sayDraft.text.trim().length<=160&&Number.isInteger(sayDraft.points)&&sayDraft.points>=0&&sayDraft.points<=100;
    const nightSteps=(mood:Mood)=>nightTemplates[mood].slice(0,cap).map((step,index)=>({he:step.he,en:step.en,points:step.points,minutesFromNow:index*30}));
     const eveningLeft=Math.max(0,cap-usedNow),sendSteps=(mood:Mood)=>nightSteps(mood).slice(0,eveningLeft);
@@ -148,7 +170,8 @@ export function GameApp({paired}: {paired?:{id:string;lang:'he'|'en';revision:nu
    };
    const askPreset=(p:{id:string;he:string;en:string;points:number})=>{const text=lang==='he'?p.he:p.en;askQuick(text,text,p.points,{preset:p.id},p.id);};
    const askNight=(mood:Mood)=>{const steps=sendSteps(mood),full=nightTemplates[mood].length;setSheet({title:t('לשלוח את הערב?','Send this evening?'),intro:`${t('אלה הצעדים שהוא יראה, לפי הזמנים המוצגים.','These are the steps he will see, at the times shown.')}${steps.length<full?t(` בקצב הנוכחי נשלחים ${steps.length} מתוך ${full} צעדים.`,` At the current pace, ${steps.length} of ${full} steps are sent.`):''}`,steps:steps.map(step=>({title:t(step.he,step.en),points:step.points,offset:offsetLabel(step.minutesFromNow)})),confirm:t('שליחה','Send'),onConfirm:()=>void run(async()=>{await action('her-night',{mood,lang,steps});setNightMood('');})});};
-   const askSeason=(packId:string)=>{const pack=seasonPacks.find(item=>item.id===packId);if(!pack)return;const first=seasonItemFor(pack,1),startsAt=seasonStartDefault(Date.now());setSheet({title:t('להתחיל עונה?','Start this season?'),intro:`${t(pack.title.he,pack.title.en)} · ${pack.days} ${t('ימים','days')} · ${t('מתחילה','Starts')} ${date(startsAt)}. ${t('משימה אחת בכל יום, ואפשר לעצור בכל רגע.','One task each day, and you can stop at any moment.')}`,steps:[{title:t(first.title.he,first.title.en),text:t(first.text.he,first.text.en),points:first.points,offset:date(startsAt)}],confirm:t('התחלה','Start'),onConfirm:()=>void run(()=>action('season-start',{pack:packId,lang}))});};
+    const askSeason=(packId:string)=>{const pack=seasonPacks.find(item=>item.id===packId);if(!pack)return;const first=seasonItemFor(pack,1),startsAt=seasonStartDefault(Date.now());setSheet({title:t('להתחיל עונה?','Start this season?'),intro:`${t(pack.title.he,pack.title.en)} · ${pack.days} ${t('ימים','days')} · ${t('מתחילה','Starts')} ${date(startsAt)}. ${t('משימה אחת בכל יום, ואפשר לעצור בכל רגע.','One task each day, and you can stop at any moment.')}`,steps:[{title:t(first.title.he,first.title.en),text:t(first.text.he,first.text.en),points:first.points,offset:date(startsAt)}],confirm:t('התחלה','Start'),onConfirm:()=>void run(()=>action('season-start',{pack:packId,lang}))});};
+    const askStopSeason=(packId:string)=>setSheet({title:t('לעצור את העונה?','Stop this season?'),intro:t('המשימות הממתינות יבוטלו. ההתקדמות שנשמרה נשארת.','Waiting tasks will be cancelled. Saved progress remains.'),confirm:t('עצירת העונה','Stop season'),danger:true,onConfirm:()=>void run(()=>action('season-stop',{pack:packId}))});
    const askRun=(evening:SavedEvening)=>setSheet({title:t('להפעיל את הערב השמור?','Run this saved evening?'),intro:t('אלה הצעדים שהוא יראה, לפי הזמנים המוצגים.','These are the steps he will see, at the times shown.'),steps:evening.steps.map(step=>({title:t(step.he,step.en),points:step.points,offset:offsetLabel(step.minutesFromNow)})),confirm:t('הפעלה','Run'),onConfirm:()=>void run(()=>action('evening-run',{evening:evening.id,lang}))});
    const askClose=()=>{const queued=(s?.missions??[]).filter(m=>m.status==='queued').length;setSheet({title:t('לסיים את הערב?','Finish tonight?'),intro:`${queued===0?t('אין הזמנות מתוזמנות שיבוטלו.','No scheduled invitations will be cancelled.'):queued===1?t('תבוטל הזמנה מתוזמנת אחת.','One scheduled invitation will be cancelled.'):t(`יבוטלו ${queued} הזמנות מתוזמנות.`,`${queued} scheduled invitations will be cancelled.`)} ${t(`לא ניתן יהיה לשלוח הזמנות למשך ${windowHours} שעות.`,`Nothing can be sent for ${windowHours} hours.`)}`,confirm:t('סיום הערב','Finish tonight'),onConfirm:()=>void run(()=>action('evening-close',{}))});};
    const saveEvening=()=>{const name=eveningName.trim(),mood=nightMood;if(!name||!mood||savedFull)return;const steps=nightSteps(mood);void run(async()=>{await action('evening-save',{name,mood,steps});setEveningName('');setSaveOpen(false);});};
@@ -177,26 +200,47 @@ export function GameApp({paired}: {paired?:{id:string;lang:'he'|'en';revision:nu
   const sendQuick=(body:Record<string,unknown>,preset?:string,done?:()=>void)=>{const at=quickAt?new Date(quickAt).getTime():NaN;if(Number.isFinite(at)&&at<=Date.now()){setError(pastMessage);return;}void run(()=>action('quick',{...body,lang,...(Number.isFinite(at)?{scheduledAt:at}:{})})).then(ok=>{if(ok){if(preset)recordQuickUse(preset,prefScope);done?.();}});};
  const date=(at:number)=>new Date(at).toLocaleString(lang==='he'?'he-IL':'en-GB');
    const displayName=(id:string)=>id==='server'?t('השרת','Server'):id===u?.id?t('אני','Me'):t('השותף/ה','Partner');
-   const sections=[['missions','משימות','Missions'],['dashboard','לוח מעקב','Dashboard'],['rewards','פרסים','Rewards'],['wishes','משאלות',paired?'Wishes':'Her wishes'],
-     ...(wife?[['library','ספריית השראה','Idea library'],['punishments',paired?'תוצאות משחק':'השראת עונשים',paired?'Game outcomes':'Punishments inspiration']]:[]),['messages','שיחה','Messages'],['inbox','תיבת עדכונים','Inbox'],['history','היסטוריה','History']];
-   const area=([id,he,en]:string[])=><button key={id} aria-current={tab===id?'page':undefined} className={tab===id?'active':''} onClick={()=>{setTab(id);setIntensity('');setTag('');setQuery('');setOnlyFavorites(false);setNoPrep(false);}}>{t(he,en)}{id==='inbox'&&` (${s?.inbox.filter(n=>!n.readBy.includes(u!.id)).length??0})`}</button>;
+    const sections=[['missions','משימות','Missions'],['dashboard','לוח מעקב','Dashboard'],
+      ...(paired?[['rewards','פרסים','Rewards'],['wishes','משאלות','Wishes'],
+        ...(wife?[['library','ספריית השראה','Idea library'],['punishments','תוצאות משחק','Game outcomes']]:[]),
+        ['messages','שיחה','Messages'],['inbox','תיבת עדכונים','Inbox'],['history','היסטוריה','History']]
+        :[['rewards','פרסים ומשאלות','Rewards & wishes'],...(wife?[['inspiration','השראה','Inspiration']]:[]),['messages','שיחה','Messages'],['updates','עדכונים','Updates']])];
+    const primaryAreas=['missions','messages','dashboard'];
+    const extraAreas=sections.filter(([id])=>!primaryAreas.includes(id));
+    const currentExtra=extraAreas.find(([id])=>id===tab);
+    const unread=s&&u?s.inbox.filter(n=>!n.readBy.includes(u.id)).length:0;
+    const area=([id,he,en]:string[])=><button type="button" key={id} aria-current={tab===id?'page':undefined} className={tab===id?'active':''} onClick={()=>{if(!paired&&primaryAreas.includes(id))setMoreOpen(false);setTab(id);setIntensity('');setTag('');setQuery('');setOnlyFavorites(false);setNoPrep(false);}}>{t(he,en)}{(id==='inbox'||id==='updates')&&unread>0&&<> (<bdi>{unread}</bdi>)</>}</button>;
    const Shell=paired?'div':'main';
     const nextStep=ended?(paired?t('אי אפשר להמשיך לשחק במפגש הזה. אפשר לעיין בהזמנות ובהיסטוריה.','This session can no longer be played. Invitations and history are available to review.'):t('המפגש הסתיים. אפשר לשתף מה היה נעים ומה נרצה לחזור עליו; מפגש חדש נפתח אוטומטית. ההזמנות וההיסטוריה נשארות לעיון.','This session has ended. Reflect on what felt good and what to repeat; a new session opens automatically. Invitations and history remain available.')):
     held?(s?.pauses.includes(u?.id??'')?t('ההשהיה שלך פעילה. רק לך אפשרות לשחרר אותה בכפתור הבטיחות; השהיית השותף/ה נשארת עצמאית.','Your pause is active. Only you can release it using the safety control; your partner’s pause stays independent.'):t('ממתינים לשותף/ה ששומר/ת על ההשהיה. רק מי שהשהה יכול לשחרר אותה.','Waiting on your partner’s pause. Only its owner can release it.')):
      paired&&!s?.started?t('בדקו את תנאי המפגש. המשחק מתחיל רק לאחר אישור אישי של שני המשתתפים.','Review the session agreement. Play begins only when both participants opt in.'):
      paired&&!wife&&!current?t('ממתינים להזמנה מהדום. אפשר בינתיים לשתף צ׳ק־אין.','Waiting for a mission from the Dom. You can share a check-in in the meantime.'):
-     !current?(wife?t('בחרי הזמנה קטנה או פתחי את העורך ליצירת טיוטה.','Choose a small invitation or open the composer to draft one.'):t('ממתינים להזמנה מהאישה. אפשר בינתיים לשוחח או לשתף צ׳ק־אין.','Waiting for an invitation from your wife. You can chat or share a check-in.')):
+      !current?(wife?paired?t('בחרי הזמנה קטנה או פתחי את העורך ליצירת טיוטה.','Choose a small invitation or open the composer to draft one.'):t('אפשר לכתוב הזמנה ולבדוק אותה לפני השליחה.','Draft an invitation and review it before sending.'):t('ממתינים להזמנה מהאישה. אפשר בינתיים לשוחח או לשתף צ׳ק־אין.','Waiting for an invitation from your wife. You can chat or share a check-in.')):
     current.status==='draft'?(wife?t('בדקי את הטיוטה, ערכי או שלחי רק כשתבחרי.','Review the draft, edit or send only when you choose.'):t('ממתינים שהאישה תבחר לשלוח את הטיוטה.','Waiting for your wife to choose to send the draft.')):
     current.status==='queued'?t('ההזמנה מתוזמנת. ממתינים למועד המסירה; אין קבלה אוטומטית.','The invitation is scheduled. Waiting for delivery time; acknowledgement is never automatic.'):
     current.status==='pending'?(wife?t('ממתינים לבחירת הבעל: קבלה, התאמה או סירוב.','Waiting for your husband to acknowledge, request adjustment or decline.'):t('קרא את ההזמנה ובחר: קבלה, התאמה או סירוב חופשי.','Read the invitation and choose: acknowledge, request adjustment or freely decline.')):
     current.status==='adjustment'?(wife?t('התבקשה התאמה. נסחי טיוטה חלופית לבדיקה וקבלה חדשות.','An adjustment was requested. Author a replacement for fresh review and acknowledgement.'):t('ממתינים לטיוטה חלופית מהאישה. אין צורך לבצע את המקור.','Waiting for a replacement from your wife. You need not complete the original.')):
     current.status==='submitted'?(wife?t('קראי את הביצוע שנשלח ובחרי אישור או החזרה לתיקון.','Read the submitted completion and choose approval or return for revision.'):t('הביצוע נשלח. ממתינים לבדיקה של האישה.','Completion submitted. Waiting for your wife’s review.')):
-    wife?t('ממתינים לביצוע מרצון של הבעל; אפשר תמיד להשהות.','Waiting for your husband’s voluntary completion; pausing remains available.'):current.completionStyle==='simple'?t('אם מתאים לך וסיימת, בחר סיימתי לבדיקה. אפשר גם לבקש התאמה או לסרב.','If it suits you and you are finished, choose Done for review. You can also request adjustment or decline.'):t('אם מתאים לך, שתף ביצוע כתוב. אפשר גם לבקש התאמה או לסרב.','If it suits you, share a written completion. You can also request adjustment or decline.');
-   const openComposer=()=>{
-     if(tab==='missions'&&composerOpen){document.querySelector<HTMLInputElement>('#mission-composer input')?.focus();return;}
+     wife?t('ממתינים לביצוע מרצון של הבעל; אפשר תמיד להשהות.','Waiting for your husband’s voluntary completion; pausing remains available.'):current.completionStyle==='simple'?t('אם מתאים לך וסיימת, בחר סיימתי לבדיקה. אפשר גם לבקש התאמה או לסרב.','If it suits you and you are finished, choose Done for review. You can also request adjustment or decline.'):t('אם מתאים לך, שתף ביצוע כתוב. אפשר גם לבקש התאמה או לסרב.','If it suits you, share a written completion. You can also request adjustment or decline.');
+    const pausedByMe=!!(s&&u&&s.pauses.includes(u.id));
+    const safetyButtons=!ended&&<>
+      <button type="button" className="quiet" aria-pressed={pausedByMe} onClick={()=>void runSafety(pausedByMe?'resume':'pause')}>{pausedByMe?t('שחרור ההשהיה שלי','Release my pause'):t('השהיה אישית','Pause my play')}</button>
+      {paired?<button type="button" className="danger" onClick={()=>{if(confirm(t('לעצור את המפגש לצמיתות? לא ניתן לחדש אותו.','Stop this session permanently? It cannot be resumed.')))void runSafety('stop');}}>{t('עצירה לצמיתות','Stop permanently')}</button>
+      :<button type="button" className="danger" onClick={()=>setSheet({
+        title:t('לשמור בארכיון ולהתחיל מחדש?','Archive and start a new session?'),
+        intro:t('המפגש הנוכחי ייסגר ויישמר בארכיון. המפגש החדש יתחיל עם אותן נקודות, בלי הזמנות או עדכונים מהקודם.','The current session will be archived. The new session keeps your points and starts without the previous invitations or updates.'),
+        confirm:t('שמירה בארכיון והתחלה מחדש','Archive and start a new session'),
+        danger:true,
+        onConfirm:()=>void runSafety('restart'),
+      })}>{t('ארכיון ומפגש חדש','Archive & new session')}</button>}
+    </>;
+    const openComposer=()=>{
+      if(!paired)setMoreOpen(false);
+      if(tab==='missions'&&composerOpen){document.querySelector<HTMLInputElement>('#mission-composer input')?.focus();return;}
      focusComposer.current=true;setTab('missions');setComposerOpen(true);
    };
-   const showPrivateInvitation=(id:string)=>{
+    const showPrivateInvitation=(id:string)=>{
+      setMoreOpen(false);
      setTab('missions');
      setTimeout(()=>{
        const card=document.getElementById(`mission-${id}`);
@@ -212,13 +256,13 @@ export function GameApp({paired}: {paired?:{id:string;lang:'he'|'en';revision:nu
  {error&&<p className="error" role="alert">{error}<button className="quiet" onClick={()=>setError('')}>{t('סגירה','Dismiss')}</button></p>}
    {!ready?<p role="status">{t('מתחברים…','Connecting…')}</p>:!u?paired?<div role="alert" className="notice"><p>{loadError==='missing'?t('המפגש אינו זמין. בדקו את רשימת המפגשים.','This session is unavailable. Check your play sessions.'):t('לא הצלחנו לטעון את המפגש.','We couldn’t load this session.')}</p><button type="button" onClick={()=>void refresh()}>{t('ניסיון חוזר','Retry')}</button></div>:<PrivateEntrance t={t}><section className="panel auth" aria-labelledby="private-auth-title">
     <div className="private-auth-head"><h2 id="private-auth-title">{t('בחרו תפקיד והיכנסו','Choose a role and enter')}</h2><span className="badge">18+</span></div>
-    <p>{t('כשתיכנסו בשני התפקידים, המשחק ייפתח אוטומטית, ללא קוד הזמנה.','Once both roles enter, your shared game opens automatically. No invitation code needed.')}</p>
+    <p>{t('כשתיכנסו בשני התפקידים, המשחק ייפתח אוטומטית.','The game opens when both roles sign in.')}</p>
     <form onSubmit={e=>{const b=form(e);void run(()=>api('/guest',{...b,adult:b.adult==='on'}));}}>
         <label><span id="private-role-label">{t('תפקיד','Role')}</span><select name="role" aria-labelledby="private-role-label"><option value="wife">{t('האישה — ניהול משימות','Wife — directs missions')}</option><option value="husband">{t('הבעל — קבלת משימות','Husband — receives missions')}</option></select></label>
         <label className="check"><input name="adult" type="checkbox" required/>{t('אני בגיר/ה (18+) ומשתתפ/ת מרצוני. לכל משתתף דפדפן וזהות נפרדים.','I am an adult (18+) participating freely. Each participant uses a separate browser and identity.')}</label>
       <Button className="primary">{t('כניסה','Enter')}</Button>
     </form>
-    <p className="private-entry-note">{t('כל כניסה לאותו תפקיד חוזרת לאותה זהות, מכל דפדפן. שמרו את כתובת המשחק פרטית.','Every entry to a role returns to the same identity, from any browser. Keep the game address private.')}</p>
+     <p className="private-entry-note">{t('כל כניסה לאותו תפקיד מחזירה לאותה זהות. שמרו על כתובת המשחק פרטית.','Each role keeps the same identity across browsers. Keep the game link private.')}</p>
   </section></PrivateEntrance>:<>
    {paired&&state?.play&&<div className="paired-context"><h3><bdi>{state.play.title}</bdi></h3><p><bdi>{state.play.partner}</bdi> · {wife?t('התפקיד שלך: דום','Your role: Dom'):t('התפקיד שלך: סאב','Your role: Sub')} · <time dateTime={state.play.scheduledAt}><bdi>{date(new Date(state.play.scheduledAt).getTime())}</bdi></time></p></div>}
    {!paired&&<div className="account"><div className="private-identity"><h1 id="private-game-title" tabIndex={-1}>{t('המשחק שלנו','Our game')}</h1><span><bdi>{u.nickname??u.email}</bdi> · {wife?t('האישה · מנהלת המשחק','Wife · game director'):t('הבעל · משתתף','Husband · participant')}</span></div><span className={online?'badge':'badge warning'}>{online?t('מחובר','Connected'):t('ממתין לחיבור','Reconnecting')}</span><details className="private-preferences"><summary>{t('העדפות','Preferences')}</summary><p role="status">{notificationPermission==='granted'?t('התראות מופעלות','Notifications enabled'):notificationPermission==='denied'?t('התראות חסומות. אפשר לשנות בהגדרות האתר בדפדפן.','Notifications blocked. Change this in your browser’s site settings.'):notificationPermission==='unsupported'?t('הדפדפן אינו תומך בהתראות.','Notifications are not supported in this browser.'):t('התראות אינן מופעלות עדיין.','Notifications are not enabled yet.')}</p><div className="row">{notificationPermission==='default'&&<button type="button" className="quiet" onClick={()=>void Notification.requestPermission().then(setNotificationPermission).catch(()=>setNotificationPermission(Notification.permission))}>{t('הפעלת התראות','Enable notifications')}</button>}<button type="button" className="quiet" aria-pressed={contrast} onClick={toggleContrast}>{t('ניגודיות גבוהה','High contrast')}</button></div></details></div>}
@@ -226,30 +270,52 @@ export function GameApp({paired}: {paired?:{id:string;lang:'he'|'en';revision:nu
   {s&&<>
   {paired&&<p className="paired-status" id="paired-status" tabIndex={-1} role="status"><strong>{t('מצב המפגש','Session status')}: </strong><span>{state?.play?.state==='cancelled'?t('המפגש בוטל','Session cancelled'):state?.play?.state==='closed'?t('השיחה נסגרה','Conversation closed'):ended?label(s.status):held?t('מושהה','Paused'):s.started?t('פעיל','Active'):t('ממתין להסכמה','Awaiting consent')}</span></p>}
   {paired&&!ended&&!s.started&&<PairedAgreement key={s.revision} session={s} viewer={u.id} dom={wife} online={online} t={t} run={run} action={action} withdraw={()=>void runSafety('agreement-withdraw',{revision:s.revision})}/>}
- <section className="panel next-step" aria-label={t('הצעד הבא','Next step')}><div className="row between"><h2>{t('הצעד הבא שלנו','Our next step')}</h2>{!ended&&<button type="button" className="quiet" aria-pressed={s.pauses.includes(u.id)} onClick={()=>void runSafety(s.pauses.includes(u.id)?'resume':'pause')}>{s.pauses.includes(u.id)?t('שחרור ההשהיה שלי','Release my pause'):t('השהיה אישית','Pause my play')}</button>}{!ended&&<button type="button" className="danger" onClick={()=>{if(confirm(t('לעצור את המפגש לצמיתות? לא ניתן לחדש אותו.','Stop this session permanently? It cannot be resumed.')))void runSafety('stop');}}>{t('עצירה לצמיתות','Stop permanently')}</button>}</div><p>{nextStep}</p>{ended&&<div className="row"><Button onClick={()=>document.getElementById('reflection-appreciation')?.focus()}>{t('לשיתוף על המפגש','Reflect on this session')}</Button></div>}
-   {!paired&&play&&wife&&!current&&<Button className="primary" onClick={openComposer}>{t('יצירת טיוטה חדשה','Draft a mission')}</Button>}
-   {current&&(!paired||tab!=='missions')&&<Button onClick={()=>{if(!paired){showPrivateInvitation(current.id);return;}setTab('missions');setTimeout(()=>document.getElementById(`mission-${current.id}`)?.focus(),0);}}>{t('להזמנה הנוכחית','View current invitation')}</Button>}</section>
+  <section className="panel next-step" aria-label={t('הצעד הבא','Next step')}>
+    <div className="row between"><h2>{t('הצעד הבא שלנו','Our next step')}</h2>{paired&&safetyButtons}</div>
+    <p>{nextStep}</p>
+    {ended&&<div className="row"><Button onClick={()=>document.getElementById('reflection-appreciation')?.focus()}>{t('לשיתוף על המפגש','Reflect on this session')}</Button></div>}
+    {!paired&&play&&wife&&!current&&<Button className="primary" onClick={openComposer}>{t('יצירת טיוטה חדשה','Draft a mission')}</Button>}
+    {current&&(!paired||tab!=='missions')&&<Button className={!paired&&!held&&!ended?'primary':undefined} onClick={()=>{if(!paired){showPrivateInvitation(current.id);return;}setTab('missions');setTimeout(()=>document.getElementById(`mission-${current.id}`)?.focus(),0);}}>{t('להזמנה הנוכחית','View current invitation')}</Button>}
+    {!paired&&!ended&&<div className="row private-safety">{safetyButtons}</div>}
+  </section>
    {paired&&!ended&&s.started&&<PairedAgreement key={s.revision} session={s} viewer={u.id} dom={wife} online={online} t={t} run={run} action={action} withdraw={()=>void runSafety('agreement-withdraw',{revision:s.revision})}/>}
    {paired&&!ended&&play&&wife&&!current&&<Button className="primary paired-compose" onClick={openComposer}>{t('יצירת טיוטה חדשה','Draft a mission')}</Button>}
-   <nav ref={navRef} aria-label={t('אזורי המפגש','Session areas')}>{paired?<>
+    <nav ref={navRef} className={paired?undefined:'private-nav'} aria-label={t('אזורי המפגש','Session areas')}>{paired?<>
      {sections.slice(0,3).map(area)}
      <details className="paired-more" open={sections.slice(3).some(([id])=>id===tab)||undefined}>
        <summary>{t('עוד במפגש','More in this session')}</summary><div className="row">{sections.slice(3).map(area)}<button type="button" className="quiet" aria-pressed={contrast} onClick={toggleContrast}>{t('ניגודיות גבוהה','High contrast')}</button>
        {notificationPermission==='default'&&<button type="button" className="quiet" onClick={()=>void Notification.requestPermission().then(setNotificationPermission).catch(()=>setNotificationPermission(Notification.permission))}>{t('הפעלת התראות','Enable notifications')}</button>}</div>
      </details>
-   </>:sections.map(area)}</nav>
-   {paired&&tab==='rewards'&&<p className="notice">{t('נקודות מפגש זמינות לשימוש רק כאן. שימוש בהן לא משנה את סך הנקודות שנצברו בחשבון. אין לנקודות ערך כספי.','Session points are spendable only here. Spending does not change your lifetime earned points. Points have no monetary value.')}</p>}
-  {tab==='dashboard'&&<DashboardTab s={s} u={u} wife={wife} ended={ended} held={held} play={play} now={now} lang={lang} t={t} date={date} label={label} run={run} action={action} nudgeDue={nudgeDue} dismissNudge={dismissNudge} progress={progress} weekly={weekly} badges={badges} streaks={streaks} queen={state?.queenLevel} digest={state?.digest} adorationTally={state?.adorationTally} spark={state?.spark} ratingLabel={ratingLabel} moodLabel={moodLabel} favourite={favourite} nextScheduled={nextScheduled} notes={notes} notesFull={notesFull} awaitingReview={awaitingReview} pendingRewards={pendingRewards} recentApproved={recentApproved} needsCare={needsCare} keysHintSeen={keysHintSeen} setKeysHintSeen={setKeysHintSeen} moodOrder={moodOrder} nightMood={nightMood} lastMood={lastMood} chooseMood={chooseMood} sendSteps={sendSteps} nightBlock={nightBlock} askNight={askNight} saveOpen={saveOpen} setSaveOpen={setSaveOpen} eveningName={eveningName} setEveningName={setEveningName} savedFull={savedFull} saveEvening={saveEvening} savedList={savedList} sendBlock={sendBlock} cap={cap} usedNow={usedNow} limitMessage={limitMessage} askRun={askRun} lastNight={lastNight} nightApproved={nightApproved} nightMissions={nightMissions} choosePace={choosePace} finishOnboarding={finishOnboarding} closedNow={closedNow} windowHours={windowHours} reopenHours={reopenHours} askClose={askClose} quickBlock={quickBlock} barPresets={barPresets} askPreset={askPreset} quickAt={quickAt} setQuickAt={setQuickAt} askQuick={askQuick} sayOpen={sayOpen} setSayOpen={setSayOpen} sayText={sayText} setSayText={setSayText} sayDraft={sayDraft} setSayDraft={setSayDraft} sayReady={sayReady} deck={deck} skipDeck={skipDeck} gardenTotal={gardenTotal} useIdea={useIdea} askSeason={askSeason}/>}
+    </>:<>
+      {sections.filter(([id])=>primaryAreas.includes(id)).map(area)}
+      <button type="button" className="private-nav-toggle" data-current={!!currentExtra} aria-expanded={moreOpen} aria-controls="private-nav-extra" onClick={()=>setMoreOpen(open=>!open)}>
+        {t('עוד','More')}
+        {currentExtra&&<span className="sr-only">: {t(currentExtra[1],currentExtra[2])}</span>}
+        {unread>0&&<><span className="private-nav-dot" aria-hidden="true"/><span className="sr-only"> · {t('יש עדכונים שלא נקראו','Unread updates')}</span></>}
+      </button>
+      <div id="private-nav-extra" className="private-nav-extra" data-expanded={moreOpen}>{extraAreas.map(area)}</div>
+    </>}</nav>
+    {paired&&tab==='rewards'&&<p className="notice">{t('נקודות מפגש זמינות לשימוש רק כאן. שימוש בהן לא משנה את סך הנקודות שנצברו בחשבון. אין לנקודות ערך כספי.','Session points are spendable only here. Spending does not change your lifetime earned points. Points have no monetary value.')}</p>}
+    {!paired&&tab==='rewards'&&<div className="section-links" role="group" aria-label={t('אזורי הפרסים והמשאלות','Rewards and wishes sections')}>
+      <a href="#reward-shop">{t('פרסים','Rewards')}</a><a href="#wish-list">{t('משאלות','Wishes')}</a><a href="#auction-list">{t('מכרזים','Auctions')}</a>
+    </div>}
+    {tab==='inspiration'&&<div className="segmented" role="group" aria-label={t('בחירת סוג ההשראה','Choose inspiration type')}>
+      <button type="button" aria-pressed={inspiration==='library'} onClick={()=>{setInspiration('library');setTag('');}}>{t('ספריית השראה','Idea library')}</button>
+      <button type="button" aria-pressed={inspiration==='punishments'} onClick={()=>{setInspiration('punishments');setTag('');}}>{t('השראת עונשים','Punishments inspiration')}</button>
+    </div>}
+   {tab==='dashboard'&&<DashboardTab s={s} u={u} wife={wife} ended={ended} held={held} play={play} now={now} lang={lang} t={t} date={date} label={label} run={run} action={action} nudgeDue={nudgeDue} dismissNudge={dismissNudge} progress={progress} weekly={weekly} badges={badges} streaks={streaks} queen={state?.queenLevel} digest={state?.digest} adorationTally={state?.adorationTally} spark={state?.spark} ratingLabel={ratingLabel} moodLabel={moodLabel} favourite={favourite} nextScheduled={nextScheduled} notes={notes} notesFull={notesFull} awaitingReview={awaitingReview} pendingRewards={pendingRewards} recentApproved={recentApproved} needsCare={needsCare} keysHintSeen={keysHintSeen} setKeysHintSeen={setKeysHintSeen} moodOrder={moodOrder} nightMood={nightMood} lastMood={lastMood} chooseMood={chooseMood} sendSteps={sendSteps} nightBlock={nightBlock} askNight={askNight} saveOpen={saveOpen} setSaveOpen={setSaveOpen} eveningName={eveningName} setEveningName={setEveningName} savedFull={savedFull} saveEvening={saveEvening} savedList={savedList} sendBlock={sendBlock} cap={cap} usedNow={usedNow} limitMessage={limitMessage} askRun={askRun} lastNight={lastNight} nightApproved={nightApproved} nightMissions={nightMissions} choosePace={choosePace} finishOnboarding={finishOnboarding} closedNow={closedNow} windowHours={windowHours} reopenHours={reopenHours} askClose={askClose} quickBlock={quickBlock} barPresets={barPresets} askPreset={askPreset} quickAt={quickAt} setQuickAt={setQuickAt} askQuick={askQuick} sayOpen={sayOpen} setSayOpen={setSayOpen} sayText={sayText} setSayText={setSayText} sayDraft={sayDraft} setSayDraft={setSayDraft} sayReady={sayReady} deck={deck} skipDeck={skipDeck} gardenTotal={gardenTotal} useIdea={useIdea} askSeason={askSeason} askStopSeason={askStopSeason}/>}
   {tab==='dashboard'&&wife&&s&&<TrophyCase s={s} wife={wife} open={false} t={t} date={date} run={run} action={action}/>}
-  {tab==='wishes'&&<WishesTab s={s} play={play} wife={wife} busy={busy} unreconciled={unreconciled} lang={lang} t={t} run={run} action={action}/>}
-  {tab==='rewards'&&<RewardsTab s={s} play={play} wife={wife} busy={busy} unreconciled={unreconciled} ended={ended} now={now} rewardDraft={rewardDraft} setRewardDraft={setRewardDraft} setTab={setTab} setComposerOpen={setComposerOpen} t={t} run={run} action={action}/>}
+   {tab==='rewards'&&<RewardsTab s={s} play={play} wife={wife} busy={busy} unreconciled={unreconciled} ended={ended} now={now} rewardDraft={rewardDraft} setRewardDraft={setRewardDraft} setTab={setTab} setComposerOpen={setComposerOpen} t={t} run={run} action={action}/>}
+   {(tab==='wishes'||(!paired&&tab==='rewards'))&&<WishesTab s={s} play={play} wife={wife} busy={busy} unreconciled={unreconciled} lang={lang} t={t} run={run} action={action}/>}
 
-   {tab==='missions'&&<MissionsTab paired={!!paired&&!ended} privateGame={!paired} s={s} u={u} wife={wife} play={play} current={current} lang={lang} t={t} label={label} date={date} run={run} action={action} editing={editing} setEditing={setEditing} draft={draft} setDraft={setDraft} composerOpen={composerOpen} setComposerOpen={setComposerOpen} setTab={setTab} sequence={sequence} setSequence={setSequence} autoProgress={autoProgress} setAutoProgress={setAutoProgress} drawnFollowup={drawnFollowup} setDrawnFollowup={setDrawnFollowup}/>}
-   {['library','rewards','punishments'].includes(tab)&&wife&&<LibraryTab tab={tab} s={s} t={t} lang={lang} label={label} library={library} destinationIdeas={destinationIdeas} filtered={filtered} category={category} setCategory={setCategory} intensity={intensity} setIntensity={setIntensity} tag={tag} setTag={setTag} query={query} setQuery={setQuery} noPrep={noPrep} setNoPrep={setNoPrep} away={away} setAway={setAway} onlyFavorites={onlyFavorites} setOnlyFavorites={setOnlyFavorites} favorites={favorites} setFavorites={setFavorites} favoriteKey={favoriteKey} recent={recent} useIdea={useIdea} setError={setError}/>}
-  {tab==='messages'&&<><MessagesTab s={s} u={u} ended={ended} t={t} date={date} displayName={displayName} run={run} action={action}/><WhisperBox s={s} wife={wife} ended={ended} t={t} date={date} run={run} action={action} useWhisper={text=>{setDraft({title:text.slice(0,150),text,points:5,secret:false,completionStyle:'simple'});setEditing('');setComposerOpen(true);setTab('missions');setTimeout(()=>document.querySelector<HTMLInputElement>('#mission-composer input')?.focus(),0);}}/></>}
-  {tab==='inbox'&&<InboxTab s={s} u={u} t={t} label={label} date={date} run={run} action={action}/>}
-  {tab==='history'&&<HistoryTab s={s} t={t} label={label} date={date} displayName={displayName}/>}
-  {tab==='history'&&s&&<TrophyCase s={s} wife={wife} open={true} t={t} date={date} run={run} action={action}/>}
+    {tab==='missions'&&<MissionsTab paired={!!paired&&!ended} s={s} u={u} wife={wife} play={play} current={current} lang={lang} t={t} label={label} date={date} run={run} action={action} editing={editing} setEditing={setEditing} draft={draft} setDraft={setDraft} composerOpen={composerOpen} setComposerOpen={setComposerOpen} setTab={setTab} sequence={sequence} setSequence={setSequence} autoProgress={autoProgress} setAutoProgress={setAutoProgress} drawnFollowup={drawnFollowup} setDrawnFollowup={setDrawnFollowup}/>}
+    {['library','rewards','punishments'].includes(libraryTab)&&wife&&<LibraryTab key={libraryTab} tab={libraryTab} s={s} t={t} lang={lang} label={label} library={library} destinationIdeas={destinationIdeas} filtered={filtered} category={category} setCategory={setCategory} intensity={intensity} setIntensity={setIntensity} tag={tag} setTag={setTag} query={query} setQuery={setQuery} noPrep={noPrep} setNoPrep={setNoPrep} away={away} setAway={setAway} onlyFavorites={onlyFavorites} setOnlyFavorites={setOnlyFavorites} favorites={favorites} setFavorites={setFavorites} favoriteKey={favoriteKey} recent={recent} useIdea={useIdea} setError={setError} play={play} ended={ended} mood={ownCheckIn} spend={()=>run(()=>action('wheel-spin'))} configure={paired?undefined:cost=>run(()=>action('wheel-config',{cost}))}/>}
+   {tab==='messages'&&<><MessagesTab s={s} u={u} ended={ended} t={t} date={date} displayName={displayName} run={run} action={action}/><WhisperBox s={s} wife={wife} ended={ended} t={t} date={date} run={run} action={action} useWhisper={draftInvitation}/></>}
+   {tab==='updates'&&<div className="section-links" role="group" aria-label={t('אזורי העדכונים','Updates sections')}>
+     <a href="#session-updates">{t('עדכונים','Updates')}</a><a href="#session-history">{t('היסטוריה','History')}</a><a href="#session-trophies">{t('גביעים','Trophies')}</a>
+   </div>}
+   {(tab==='inbox'||tab==='updates')&&<InboxTab s={s} u={u} lang={lang} t={t} label={label} run={run} action={action}/>}
+   {(tab==='history'||tab==='updates')&&<><HistoryTab s={s} lang={lang} t={t} label={label} displayName={displayName}/><TrophyCase s={s} wife={wife} open={true} t={t} date={date} run={run} action={action}/></>}
   <details className="panel" aria-label={t('צ׳ק־אין משותף','Shared check-in')}><summary><h2>{t('איך אנחנו עכשיו?','How are we right now?')}</h2></summary><p>{t('לא חובה. שניכם רואים את התשובות; זו אינה הסכמה או תנאי למשחק. אפשר לעדכן גם בהשהיה.','Optional. Both see the answers; this is not consent or a requirement to play. Updates are welcome during holds.')}</p>
     <div className="row">{[u.id,...Object.keys(s.checkIns??{}).filter(id=>id!==u.id)].map(id=>{const entry=s.checkIns?.[id];return <p key={id}><strong>{displayName(id)}</strong>: {entry?`${entry.minutes} ${t('דקות','minutes')} · ${t('אנרגיה','Energy')}: ${label(entry.energy)} · ${t('מצב רוח','Mood')}: ${label(entry.mood)}`:t('עדיין לא שותף','Not shared yet')}</p>;})}{!Object.keys(s.checkIns??{}).some(id=>id!==u.id)&&<p><strong>{t('השותף/ה','Partner')}</strong>: {t('עדיין לא שותף','Not shared yet')}</p>}</div>
     <form onSubmit={e=>{e.preventDefault();void run(()=>action('checkin',checkIn));}}><fieldset disabled={busy||unreconciled||ended}><legend>{t('הצ׳ק־אין שלי','My check-in')}</legend><div className="row">
@@ -266,7 +332,7 @@ export function GameApp({paired}: {paired?:{id:string;lang:'he'|'en';revision:nu
     <h2 id="sheet-title">{sheet.title}</h2>
     {sheet.intro&&<p>{sheet.intro}</p>}
     {sheet.steps&&<ol className="sheet-steps">{sheet.steps.map((step,index)=><li key={index}><strong>{step.offset}</strong> · {step.title}{step.text&&step.text!==step.title&&<p className="preserve small">{step.text}</p>}<span className="small">{step.points} {t('נק׳','pts')}</span></li>)}</ol>}
-    <div className="row"><button type="button" autoFocus onClick={()=>setSheet(null)}>{t('ביטול','Cancel')}</button><Button className="primary" onClick={()=>{const confirm=sheet.onConfirm;setSheet(null);confirm();}}>{sheet.confirm}</Button></div>
+     <div className="row"><button type="button" autoFocus onClick={()=>setSheet(null)}>{t('ביטול','Cancel')}</button><button type="button" className={sheet.danger?'danger':'primary'} disabled={!sheet.danger&&(busy||unreconciled||unknownOutcome||!!(paired&&archiveLocked))} onClick={()=>{const confirm=sheet.onConfirm;setSheet(null);confirm();}}>{sheet.confirm}</button></div>
   </>}</dialog>
    {!paired&&<footer><span>HER RULES · {t('הבחירה נשארת בידיים שלכם','Your choice, always')}</span><p>{t('ללא העלאת מדיה, התראות דחיפה או משחק מסתעף. אין הבטחת התראה כשהאפליקציה סגורה.','No media uploads, push notifications or branching gameplay. Delivery alerts are not guaranteed while the app is closed.')}</p><a href="/legacy/">{t('','Legacy local demo — simulated identities and consent')}</a></footer>}</Shell></></BusyContext.Provider>;
 }

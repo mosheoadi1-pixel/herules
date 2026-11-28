@@ -25,8 +25,127 @@ export function parseCsv(csv:string):string[][] {
   return rows;
 }
 const ideaSchema=z.object({category:z.enum(categories),he:z.string().min(1).max(4000),en:z.string().min(1).max(4000),minutes:z.number().int().min(1).max(525600),intensity:z.number().int().min(1).transform(value=>Math.min(value,3)),tags:z.array(z.string().min(1).max(80)).max(50)});
-// Built-in library texts (trimmed): a row duplicating either language of a built-in suggestion is never stored.
-const builtinTexts=new Set(library.flatMap(idea=>[idea.he,idea.en].map(text=>text.trim())));
+
+// Case-, punctuation- and whitespace-insensitive text key in both languages: "Shalom." and "shalom" are one idea.
+export function normalizeIdeaText(text:string):string {
+  return text.toLowerCase().replace(/[\s\u05be\u05f3\u05f4.,!?;:"'()\-\u2013\u2014]+/g,' ').trim();
+}
+
+// Reworded copies ("Fold all the laundry without complaining" / "without a single complaint")
+// survive normalization but are still one idea. Ratcliff/Obershelp matching, the algorithm
+// behind Python's difflib.SequenceMatcher, catches them without needing a database extension.
+export const SEMANTIC_SIMILARITY_THRESHOLD=0.86;
+// Hebrew morphology and paraphrasing can push a genuine copy well below 0.86 in both languages
+// (e.g. "Place clothespins on inner thighs for a few minutes" / "Wear clothespins on your inner
+// thighs for five minutes" scores 0.84 in English, 0.71 in Hebrew). When every other field is
+// identical, a clearly reworded text is still the same idea and much weaker evidence suffices.
+export const SAME_METADATA_SIMILARITY_THRESHOLD=0.70;
+type TextKey={nhe:string;nen:string};
+type IdeaMeta={category:string;minutes:number;intensity:number;tags:string[]};
+type CharCounts=Map<string,number>;
+type IdeaFingerprint=TextKey&IdeaMeta&{tagSignature:string;chars:{he:CharCounts;en:CharCounts}};
+const textKey=(he:string,en:string):TextKey=>({nhe:normalizeIdeaText(he),nen:normalizeIdeaText(en)});
+const charCounts=(text:string):CharCounts=>{const counts:CharCounts=new Map();for(let i=0;i<text.length;i++){const c=text[i]!;counts.set(c,(counts.get(c)??0)+1);}return counts;};
+// A trailing comma in an imported tag is a typo, not a different idea.
+const tagKey=(tag:string):string=>tag.toLowerCase().replace(/[,;\s]+$/,'').trim();
+export const ideaFingerprint=(he:string,en:string,meta:IdeaMeta):IdeaFingerprint=>{
+  const key=textKey(he,en);
+  return {...key,...meta,tagSignature:meta.tags.map(tagKey).sort().join('|'),chars:{he:charCounts(key.nhe),en:charCounts(key.nen)}};
+};
+const sameMetadata=(a:IdeaFingerprint,b:IdeaFingerprint):boolean=>
+  a.category===b.category&&a.minutes===b.minutes&&a.intensity===b.intensity&&
+  a.tagSignature===b.tagSignature;
+function longestBlock(a:string,b:string):{i:number;j:number;size:number} {
+  let bestI=0,bestJ=0,best=0;
+  const previous=new Int32Array(b.length+1);
+  for(let i=1;i<=a.length;i++) {
+    const current=new Int32Array(b.length+1);
+    for(let j=1;j<=b.length;j++) if(a[i-1]===b[j-1]) {
+      current[j]=previous[j-1]!+1;
+      if(current[j]!>best){best=current[j]!;bestI=i-best;bestJ=j-best;}
+    }
+    previous.set(current);
+  }
+  return {i:bestI,j:bestJ,size:best};
+}
+function commonCharacters(a:string,b:string):number {
+  const {i,j,size}=longestBlock(a,b);
+  if(!size)return 0;
+  return size+commonCharacters(a.slice(0,i),b.slice(0,j))+commonCharacters(a.slice(i+size),b.slice(j+size));
+}
+export function ideaSimilarity(a:string,b:string):number {
+  if(a===b)return 1;
+  if(!a||!b)return 0;
+  const total=a.length+b.length;
+  // 2*min/(a+b) is the highest score any pair of these lengths could reach. Short-circuit
+  // only below the lowest threshold in use: returning the ceiling above that would turn an
+  // upper bound into a false positive at the relaxed same-metadata threshold.
+  const ceiling=2*Math.min(a.length,b.length)/total;
+  if(ceiling<SAME_METADATA_SIMILARITY_THRESHOLD)return ceiling;
+  return 2*commonCharacters(a,b)/total;
+}
+// Matched blocks pair up equal characters, so shared-character count bounds the similarity from above.
+// Most unrelated pairs fall below the threshold here, skipping the costly block matching.
+function similarityBound(a:string,b:string,countsA:CharCounts,countsB:CharCounts):number {
+  let common=0;
+  for(const [c,n] of countsA){const m=countsB.get(c);if(m)common+=Math.min(n,m);}
+  return 2*common/(a.length+b.length);
+}
+const languageMatch=(a:string,b:string,countsA:CharCounts,countsB:CharCounts,threshold:number):boolean=>
+  !!a&&!!b&&similarityBound(a,b,countsA,countsB)>=threshold&&ideaSimilarity(a,b)>=threshold;
+export function isSameIdea(a:IdeaFingerprint,b:IdeaFingerprint):boolean {
+  // Categories are distinct ideas even with identical wording.
+  if(a.category!==b.category)return false;
+  const threshold=sameMetadata(a,b)?SAME_METADATA_SIMILARITY_THRESHOLD:SEMANTIC_SIMILARITY_THRESHOLD;
+  return languageMatch(a.nhe,b.nhe,a.chars.he,b.chars.he,threshold)||
+    languageMatch(a.nen,b.nen,a.chars.en,b.chars.en,threshold);
+}
+
+// Built-in library texts (normalized): a CSV row matching either language of a built-in suggestion is never stored.
+const builtinTexts=new Set(library.flatMap(idea=>[idea.he,idea.en].map(text=>normalizeIdeaText(text.trim()))));
+
+type IdeaRow=IdeaMeta&{id:string;he:string;en:string};
+type StoredIdea=IdeaFingerprint&{id:string};
+const sortedTags=(groups:string[][]):string[]=>[...new Set(groups.flat())].sort();
+
+/**
+ * Merge duplicate imported_ideas rows on server load.
+ * Rows in the same category whose normalized Hebrew/English text match, or whose wording is
+ * highly similar in either language, are one idea: the first row (lowest id) survives with
+ * the union of all tags, the rest are deleted. Returns how many rows were merged away.
+ */
+export async function mergeDuplicateIdeas(pool:Pool|PoolClient):Promise<number> {
+  const owned=pool instanceof Pool;
+  const client=owned?await pool.connect():pool;
+  try {
+    if(owned)await client.query('BEGIN');
+    await client.query('SELECT pg_advisory_xact_lock(731904)');
+    const rows=(await client.query('SELECT id,category,he,en,minutes,intensity,tags FROM imported_ideas ORDER BY id')).rows as IdeaRow[];
+    const fingerprints=rows.map(row=>ideaFingerprint(row.he,row.en,row));
+    const parent=rows.map((_,index)=>index);
+    const find=(index:number):number=>{while(parent[index]!==index){parent[index]=parent[parent[index]]!;index=parent[index]!;}return index;};
+    const union=(a:number,b:number)=>{a=find(a);b=find(b);if(a!==b)parent[Math.max(a,b)]=Math.min(a,b);};
+    for(let index=0;index<rows.length;index++) {
+      for(let other=0;other<index;other++) {
+        if(isSameIdea(fingerprints[other]!,fingerprints[index]!))union(other,index);
+      }
+    }
+    const clusters=new Map<number,number[]>();
+    rows.forEach((_,index)=>{const root=find(index);const cluster=clusters.get(root);if(cluster)cluster.push(index);else clusters.set(root,[index]);});
+    let removed=0;
+    for(const members of clusters.values()) {
+      if(members.length<2)continue;
+      const keeper=rows[members[0]!];
+      const tags=sortedTags(members.map(index=>rows[index]!.tags));
+      const dropped=members.slice(1).map(index=>rows[index]!.id);
+      await client.query('DELETE FROM imported_ideas WHERE id=ANY($1)',[dropped]);
+      if(tags.join('|')!==keeper.tags.join('|'))await client.query('UPDATE imported_ideas SET tags=$2 WHERE id=$1',[keeper.id,tags]);
+      removed+=dropped.length;
+    }
+    if(owned)await client.query('COMMIT');
+    return removed;
+  } catch(error){if(owned)await client.query('ROLLBACK');throw error;}finally{if(owned)client.release();}
+}
 
 export async function importIdeas(pool:Pool|PoolClient,csv:string):Promise<number> {
   const [header,...rows]=parseCsv(csv);
@@ -38,17 +157,36 @@ export async function importIdeas(pool:Pool|PoolClient,csv:string):Promise<numbe
     if(!parsed.success)throw new Error(`CSV record ${index+2}: ${parsed.error.message}`);
     return parsed.data;
   });
-  // Skip rows whose Hebrew or English text duplicates a built-in suggestion, exactly like identical reimported rows.
-  const insertable=ideas.filter(idea=>!builtinTexts.has(idea.he)&&!builtinTexts.has(idea.en));
   const owned=pool instanceof Pool;
   const client=owned?await pool.connect():pool;let inserted=0;
   try {
     if(owned)await client.query('BEGIN');
+    await client.query('SELECT pg_advisory_xact_lock(731904)');
     await client.query(await readFile(new URL('../db/004-imported-ideas.sql',import.meta.url),'utf8'));
-    for(const idea of insertable){
+    // Existing ideas are the baseline; within-batch additions join them so two reworded
+    // records in one CSV cannot both enter the table.
+    const stored=(await client.query('SELECT id,category,he,en,minutes,intensity,tags FROM imported_ideas')).rows as IdeaRow[];
+    const byCategory=new Map<string,StoredIdea[]>();
+    for(const row of stored) {
+      const entry:StoredIdea={...ideaFingerprint(row.he,row.en,row),id:row.id};
+      const list=byCategory.get(row.category)??[];
+      list.push(entry);byCategory.set(row.category,list);
+    }
+    for(const idea of ideas) {
+      const key=textKey(idea.he,idea.en);
+      if(builtinTexts.has(key.nhe)||builtinTexts.has(key.nen))continue;
+      const fingerprint:StoredIdea={...ideaFingerprint(idea.he,idea.en,idea),id:''};
+      const list=byCategory.get(idea.category)??[];
+      const duplicate=list.find(entry=>isSameIdea(fingerprint,entry));
+      if(duplicate) {
+        const tags=sortedTags([duplicate.tags,idea.tags]);
+        if(tags.join('|')!==duplicate.tags.join('|'))await client.query('UPDATE imported_ideas SET tags=$2 WHERE id=$1',[duplicate.id,tags]);
+        continue;
+      }
       const id='csv-'+createHash('sha256').update(JSON.stringify(idea)).digest('hex');
       const result=await client.query('INSERT INTO imported_ideas(id,category,he,en,minutes,intensity,tags) VALUES($1,$2,$3,$4,$5,$6,$7) ON CONFLICT(id) DO NOTHING',[id,idea.category,idea.he,idea.en,idea.minutes,idea.intensity,idea.tags]);
       inserted+=result.rowCount!;
+      list.push({...fingerprint,id});byCategory.set(idea.category,list);
     }
     if(owned)await client.query('COMMIT');return inserted;
   } catch(error){if(owned)await client.query('ROLLBACK');throw error;}finally{if(owned)client.release();}

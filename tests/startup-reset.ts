@@ -23,13 +23,17 @@ try {
   assert.equal(await importIdeas(pool,'category,he,en,minutes,intensity,tags\nchallenges,רעיון ייחודי,Unique imported idea,5,1,test'),1);
   const ideas=(await pool.query('SELECT * FROM imported_ideas ORDER BY id')).rows;
   const pair=(await pool.query('SELECT pair_id FROM private_game')).rows[0].pair_id;
-  await pool.query("INSERT INTO sessions VALUES(gen_random_uuid(),$1,'active','{}')",[pair]);
-  await pool.query("INSERT INTO auth_sessions SELECT 'old-cookie',id,now()+interval '7 days' FROM users LIMIT 1");
-  await pool.query('ALTER TABLE imported_ideas ADD CONSTRAINT reject_seed CHECK(false) NOT VALID');
+   await pool.query("INSERT INTO sessions VALUES(gen_random_uuid(),$1,'active','{}')",[pair]);
+   await pool.query("INSERT INTO auth_sessions SELECT 'old-cookie',id,now()+interval '7 days' FROM users LIMIT 1");
+   // Existing ideas are skipped by the importer. Remove one fixture seed so the
+   // reset must insert it within the same transaction that clears gameplay.
+   const seedId=ideas.find(idea=>idea.en!=='Unique imported idea')!.id;
+   await pool.query('DELETE FROM imported_ideas WHERE id=$1',[seedId]);
+   await pool.query('ALTER TABLE imported_ideas ADD CONSTRAINT reject_seed CHECK(false) NOT VALID');
   await assert.rejects(resetGame(pool),{code:'23514'});
   assert.equal((await pool.query('SELECT count(*) FROM sessions')).rows[0].count,'1','Failed seed must preserve gameplay');
   assert.equal((await pool.query('SELECT count(*) FROM auth_sessions')).rows[0].count,'1','Failed seed must preserve cookies');
-  assert.deepEqual((await pool.query('SELECT * FROM imported_ideas ORDER BY id')).rows,ideas);
+   assert.deepEqual((await pool.query('SELECT * FROM imported_ideas ORDER BY id')).rows,ideas.filter(idea=>idea.id!==seedId));
   await pool.query('ALTER TABLE imported_ideas DROP CONSTRAINT reject_seed');
   await resetGame(pool);
   assert.equal((await pool.query('SELECT count(*) FROM sessions')).rows[0].count,'0');
