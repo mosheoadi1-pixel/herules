@@ -195,9 +195,8 @@ try{
     await openCheckIn(x);await x.getByLabel('Available minutes',{exact:true}).fill('30');await x.getByRole('button',{name:'Save my check-in',exact:true}).click();
     await x.getByRole('button',{name:'Enter',exact:true}).waitFor();assert.equal(await x.getByRole('button',{name:'Enter',exact:true}).isEnabled(),true);
   }finally{await x.unroute('**/api/state',unauthorized);await x.unroute('**/api/sessions/*/checkin',expireAfterSave);}
-  await x.locator('select[name="role"]').selectOption('wife');await x.getByRole('checkbox').check();await x.getByRole('button',{name:'Enter',exact:true}).click();
-  await x.getByText('Settings',{exact:true}).click();
-  await x.getByRole('button',{name:'Sign out',exact:true}).click();await x.getByRole('button',{name:'Enter',exact:true}).waitFor();
+   await x.locator('select[name="role"]').selectOption('wife');await x.getByRole('checkbox').check();await x.getByRole('button',{name:'Enter',exact:true}).click();
+   await x.getByRole('button',{name:'Sign out',exact:true}).click();await x.getByRole('button',{name:'Enter',exact:true}).waitFor();
   // An unkeyed request can arrive after timeout and after a successful state read.
   let releaseLate!:()=>void,lateEntered!:()=>void,lateRequest:any;
   const lateGate=new Promise<void>(r=>releaseLate=r),lateHeld=new Promise<void>(r=>lateEntered=r);
