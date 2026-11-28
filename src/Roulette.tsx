@@ -47,17 +47,20 @@ export function Roulette({ideas,lang,onChoose,mood,herPoints,wheelCost,play,ende
       <button type="button" aria-pressed={!weighted} onClick={()=>setWeighted(false)}>{l('wheel-no-preference')}</button>
     </div>
     {weighted&&!mood&&<p className="small">{l('wheel-no-checkin')}</p>}
-    <div className="row">
-      <label>{l('wheel-cost')}<input type="number" min={0} max={WHEEL_COST_MAX} step={1} inputMode="numeric" value={costDraft} aria-invalid={costInvalid||undefined} aria-describedby={costInvalid?'wheel-cost-error':undefined} onChange={e=>setCostDraft(e.target.value)}/></label>
-      <button type="button" disabled={ended} onClick={()=>void saveCost()}>{l('wheel-save-cost')}</button>
-    </div>
-    {costInvalid&&<p id="wheel-cost-error" className="error" role="alert">{l('wheel-cost-invalid')}</p>}
     <div className="roulette-stage" aria-hidden="true"><div className="roulette-pointer"/><svg className="roulette-wheel" viewBox="-100 -100 200 200" style={{transform:`rotate(${angle}deg)`}}>
       {Array.from({length:8},(_,index)=>{const start=index*Math.PI/4-Math.PI/2,end=(index+1)*Math.PI/4-Math.PI/2;return <path key={index} d={`M 0 0 L ${100*Math.cos(start)} ${100*Math.sin(start)} A 100 100 0 0 1 ${100*Math.cos(end)} ${100*Math.sin(end)} Z`} fill={colors[index%colors.length]} stroke="#f4dfcc" strokeWidth=".6"/>;})}<circle r="8" fill="#f4dfcc"/>
     </svg></div>
     <button ref={spinButton} type="button" className="gold" disabled={!wheel||spinning||paying||blocked} onClick={()=>void spin()}>{spinning?t('הגלגל מסתובב…','Spinning…'):paying?l('wheel-paying'):t('סובבו את גלגל הרעיונות','Spin the idea wheel')}{costly&&<> · {wheelCost} {l('wheel-points')}</>}</button>
-    {costly&&!play&&<p className="small">{l('wheel-cost-note')}</p>}
-    {costly&&play&&herPoints<wheelCost&&<p className="small">{l('wheel-short')}</p>}
+     {costly&&!play&&<p className="small">{l('wheel-cost-note')}</p>}
+     {costly&&play&&herPoints<wheelCost&&<p className="small">{l('wheel-short')}</p>}
+     <details className="library-options">
+       <summary>{t('הגדרות הגלגל','Wheel settings')}</summary>
+       <div className="row">
+         <label>{l('wheel-cost')}<input type="number" min={0} max={WHEEL_COST_MAX} step={1} inputMode="numeric" value={costDraft} aria-invalid={costInvalid||undefined} aria-describedby={costInvalid?'wheel-cost-error':undefined} onChange={e=>setCostDraft(e.target.value)}/></label>
+         <button type="button" disabled={ended} onClick={()=>void saveCost()}>{l('wheel-save-cost')}</button>
+       </div>
+       {costInvalid&&<p id="wheel-cost-error" className="error" role="alert">{l('wheel-cost-invalid')}</p>}
+     </details>
     <dialog ref={dialog} className="roulette-dialog" aria-labelledby="roulette-result-title" onCancel={e=>{e.preventDefault();close();}}>
       <h3 id="roulette-result-title">{t('הרעיון שהוגרל','Selected idea')}</h3><p className="preserve" dir="auto">{result&&(lang==='he'?result.he:result.en)}</p>
       <div className="row"><button type="button" className="primary" onClick={()=>{if(result){const chosen=result;dialog.current?.close();setResult(null);onChoose(chosen);}}}>{t('בחירה ועריכה','Choose and edit')}</button><button type="button" onClick={()=>{close();setTimeout(()=>void spin(),0);}}>{t('סיבוב נוסף','Spin again')}</button><button type="button" onClick={close}>{t('סגירה','Close')}</button></div>

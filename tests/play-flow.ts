@@ -614,8 +614,6 @@ try {
   s=await state();
   assert.equal(s.trophies?.some(entry=>entry.kind==='reflection'),false,'the removed reflection leaves the gallery');
 
-<<<<<<< HEAD
-=======
   // Auction nights: his bids on her lots, the highest bid charged once and burned.
   await op(h,'auction',{title:'No',description:'No',minBid:1,closesAt:Date.now()+3600000,key:randomUUID()},403);
   await op(w,'auction-bid',{auction:randomUUID(),amount:5,key:randomUUID()},403);
@@ -695,7 +693,6 @@ try {
   s=await state();
   assert.equal(s.wheelCost,0);
 
->>>>>>> 20fda84e1bc17e5e83e3b399c13de9520009d69d
   // The case holds thirty pins.
   await edit(row=>{row.pins=[...(row.pins??[]),...Array.from({length:27},()=>({id:randomUUID(),kind:'mission' as const,ref:randomUUID(),at:Date.now()}))];});
   s=await state();
@@ -719,19 +716,13 @@ try {
   await op(h,'whisper',{text:'Too late',key:randomUUID()},409,'Session is terminal');
   await op(w,'spark-reroll',{key:randomUUID()},409,'Session is terminal');
   await op(w,'season-start',{pack:'hanukkah',key:randomUUID()},409,'Session is terminal');
-<<<<<<< HEAD
-=======
   await op(w,'auction',{title:'Late lot',description:'No',minBid:1,closesAt:Date.now()+3600000,key:randomUUID()},409,'Session is terminal');
   await op(w,'wheel-spin',{key:randomUUID()},409,'Session is terminal');
->>>>>>> 20fda84e1bc17e5e83e3b399c13de9520009d69d
   // Curation stays open on an ended session so the archive can be arranged after play stops.
   const latePin=await op(w,'pin',{kind:'mission',ref:quick.id,key:randomUUID()});
   assert.ok(latePin.pin.id);
   await op(w,'unpin',{pin:latePin.pin.id,key:randomUUID()});
   await op(h,'pin',{kind:'mission',ref:quick.id,key:randomUUID()},403);
-<<<<<<< HEAD
-  console.log('PASS play flow: approvals, quick commands, keyed retries, scheduling, review points, wishlist pricing and approval, private commands, aftercare, her night, quick ratings, private notes, progress helpers, pacing, done for tonight, saved evenings, night cap, devotions, chapters, recurring missions, adoration, whispers, daily spark, season packs, trophy case, terminal guard');
-=======
   // Ending the session voids every open lot; charged points stay burned.
   s=await state();
   assert.equal(s.auctions!.some(item=>item.status==='open'),false,'no lot stays open when the session ends');
@@ -761,7 +752,6 @@ try {
   assert.equal(archived.points,37,'the archived session keeps its record');
   await w(`/sessions/${liveId}/restart`,{},409,'Session is terminal');
   console.log('PASS play flow: approvals, quick commands, keyed retries, scheduling, review points, wishlist pricing and approval, private commands, aftercare, her night, quick ratings, private notes, progress helpers, pacing, done for tonight, saved evenings, night cap, devotions, chapters, recurring missions, adoration, whispers, daily spark, season packs, trophy case, auctions, wheels, restart, terminal guard');
->>>>>>> 20fda84e1bc17e5e83e3b399c13de9520009d69d
 } finally {
   if(server)await new Promise<void>(resolve=>server!.close(()=>resolve()));
   await pool.end();await db.stop();await rm(directory,{recursive:true,force:true,maxRetries:10,retryDelay:100});

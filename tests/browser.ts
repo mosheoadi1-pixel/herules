@@ -27,17 +27,12 @@ try{
   await aliasPage.goto('http://127.0.0.1:4180');
   await aliasPage.getByRole('checkbox').check();
   await aliasPage.locator('form button.primary').click();
-  await aliasPage.locator('.account').waitFor();
-  await aliasPage.reload();await aliasPage.locator('.account').waitFor();
+  await aliasPage.locator('.account-settings').waitFor();
+  await aliasPage.reload();await aliasPage.locator('.account-settings').waitFor();
    console.log('PASS address aliases: nonconfigured 127.0.0.1 guest entry and cookie reload without Origin rejection');
   const contexts=[aliasContext,await browser.newContext(),await browser.newContext()];
   const w=aliasPage,h=await contexts[1].newPage(),x=await contexts[2].newPage();
   async function openCheckIn(page:any){
-<<<<<<< HEAD
-    const panel=page.locator('details').filter({has:page.locator('summary',{hasText:/How are we right now\?|איך אנחנו עכשיו\?/})});
-    if(!(await panel.evaluate((e:HTMLDetailsElement)=>e.open)))await panel.locator('summary').click();
-  }
-=======
     await page.bringToFront().catch(()=>{});
     const panel=page.locator('details').filter({has:page.locator('summary',{hasText:/How are we right now\?|איך אנחנו עכשיו\?/})});
     if(!(await panel.evaluate((e:HTMLDetailsElement)=>e.open)))await panel.locator('summary').click();
@@ -48,7 +43,6 @@ try{
     if(!(await panel.evaluate((e:HTMLDetailsElement)=>e.open)))await panel.locator('summary').click();
   }
   const reflectionPanel=(page:any)=>page.locator('details').filter({has:page.locator('summary',{hasText:/Optional closing reflection|A moment of appreciation|שיתוף סיום אופציונלי|רגע של הערכה/})});
->>>>>>> 20fda84e1bc17e5e83e3b399c13de9520009d69d
   async function heldOwnSave(kind:'checkin'|'reflection',controls:any[],values:string[],buttonName:string){
     const pattern=`**/api/sessions/*/${kind}`;
     let release!:()=>void,committed!:()=>void;
@@ -59,7 +53,7 @@ try{
       await w.getByRole('button',{name:buttonName,exact:true}).click();await saved;
       for(const control of controls)assert.equal(await control.isDisabled(),true,`${kind}: edits blocked while own save response is held`);
       assert.equal(await w.getByRole('button',{name:/^(Pause my play|Release my pause)$/}).isEnabled(),true);
-      assert.equal(await w.getByRole('button',{name:'New session',exact:true}).isEnabled(),true);
+      assert.equal(await w.getByRole('button',{name:'Archive & new session',exact:true}).isEnabled(),true);
       release();
       await w.getByRole('button',{name:buttonName,exact:true}).waitFor();
       await w.waitForFunction((name:string)=>[...document.querySelectorAll('button')].some(b=>b.textContent===name&&!b.disabled),buttonName);
@@ -73,7 +67,7 @@ try{
   async function guestForm(page:any,role:string){
   await page.goto('http://localhost:4180');assert.equal(await page.locator('html').getAttribute('lang'),'he');assert.equal(await page.locator('html').getAttribute('dir'),'rtl');await page.getByRole('button',{name:'English',exact:true}).click();
   assert.equal(await page.getByLabel('Email',{exact:true}).count(),0);
-  await page.getByText('Every entry to a role returns to the same identity',{exact:false}).waitFor();
+  await page.getByText('Choosing the same role opens the same identity',{exact:false}).waitFor();
   await page.locator('select[name="role"]').selectOption(role);
    await page.getByRole('checkbox').check();await page.getByRole('button',{name:'Enter',exact:true}).click();
   }
@@ -81,8 +75,9 @@ try{
   await w.getByRole('heading',{name:'Waiting for the second player',exact:true}).waitFor();
   assert.equal(await w.getByRole('button',{name:'Create new invitation',exact:true}).count(),0);
   await guestForm(h,'husband');await h.getByRole('region',{name:'Next step',exact:true}).waitFor();
-  await guestForm(x,'husband');await x.locator('.account').waitFor();
+  await guestForm(x,'husband');await x.locator('.account-settings').waitFor();
   assert.equal(await x.evaluate(async()=> (await (await fetch('/api/state')).json()).user.id),await h.evaluate(async()=> (await (await fetch('/api/state')).json()).user.id));
+  await x.getByText('Settings',{exact:true}).click();
   await x.getByRole('button',{name:'Sign out',exact:true}).click();
   const guestIds=await Promise.all([w,h].map(p=>p.evaluate(async()=> (await (await fetch('/api/state')).json()).user.id)));assert.equal(new Set(guestIds).size,2);
   const pairIds=await Promise.all([w,h].map(p=>p.evaluate(async()=> (await (await fetch('/api/state')).json()).user.pair_id)));assert.ok(pairIds[0]);assert.equal(pairIds[0],pairIds[1]);
@@ -183,7 +178,7 @@ try{
     for(const name of ['Reward title','Reward description','Reward cost'])assert.equal(await w.getByLabel(name,{exact:true}).isDisabled(),true,`${name} disabled until reconciliation`);
     const paused=w.waitForResponse((r:any)=>r.url().endsWith('/pause')&&r.request().method()==='POST');
     await w.getByRole('button',{name:'Pause my play',exact:true}).click();assert.equal((await paused).status(),200);
-    assert.equal(await w.getByRole('button',{name:'New session',exact:true}).isEnabled(),true);
+    assert.equal(await w.getByRole('button',{name:'Archive & new session',exact:true}).isEnabled(),true);
   }finally{await w.unroute('**/api/state',failedState);}
   await w.getByRole('button',{name:'Release my pause',exact:true}).waitFor({timeout:30000});
   await w.getByRole('button',{name:'Release my pause',exact:true}).click();
@@ -202,6 +197,7 @@ try{
     await x.getByRole('button',{name:'Enter',exact:true}).waitFor();assert.equal(await x.getByRole('button',{name:'Enter',exact:true}).isEnabled(),true);
   }finally{await x.unroute('**/api/state',unauthorized);await x.unroute('**/api/sessions/*/checkin',expireAfterSave);}
   await x.locator('select[name="role"]').selectOption('wife');await x.getByRole('checkbox').check();await x.getByRole('button',{name:'Enter',exact:true}).click();
+  await x.getByText('Settings',{exact:true}).click();
   await x.getByRole('button',{name:'Sign out',exact:true}).click();await x.getByRole('button',{name:'Enter',exact:true}).waitFor();
   // An unkeyed request can arrive after timeout and after a successful state read.
   let releaseLate!:()=>void,lateEntered!:()=>void,lateRequest:any;
@@ -243,7 +239,7 @@ try{
   await invitation.getByRole('heading',{name:'Surprise invitation',exact:true}).waitFor();
   assert.equal(await invitation.getByText('Category: Conversation',{exact:true}).count(),0,'the category is withheld until he reveals');
   const placeholder=await h.locator('body').innerText();assert.ok(!placeholder.includes(surpriseTitle)&&!placeholder.includes(surpriseText));
-  assert.equal(await invitation.getByRole('button',{name:'Read, acknowledge and choose to participate',exact:true}).count(),0);
+  assert.equal(await invitation.getByRole('button',{name:'Accept invitation',exact:true}).count(),0);
   await h.getByRole('button',{name:'עברית',exact:true}).click();
   await h.getByRole('heading',{name:'הזמנת הפתעה',exact:true}).waitFor();
   await h.getByRole('button',{name:'English',exact:true}).click();
@@ -254,7 +250,7 @@ try{
   await invitation.getByRole('heading',{name:surpriseTitle,exact:true}).waitFor();await invitation.getByText(surpriseText,{exact:true}).waitFor();
   const afterReveal=await h.evaluate(async(id:string)=>{const state=await(await fetch('/api/state')).json();return state.sessions[0].missions.find((m:any)=>m.id===id);},hiddenMission.id);
   assert.equal(afterReveal.status,'pending');assert.equal(afterReveal.acknowledgedAt,undefined);
-  await invitation.getByRole('button',{name:'Read, acknowledge and choose to participate',exact:true}).click();
+  await invitation.getByRole('button',{name:'Accept invitation',exact:true}).click();
   await h.waitForFunction(async(id:string)=>{const state=await(await fetch('/api/state')).json();return state.sessions[0].missions.find((m:any)=>m.id===id)?.status==='acknowledged';},hiddenMission.id);
   await invitation.getByRole('button',{name:'Decline without penalty',exact:true}).click();
   await w.getByText('New mission to review',{exact:true}).click();
@@ -269,20 +265,33 @@ try{
  assert.equal(await h.getByText('Would you like to prepare optional mint tea?',{exact:true}).count(),0);
   assert.equal((await x.request.get('http://localhost:4180/api/state')).status(),401);
  await w.getByRole('button',{name:'Send now',exact:true}).click();
-  await h.getByRole('button',{name:'Read, acknowledge and choose to participate',exact:true}).waitFor();
+  await h.getByRole('button',{name:'Accept invitation',exact:true}).waitFor();
+  const previousViewport = h.viewportSize();
+  await h.setViewportSize({width:375,height:812});
+  await h.getByRole('button',{name:'עברית',exact:true}).click();
+  await h.evaluate(()=>window.scrollTo({top:0,behavior:'instant'}));
+  for(const name of ['קבלת ההזמנה','בקשת שינוי','סירוב ללא קנס','השהיה אישית']){
+    const control = h.getByRole('button',{name,exact:true});
+    assert.equal(await control.evaluate((el:HTMLElement)=>{
+      const {top,bottom,left,right}=el.getBoundingClientRect();
+      return top>=0&&bottom<=innerHeight&&left>=0&&right<=innerWidth;
+    }),true,`${name} is visible without scrolling at 375px RTL`);
+  }
+  await h.getByRole('button',{name:'English',exact:true}).click();
+  await h.setViewportSize(previousViewport);
   await w.getByRole('region',{name:'Next step',exact:true}).getByText('Waiting for your husband to acknowledge',{exact:false}).waitFor();
    assert.equal(await h.getByRole('region',{name:'Current invitation',exact:true}).count(),1);
    assert.ok(await h.getByRole('region',{name:'Current invitation',exact:true}).evaluate((el:HTMLElement)=>!!(el.compareDocumentPosition(document.querySelector('fieldset')!)&Node.DOCUMENT_POSITION_FOLLOWING)),'Current invitation precedes check-in editing');
    assert.ok(await h.getByRole('region',{name:'Current invitation',exact:true}).evaluate((el:HTMLElement)=>!!(el.compareDocumentPosition(document.querySelector('.reflection')!)&Node.DOCUMENT_POSITION_FOLLOWING)),'Current invitation precedes optional reflection');
-  assert.equal(await h.getByRole('button',{name:'Read, acknowledge and choose to participate',exact:true}).count(),1);
+  assert.equal(await h.getByRole('button',{name:'Accept invitation',exact:true}).count(),1);
  assert.equal(await h.getByLabel('Written completion',{exact:true}).count(),0);
-   await h.getByRole('button',{name:'Read, acknowledge and choose to participate',exact:true}).click();
+   await h.getByRole('button',{name:'Accept invitation',exact:true}).click();
    await h.getByRole('button',{name:'Pause my play',exact:true}).click();
    await h.getByRole('region',{name:'Next step',exact:true}).getByText('Your pause is active.',{exact:false}).waitFor();
    await w.getByRole('region',{name:'Next step',exact:true}).getByText('Waiting on your partner’s pause.',{exact:false}).waitFor();
    assert.equal(await h.getByRole('button',{name:'Submit completion',exact:true}).isDisabled(),true);
    await h.getByRole('button',{name:'Release my pause',exact:true}).click();
-  await h.getByText('Request a softer version or adjustment',{exact:true}).click();
+  await h.getByRole('button',{name:'Request a change',exact:true}).click();
   await h.getByLabel('Request type').selectOption('softer');
   await h.getByLabel('Note (optional)',{exact:true}).fill('A smaller invitation please.');
   await h.getByRole('button',{name:'Request adjustment',exact:true}).click();
@@ -300,7 +309,7 @@ try{
   await w.getByRole('button',{name:'Send now',exact:true}).click();
   await h.getByRole('heading',{name:'A smaller tea invitation',exact:true}).waitFor();
   assert.equal(await h.getByLabel('Written completion',{exact:true}).count(),0);
-  await h.getByRole('button',{name:'Read, acknowledge and choose to participate',exact:true}).click();
+  await h.getByRole('button',{name:'Accept invitation',exact:true}).click();
    console.log('PASS cycle 1 browser: chat during play, adjustment/note, linked secret replacement, immutable original and fresh acknowledgement');
    // Switching the focused card must not remount A's uncontrolled, genuinely unsaved report.
    const unsavedReport='Still writing this report — not submitted.';
@@ -325,6 +334,7 @@ try{
  await w.getByRole('button',{name:'Approve and award once',exact:true}).click();
     await w.waitForFunction(async()=>{const data=await(await fetch('/api/state')).json();return data.sessions[0].missions.some((m:any)=>m.title==='A smaller tea invitation'&&m.status==='approved');});
     await w.getByRole('navigation').getByRole('button',{name:/Rewards & wishes|פרסים ומשאלות/,exact:true}).click();
+    await w.locator('#reward-composer > summary').click();
     await w.getByLabel('Reward title',{exact:true}).fill('Shared tea');
     await w.getByLabel('Reward description',{exact:true}).fill('A cup together');
     await w.getByLabel('Reward cost',{exact:true}).fill('3');
@@ -339,7 +349,7 @@ try{
       await w.getByRole('button',{name:'Create reward',exact:true}).click();await rewardSaved;
       for(const name of ['Reward title','Reward description','Reward cost'])assert.equal(await w.getByLabel(name).isDisabled(),true,`${name} locked until save refresh`);
       assert.equal(await w.getByRole('button',{name:'Pause my play',exact:true}).isEnabled(),true);
-      assert.equal(await w.getByRole('button',{name:'New session',exact:true}).isEnabled(),true);
+      assert.equal(await w.getByRole('button',{name:'Archive & new session',exact:true}).isEnabled(),true);
       await w.route('**/api/state',refreshHandler);
       releaseReward();await refreshHeld;
       for(const name of ['Reward title','Reward description','Reward cost'])assert.equal(await w.getByLabel(name).isDisabled(),true,`${name} locked during authoritative refresh`);
@@ -383,7 +393,7 @@ try{
    await w.getByLabel('Points on approved completion',{exact:true}).fill('0');
    await w.getByRole('button',{name:'Save draft only',exact:true}).click();
    await w.getByRole('region',{name:'Current invitation',exact:true}).getByRole('button',{name:'Send now',exact:true}).click();
-   await h.getByRole('button',{name:'Read, acknowledge and choose to participate',exact:true}).click();
+   await h.getByRole('button',{name:'Accept invitation',exact:true}).click();
    assert.equal(await h.getByLabel('Written completion',{exact:true}).count(),0);
    await h.getByRole('button',{name:'Done',exact:true}).click();
     await w.getByRole('button',{name:'Approve and award once',exact:true}).click();
@@ -410,11 +420,7 @@ try{
     try{
       await openCheckIn(h);await h.getByLabel('Available minutes',{exact:true}).fill('44');await h.getByRole('button',{name:'Save my check-in',exact:true}).click();await partnerSaved;
       await openCheckIn(w);await w.getByText('44 minutes · Energy:',{exact:false}).waitFor();
-<<<<<<< HEAD
-      await w.getByRole('navigation').getByRole('button',{name:'Rewards',exact:true}).click();
-=======
       await w.getByRole('navigation').getByRole('button',{name:/Rewards & wishes|פרסים ומשאלות/,exact:true}).click();
->>>>>>> 20fda84e1bc17e5e83e3b399c13de9520009d69d
       await w.getByRole('button',{name:'Draft a bonus invitation',exact:true}).click();
       assert.equal(await w.getByLabel('Title',{exact:true}).isVisible(),true);
       assert.equal(await w.getByLabel('Title',{exact:true}).inputValue(),'Unsaved bonus navigation');
@@ -467,8 +473,8 @@ try{
   assert.equal(await w.getByLabel('Title',{exact:true}).isVisible(),false);
   await w.getByRole('button',{name:'Send now',exact:true}).click();
    await h.getByRole('region',{name:'Current invitation',exact:true}).getByRole('heading',{name:'Sequence second',exact:true}).waitFor();
-   await h.getByRole('button',{name:'Read, acknowledge and choose to participate',exact:true}).waitFor();
-   assert.equal(await h.getByRole('button',{name:'Read, acknowledge and choose to participate',exact:true}).count(),1);
+   await h.getByRole('button',{name:'Accept invitation',exact:true}).waitFor();
+   assert.equal(await h.getByRole('button',{name:'Accept invitation',exact:true}).count(),1);
   assert.equal(await h.getByLabel('Written completion',{exact:true}).count(),0);
   await w.getByRole('button',{name:'Cancel mission',exact:true}).click();
   await w.getByRole('region',{name:'Current invitation',exact:true}).getByRole('heading',{name:'Sequence first',exact:true}).waitFor();
@@ -505,17 +511,17 @@ try{
    await w.getByRole('region',{name:'Current invitation',exact:true}).getByRole('button',{name:'Send now',exact:true}).click();
    const firstCard=h.getByRole('region',{name:'Current invitation',exact:true});
    await firstCard.getByRole('heading',{name:'Automatic first',exact:true}).waitFor();
-   await firstCard.getByRole('button',{name:'Read, acknowledge and choose to participate',exact:true}).click();
+   await firstCard.getByRole('button',{name:'Accept invitation',exact:true}).click();
    await firstCard.getByRole('button',{name:'Done',exact:true}).click();
    await w.getByRole('region',{name:'Current invitation',exact:true}).getByRole('button',{name:'Approve and award once',exact:true}).click();
    const surpriseCard=h.getByRole('region',{name:'Current invitation',exact:true});
    await surpriseCard.getByRole('button',{name:'Reveal invitation',exact:true}).waitFor();
    assert.equal(await surpriseCard.getByText('Private automatic surprise content',{exact:true}).count(),0);
-   assert.equal(await surpriseCard.getByRole('button',{name:'Read, acknowledge and choose to participate',exact:true}).count(),0);
+   assert.equal(await surpriseCard.getByRole('button',{name:'Accept invitation',exact:true}).count(),0);
    await surpriseCard.getByRole('button',{name:'Reveal invitation',exact:true}).click();
    await surpriseCard.getByText('Private automatic surprise content',{exact:true}).waitFor();
    assert.equal(await surpriseCard.getByRole('button',{name:'Done',exact:true}).count(),0);
-   await surpriseCard.getByRole('button',{name:'Read, acknowledge and choose to participate',exact:true}).click();
+   await surpriseCard.getByRole('button',{name:'Accept invitation',exact:true}).click();
    await surpriseCard.getByRole('button',{name:'Done',exact:true}).waitFor();
    console.log('PASS automatic sequence browser: bilingual controls, persisted opt-in, approval delivery, surprise reveal and explicit acknowledgement');
  await w.getByRole('navigation').getByRole('button',{name:'Messages',exact:true}).click();
@@ -555,11 +561,7 @@ try{
    await openCheckIn(h);await h.getByLabel('Energy').selectOption('high');
    await h.getByRole('button',{name:'Save my check-in',exact:true}).click();
    await openCheckIn(w);await w.getByText('40 minutes · Energy: High · Mood: Connection',{exact:false}).waitFor();
-<<<<<<< HEAD
-   await w.getByText('2 active pauses',{exact:false}).waitFor();
-=======
    await bothPauses(w);
->>>>>>> 20fda84e1bc17e5e83e3b399c13de9520009d69d
  await w.getByRole('button',{name:'Release my pause',exact:true}).click();
  await w.waitForFunction(async()=>{const data=await(await fetch('/api/state')).json();return data.sessions[0].pauses.length===1;});
   await h.getByRole('button',{name:'Release my pause',exact:true}).click();
@@ -582,6 +584,7 @@ try{
   await w.getByLabel('Category').selectOption('roleplay');assert.equal(await w.locator('.library article').count(),6);
   await w.getByLabel('Intensity').selectOption('3');assert.equal(await w.locator('.library article').count(),6);
   await w.getByLabel('Category').selectOption('');assert.equal(await w.locator('.library article').count(),33);
+  await w.getByText('More filters',{exact:true}).click();
   await w.getByLabel('Boundary / activity tag').selectOption('conversation');assert.equal(await w.locator('.library article').count(),3);
   await w.getByLabel('Boundary / activity tag').selectOption('');
   await w.getByLabel('Intensity').selectOption('');await w.getByLabel('Category').selectOption('roleplay');
@@ -652,7 +655,7 @@ try{
    await w.getByRole('button',{name:kind==='mission'?'Save draft only':'Send message',exact:true}).click();
    await Promise.race([holding,new Promise((_,reject)=>setTimeout(()=>reject(new Error('Ordinary request did not reach hold fixture')),5000))]);
    const [pause]=await Promise.all([w.waitForResponse((r:any)=>r.url().endsWith('/pause')&&r.request().method()==='POST',{timeout:5000}),w.getByRole('button',{name:'Pause my play',exact:true}).click({timeout:2000})]);assert.equal(pause.status(),200);
-   const [stop]=await Promise.all([w.waitForResponse((r:any)=>r.url().endsWith('/restart')&&r.request().method()==='POST',{timeout:5000}),w.getByRole('button',{name:'New session',exact:true}).click({timeout:2000}).then(()=>w.locator('dialog.sheet[open]').getByRole('button',{name:'New session',exact:true}).click())]);assert.equal(stop.status(),200);
+   const [stop]=await Promise.all([w.waitForResponse((r:any)=>r.url().endsWith('/restart')&&r.request().method()==='POST',{timeout:5000}),w.getByRole('button',{name:'Archive & new session',exact:true}).click({timeout:2000}).then(()=>w.locator('dialog.sheet[open]').getByRole('button',{name:'Archive and start a new session',exact:true}).click())]);assert.equal(stop.status(),200);
    const late=w.waitForResponse((r:any)=>r.url().endsWith('/'+kind)&&r.request().method()==='POST');release();assert.equal((await late).status(),409);
    // The stop commits; the next state read opens a fresh session automatically and the ended one is archived.
    await w.waitForFunction(async()=>{const d=await(await fetch('/api/state')).json();return d.sessions.some((x:any)=>x.status==='stopped')&&d.sessions.some((x:any)=>x.status==='active');},undefined,{polling:500,timeout:30000}).catch(()=>{});
@@ -672,15 +675,8 @@ try{
        await w.setViewportSize({width,height:844});
        for(const language of ['he','en']){
          if(await w.locator('html').getAttribute('lang')!==language)await w.getByRole('button',{name:language==='he'?'עברית':'English',exact:true}).click();
-<<<<<<< HEAD
-         const next=w.getByRole('region',{name:language==='he'?'הצעד הבא':'Next step',exact:true});
-         await next.getByRole('button',{name:language==='he'?'לשיתוף על המפגש':'Reflect on this session',exact:true}).focus();await w.keyboard.press('Enter');
-         assert.equal(await w.locator('#reflection-appreciation').evaluate((el:HTMLElement)=>el===document.activeElement),true);
-         assert.ok(await w.evaluate(()=>document.documentElement.scrollWidth<=innerWidth),`closing/new session overflow ${width} ${language}`);
-=======
           await openReflection(w);
           assert.ok(await w.evaluate(()=>document.documentElement.scrollWidth<=innerWidth),`closing/new session overflow ${width} ${language}`);
->>>>>>> 20fda84e1bc17e5e83e3b399c13de9520009d69d
          for(const selector of ['.reflection textarea','.reflection button','.session-select select','fieldset select','fieldset input']){
            for(const control of await w.locator(selector).all()){
              const box=await control.boundingBox();assert.ok(box&&box.x>=0&&box.x+box.width<=width,`control outside viewport ${selector} ${width} ${language}`);
@@ -694,11 +690,7 @@ try{
  }
  await safetyWhilePending('mission');
    await w.getByRole('region',{name:'Next step',exact:true}).waitFor();
-<<<<<<< HEAD
-  await w.getByRole('heading',{name:'Active',exact:true}).waitFor();
-=======
   await w.waitForFunction(async()=>{const d=await(await fetch('/api/state')).json();return d.sessions.some((x:any)=>x.status==='active');},undefined,{polling:500,timeout:30000});
->>>>>>> 20fda84e1bc17e5e83e3b399c13de9520009d69d
   assert.equal(await w.getByLabel('Available minutes',{exact:true}).inputValue(),'15');
   // The fresh session's forms restore the values saved on it: the check-in defaults to 15 and the reflection keeps its saved text.
   await openCheckIn(w);
@@ -726,10 +718,11 @@ try{
  await legacy.locator('[data-view="her"]').click();await legacy.locator('#missionBoard').getByRole('button',{name:'Remove',exact:true}).click();await legacy.locator('#missionBoard').getByText('No missions yet.',{exact:true}).waitFor();
  assert.deepEqual(await legacy.evaluate(()=>(window as any).cspViolations||[]),violations);
  await legacyContext.close();console.log('PASS legacy: strict CSP, session creation, agreement and delegated edit/send/acknowledge/complete/remove, zero CSP violations');
+  await w.getByText('Settings',{exact:true}).click();
   await w.getByRole('button',{name:'Sign out',exact:true}).click();await w.getByRole('button',{name:'Enter',exact:true}).waitFor();
   assert.equal((await w.request.get('http://127.0.0.1:4180/api/state')).status(),401);
   await w.reload();await w.getByRole('button',{name:'Enter',exact:true}).waitFor();
-  await w.getByRole('checkbox').check();await w.getByRole('button',{name:'Enter',exact:true}).click();await w.locator('.account').waitFor();
+  await w.getByRole('checkbox').check();await w.getByRole('button',{name:'Enter',exact:true}).click();await w.locator('.account-settings').waitFor();
   assert.equal(await w.evaluate(async()=> (await (await fetch('/api/state')).json()).user.id),guestIds[0]);
   assert.equal(await x.getByLabel('Email',{exact:true}).count(),0);
   assert.deepEqual(errors,[]);console.log('PASS browser: logout and reload allow same-role re-entry, no email/password UI, terminal stop, zero uncaught page errors');

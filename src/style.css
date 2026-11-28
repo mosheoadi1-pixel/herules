@@ -230,7 +230,6 @@ html.hc main { --muted: #ffffff; --line: #ffd6e0; --gold: #ffe6b3; }
 .segmented button { border: 0; border-radius: 0; background: transparent; padding: 10px 18px; }
 .segmented button + button { border-inline-start: 1px solid var(--line); }
 .segmented button[aria-pressed="true"] { background: var(--gold); color: #241326; font-weight: 700; }
-.toast { position: fixed; inset-block-start: 8px; inset-inline: 0; margin-inline: auto; width: max-content; max-width: 92vw; z-index: 40; }
 .empty.soft { padding: 8px 4px; border: 0; text-align: start; color: var(--muted); }
 @media (pointer: coarse) { input[type=number]::-webkit-inner-spin-button, input[type=number]::-webkit-outer-spin-button { display: none; } input[type=number] { -moz-appearance: textfield; appearance: textfield; } }
 main.hc .panel, main.hc .stat-grid > div, main.hc .account .badge { border-width: 2px; border-color: #ffd6e0; }
@@ -243,7 +242,7 @@ main.hc button[aria-pressed="true"] { background: #ffe6b3; border-color: #ffffff
 main.hc .notice, main.hc .empty, main.hc .error { border-width: 2px; color: #ffffff; }
 main.hc :focus-visible { outline: 4px solid #ffe6b3; outline-offset: 3px; }
 
-/* One-question onboarding, pacing, sheets, and the mobile command bar. */
+/* One-question onboarding, pacing, and sheets. */
 .onboard { border-color: var(--gold); }
 .onboard-choices { display: grid; grid-template-columns: repeat(auto-fit, minmax(170px, 1fr)); gap: 10px; margin-block: 14px; }
 .onboard-choices button { display: grid; gap: 4px; text-align: start; min-height: 76px; }
@@ -261,13 +260,7 @@ main.hc :focus-visible { outline: 4px solid #ffe6b3; outline-offset: 3px; }
 .sheet-steps { list-style: none; margin: 14px 0; padding: 0; display: grid; gap: 10px; }
 .sheet-steps li { padding: 12px 14px; border: 1px solid var(--line); border-radius: 14px; background: #1b101c; }
 .sheet .row { margin-top: 18px; }
-.quick-bar { display: none; }
 @media (max-width: 600px) {
-  main.has-quick-bar .preset-grid { display: none; }
-  .quick-bar { position: fixed; inset-inline: 0; bottom: 0; z-index: 30; display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; padding: 10px 12px max(10px, env(safe-area-inset-bottom)); background: #170d14f2; border-top: 1px solid var(--line); backdrop-filter: blur(6px); }
-  .quick-bar p { grid-column: 1 / -1; margin: 0; font-size: 13px; color: var(--muted); line-height: 1.4; }
-  .quick-bar button { min-height: 44px; padding: 8px 6px; font-size: 13px; line-height: 1.3; text-align: center; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
-  main.has-quick-bar { padding-bottom: 200px; }
   .sheet { position: fixed; inset: auto 0 0 0; margin: 0 auto; width: 100%; max-width: none; max-height: 80vh; border-radius: 20px 20px 0 0; }
 }
 
@@ -320,14 +313,6 @@ footer { padding-bottom: max(45px, calc(24px + env(safe-area-inset-bottom))); }
   /* 16px form text stops iOS Safari from zooming the page on focus. */
   input, select, textarea { font-size: 16px; }
 
-  /* Full-width command bar, inset for curved screens and the home indicator. */
-  .quick-bar {
-    padding-left: max(12px, env(safe-area-inset-left));
-    padding-right: max(12px, env(safe-area-inset-right));
-    padding-bottom: max(10px, env(safe-area-inset-bottom));
-  }
-  main.has-quick-bar { padding-bottom: calc(200px + env(safe-area-inset-bottom)); }
-
   /* Bottom sheet clears the gesture bar. */
   .sheet {
     max-height: 80vh;
@@ -360,8 +345,6 @@ footer { padding-bottom: max(45px, calc(24px + env(safe-area-inset-bottom))); }
   .brand span { display: none; }
   .hero:not(.compact) { min-height: 170px; padding: 20px; }
   .panel { padding: 16px; }
-  main.has-quick-bar { padding-bottom: calc(120px + env(safe-area-inset-bottom)); }
-  .quick-bar { grid-template-columns: repeat(6, minmax(0, 1fr)); }
 }
 
 /* Installed app: iOS uses a translucent status bar, so the island inset applies. */
@@ -662,12 +645,6 @@ footer > span { color: var(--gold); }
 .roulette { background: radial-gradient(ellipse at top, #3a1d58, #150c24 70%); border-color: #6b4a92; }
 .roulette-wheel { box-shadow: 0 0 0 5px #d9b26a, 0 16px 40px #04010a99; }
 
-.quick-bar {
-  background: #0b0614f7;
-  border-top-color: #3f2a5e;
-  box-shadow: inset 0 1px #e9c88b2e;
-}
-
 /* Her court: warmer gold, deeper amethyst, brighter gilding. */
 main.role-wife { --gold: #e9c88b; --line: #4a2f6b; --muted: #cdb9dd; }
 main.role-wife .hub {
@@ -754,8 +731,216 @@ main time { font-size: 14px; line-height: 1.7; }
   .cards.library { gap: 14px; }
 }
 
+/* The private game: quiet surfaces, with the metallic edge reserved for invitations. */
+:root {
+  font-family: "Segoe UI", Arial, sans-serif;
+  color-scheme: dark;
+  --night: #18151a;
+  --surface: #211b24;
+  --raised: #2c2530;
+  --line: #4c434f;
+  --control-line: #827486;
+  --ink: #f4ece1;
+  --muted: #c5bac8;
+  --gold: #e9c88b;
+  --gold-pale: #f6e3bd;
+  color: var(--ink);
+  background: var(--night);
+  scroll-padding-block-end: 24px;
+}
+:root:lang(he) { font-family: Arial, "Segoe UI", sans-serif; }
+body { background: var(--night); color: var(--ink); font-size: 16px; }
+body::before, .panel::after, .hub::before, .panel h2::after, .section-title h2::after,
+.hero .eyebrow::before, .panel .eyebrow::before { content: none; }
+main.role-wife, main.role-husband { --line: #4c434f; --muted: #c5bac8; }
+main.role-wife.persona-strict, main.role-wife.persona-playful, main.role-wife.persona-caring { --line: #4c434f; }
+main.role-husband { --gold: #cfd9ea; --gold-pale: #ecf0f8; }
+.panel h2, .panel h3, .section-title h2, .sheet h2, .roulette-dialog h3 {
+  font-family: inherit;
+  font-weight: 600;
+  letter-spacing: normal;
+  color: var(--ink);
+  text-shadow: none;
+}
+.hero h1, .brand { text-shadow: none; letter-spacing: normal; }
+.eyebrow, html[dir="rtl"] .eyebrow { font-size: 13px; font-weight: 500; letter-spacing: normal; }
+.panel, .auth, .session, .hub, main.role-wife .hub, main.role-husband .hub,
+main.role-husband .panel, main.role-husband .session, .cards.library .panel,
+.sheet, .sheet-steps li, .roulette-dialog, .roulette, .other-invitation {
+  background: var(--surface);
+  border-color: var(--line);
+  box-shadow: none;
+}
+.panel { padding: clamp(20px, 2vw, 24px); border-radius: 16px; margin-block-end: 16px; }
+.panel h3 { margin-block-start: 16px; }
+.cards.library .panel:hover { box-shadow: none; }
+.notice, blockquote, .adoration-words, .stat-grid > div,
+.messages article, .messages .mine {
+  background: var(--raised);
+  box-shadow: none;
+}
+.notice, .empty { border-color: var(--line); }
+.badge, main.role-husband .badge {
+  background: var(--raised);
+  border-color: var(--line);
+  border-radius: 6px;
+  color: var(--ink);
+  letter-spacing: normal;
+}
+bdi, time, .big-number, .stat-grid, .nav-count { font-variant-numeric: tabular-nums; }
+button, button:hover:not(:disabled), button.primary, button.gold, button.gold:hover:not(:disabled),
+button.primary:hover:not(:disabled), button.danger, button[aria-pressed="true"],
+.mood-tile[aria-pressed="true"], main.role-husband button.primary,
+main.role-husband button.primary:hover:not(:disabled), main.role-husband button.gold {
+  background: var(--raised);
+  border-color: var(--control-line);
+  color: var(--ink);
+  box-shadow: none;
+}
+button { border-radius: 8px; padding: 8px 12px; }
+button:hover:not(:disabled), button[aria-pressed="true"], .mood-tile[aria-pressed="true"] {
+  border-color: var(--gold);
+  background: #3a313e;
+}
+button.primary, button.gold, main.role-husband button.primary, main.role-husband button.gold {
+  color: var(--surface);
+  background: var(--gold);
+  border-color: var(--gold);
+}
+button.primary:hover:not(:disabled), button.gold:hover:not(:disabled),
+main.role-husband button.primary:hover:not(:disabled) {
+  color: var(--surface);
+  background: var(--gold-pale);
+}
+button.danger, button.danger:hover:not(:disabled) { background: #452530; color: #ffdee4; border-color: #c98c9a; }
+button.quiet:not([aria-pressed="true"]) { background: transparent; border-color: transparent; color: var(--muted); }
+button.quiet:hover:not(:disabled) { background: var(--raised); color: var(--ink); }
+input:not([type="checkbox"]):not([type="radio"]), select, textarea {
+  background: var(--night);
+  border-color: var(--control-line);
+  color: var(--ink);
+}
+input:focus-visible, textarea:focus-visible, select:focus-visible { box-shadow: none; }
+main.hc, html.hc { --control-line: #ffe9c4; }
+
+.app-header {
+  max-inline-size: 1200px;
+  min-block-size: 64px;
+  padding-block: max(8px, env(safe-area-inset-top)) 8px;
+  padding-inline: 24px;
+  gap: 8px;
+  align-items: center;
+}
+.app-header .brand { font-size: clamp(19px, 3vw, 28px); }
+.header-controls { display: flex; align-items: center; gap: 4px; }
+.account-settings { position: relative; margin: 0; padding: 0; border: 0; }
+.account-settings summary { display: list-item; padding-inline: 8px; align-content: center; font-size: 14px; }
+.settings-body {
+  position: absolute;
+  z-index: 5;
+  inset-inline-end: 0;
+  inline-size: min(280px, calc(100vw - 32px));
+  display: grid;
+  gap: 8px;
+  padding: 16px;
+  background: var(--surface);
+  border: 1px solid var(--control-line);
+  border-radius: 12px;
+  font-size: 14px;
+  overflow-wrap: anywhere;
+}
+.settings-body button { justify-self: start; }
+.entrance { display: grid; grid-template-columns: minmax(0, 1fr) minmax(320px, 440px); gap: 24px; align-items: stretch; margin-block: 24px 40px; }
+.entrance .hero { margin: 0; display: grid; align-content: center; padding: clamp(24px, 4vw, 48px); min-block-size: 320px; }
+.entrance .hero h1 { margin: 0; font-weight: 500; font-size: clamp(30px, 4vw, 52px); }
+.entrance .hero p { margin-block: 12px 0; }
+.entrance .auth { width: 100%; max-width: none; margin: 0; align-content: center; }
+.entrance .auth .primary { inline-size: 100%; }
+.entrance-note { color: var(--muted); margin-block-end: 0; }
+
+.session-strip { display: flex; align-items: center; flex-wrap: wrap; gap: 8px 16px; padding-block: 8px; border-block: 1px solid var(--line); }
+.session-status, .session-controls { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 8px; }
+.session-status { color: var(--muted); font-size: 14px; }
+.session-status strong { color: var(--ink); font-weight: 600; }
+.session-controls { margin-inline-start: auto; }
+.session-controls button { font-size: 14px; }
+button.pause-button { border-color: var(--gold); }
+.session-guidance { margin: 0; flex-basis: 100%; color: var(--muted); font-size: 14px; }
+.session-nav { margin-block: 12px 20px; padding: 0; gap: 4px; overflow: visible; }
+.session-nav button { display: inline-flex; justify-content: center; align-items: center; gap: 4px; padding-inline: 12px; border-radius: 8px; background: transparent; border-color: transparent; }
+.session-nav button[aria-current="page"], main.role-husband .session-nav button[aria-current="page"] {
+  background: var(--raised);
+  border-color: var(--line);
+  color: var(--gold);
+  box-shadow: inset 0 -2px var(--gold);
+}
+.nav-short { display: none; }
+.nav-count { font-size: .85em; color: var(--muted); }
+.section-title { margin-block: 0 12px; padding: 0; border: 0; }
+.section-title h2 { margin-block: 0; font-size: 24px; }
+.current-invitation { margin-block-start: 0; padding-block-start: 0; border-block-start: 0; }
+.current-invitation > summary { color: var(--muted); font-size: 14px; }
+.current-invitation > .panel, main.role-husband .current-invitation > .panel {
+  border: 1px solid var(--line);
+  border-inline-start: 3px solid var(--gold);
+  background: var(--surface);
+  box-shadow: none;
+}
+.invitation-card h3 { margin-block: 4px 8px; font-size: clamp(22px, 3vw, 28px); overflow-wrap: anywhere; }
+.invitation-status { margin: 0; color: var(--gold); font-size: 13px; }
+.invitation-card h3 + p { margin-block-start: 0; }
+.invitation-actions { display: flex; gap: 8px; flex-wrap: wrap; margin-block: 12px; }
+.invitation-meta { margin-block-start: 8px; padding-block-start: 0; border-block-start: 1px solid var(--line); }
+.invitation-meta summary { color: var(--muted); font-size: 14px; }
+.invitation-create { margin-block-end: 8px; }
+.dashboard-tools { margin-block-end: 16px; }
+.review-desk h2 .badge { margin-inline-start: 8px; vertical-align: middle; }
+.evening-controls { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 320px), 1fr)); gap: 0 16px; }
+.quick-actions-list { display: grid; gap: 8px; margin-block: 16px; }
+.quick-actions-list button { text-align: start; }
+.section-links { display: flex; flex-wrap: wrap; gap: 8px 16px; margin-block-end: 16px; align-items: center; }
+.section-links a { display: inline-flex; align-items: center; min-block-size: 44px; }
+.library-search { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
+.library-search .filters { grid-template-columns: repeat(auto-fit, minmax(120px, 1fr)); gap: 12px; }
+.library-search label, .library-options label { min-width: 0; }
+.library-options { margin-block: 8px; padding-block-start: 0; }
+.library-options > summary { color: var(--muted); }
+.library-results { margin-block: 8px; }
+.library-results > span { color: var(--muted); font-size: 14px; }
+.favorite-button { display: inline-grid; min-inline-size: 44px; place-items: center; }
+.activity-feed article { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: start; gap: 16px; margin: 0; padding: 12px 0; border-color: var(--line); }
+.activity-feed .activity-day { color: var(--muted); font-size: 14px; }
+.activity-feed .activity-new { color: var(--gold); font-size: 13px; margin-inline-start: 4px; }
+.activity-feed time { color: var(--muted); direction: ltr; unicode-bidi: isolate; }
+.chat-panel .messages { max-block-size: 28rem; overflow: auto; }
+.chat-panel .messages .mine { background: #352b39; }
+.chat-panel .messages + form { margin-block-start: 12px; }
+.roulette-wheel { box-shadow: 0 0 0 2px var(--gold); }
+.roulette-stage { margin-block: 16px; }
+
+@media (min-height: 600px) {
+  html:has(.session-strip) { scroll-padding-block-start: calc(160px + env(safe-area-inset-top)); }
+  .session-strip { position: sticky; inset-block-start: env(safe-area-inset-top); z-index: 3; background: var(--night); }
+}
+
+@media (max-width: 680px) {
+  .app-header { padding-inline: 16px; }
+  .entrance { grid-template-columns: minmax(0, 1fr); gap: 12px; margin-block: 8px 24px; }
+  .entrance .hero { min-block-size: auto; padding: 20px; }
+  .entrance .hero p { font-size: 16px; }
+  .session-strip { gap: 4px 8px; }
+  .session-controls { margin-inline-start: 0; }
+  .session-nav { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 4px; margin-block: 8px 12px; scroll-snap-type: none; }
+  .session-nav button { min-width: 0; padding-inline: 4px; font-size: 14px; white-space: normal; }
+  .nav-wide { display: none; }
+  .nav-short { display: inline; }
+  .library-search { grid-template-columns: minmax(0, 1fr); gap: 4px; }
+  .invitation-actions > button { flex: 1 1 120px; }
+  .invitation-actions > button.primary { flex-basis: 100%; }
+}
+
 @media print {
-  body::before, .quick-bar, nav, header .row, footer a { display: none !important; }
+  body::before, nav, .header-controls, footer a { display: none !important; }
   :root, body, .panel, details.panel, .stat-grid > div { background: #fff !important; color: #111 !important; box-shadow: none !important; }
   details { display: block; }
   details > summary::after { display: none; }

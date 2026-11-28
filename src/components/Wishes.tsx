@@ -11,7 +11,7 @@ type WishesTabProps = {
 
 export function WishesTab({ s, play, wife, busy, unreconciled, lang, t, run, action }: WishesTabProps) {
   const [draftTitle,setDraftTitle]=useState('');
-  return <section className="panel"><h2>{t('המשאלות שלה','Her wishes')}</h2>
+  return <section className="panel" id="wish-list"><h2>{t('המשאלות שלה','Her wishes')}</h2>
     <h3>{t('רשימת משאלות','Wishlist')}</h3>
     <p className="small">{t('הבעל קובע את המחיר, והיא מבקשת. אישור מתעד החלטה במשחק בלבד.','The husband sets the price and she requests. Approval records an in-game decision only.')}</p>
     {wife&&<div className="quick-grid">{wishSuggestions.map(w=><button key={w.he} disabled={!play||busy||unreconciled} onClick={()=>setDraftTitle(lang==='he'?w.he:w.en)}>{lang==='he'?w.he:w.en}</button>)}</div>}

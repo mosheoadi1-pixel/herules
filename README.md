@@ -178,8 +178,6 @@ Both operations are gameplay actions, so either personal pause rejects them with
 
 Both operations are curation, not gameplay: they work during either personal pause, write no points, notices or history, and stay available on terminal sessions so the archive can be arranged after play stops — every other operation still returns 409 `Session is terminal`. The session stores only `pins`; the `trophies` gallery is derived on each read. For the husband `visible()` strips `ref` from `pins` and resolves hidden references to content-free placeholders, so a secret trophy never leaks its title or text. The wife can pin a mission or its completion from the invitations list and a reflection from the closing panel; the gallery appears on the dashboard and in history. Pure helpers are covered by `tests/trophies.ts`, the server contract by `tests/play-flow.ts`.
 
-<<<<<<< HEAD
-=======
 ### Auction nights contract
 
 Lots live in the session as `auctions` and settle on wall-clock time, regardless of holds. `auction` (wife, keyed) opens a lot: `{ title, description, minBid, closesAt }` with the close inside seven days and a minimum bid of 1–100000 (`AUCTION_LIMITS`). At most five lots are open at once (409 `Too many open auctions`) and at most fifty are stored (409 `Auction list is full`). `auction-bid` (husband, keyed) must beat both the minimum (409 `Bid is below the minimum`) and the current highest bid (409 `Bid must beat the current highest bid`); a closed or due lot returns 409 `Auction is closed` and an unknown lot 404 `Auction unavailable`.
@@ -198,7 +196,6 @@ Lots live in the session as `auctions` and settle on wall-clock time, regardless
 
 **UI/UX review round 2 (2026-11-17):** 27 further findings fixed — the punishments destination regression, garbled Hebrew labels, quick-bar/preset dedup with contextual placement, merged-tab coherence (single points line, segmented control styling, wheel-first punishments), honest feedback (Mark read gating, unread badges, fixed-toast notice), and motion/spacing/print design tokens. Details in the ledger.
 
->>>>>>> 20fda84e1bc17e5e83e3b399c13de9520009d69d
 ## Verification
 
 ```powershell
