@@ -275,7 +275,7 @@ export function GameApp({paired}: {paired?:{id:string;lang:'he'|'en';revision:nu
     <p>{nextStep}</p>
     {ended&&<div className="row"><Button onClick={()=>document.getElementById('reflection-appreciation')?.focus()}>{t('לשיתוף על המפגש','Reflect on this session')}</Button></div>}
     {!paired&&play&&wife&&!current&&<Button className="primary" onClick={openComposer}>{t('יצירת טיוטה חדשה','Draft a mission')}</Button>}
-    {current&&(!paired||tab!=='missions')&&<Button className={!paired&&!held&&!ended?'primary':undefined} onClick={()=>{if(!paired){showPrivateInvitation(current.id);return;}setTab('missions');setTimeout(()=>document.getElementById(`mission-${current.id}`)?.focus(),0);}}>{t('להזמנה הנוכחית','View current invitation')}</Button>}
+    {current&&tab!=='missions'&&<Button className={!paired&&!held&&!ended?'primary':undefined} onClick={()=>{if(!paired){showPrivateInvitation(current.id);return;}setTab('missions');setTimeout(()=>document.getElementById(`mission-${current.id}`)?.focus(),0);}}>{t('להזמנה הנוכחית','View current invitation')}</Button>}
     {!paired&&!ended&&<div className="row private-safety">{safetyButtons}</div>}
   </section>
    {paired&&!ended&&s.started&&<PairedAgreement key={s.revision} session={s} viewer={u.id} dom={wife} online={online} t={t} run={run} action={action} withdraw={()=>void runSafety('agreement-withdraw',{revision:s.revision})}/>}

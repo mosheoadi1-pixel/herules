@@ -213,6 +213,7 @@
   .private-artwork { aspect-ratio: 2.2; }
   .private-artwork-seal { inline-size: auto; block-size: 43%; }
   .private-workspace .next-step { padding: 1rem; margin-block-end: .75rem; }
+  .private-workspace .current-invitation > .panel { padding: 1rem; }
   .private-shell .private-workspace .private-nav {
     display: grid;
     grid-template-columns: repeat(4, minmax(0, 1fr));
